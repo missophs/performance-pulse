@@ -6,22 +6,7 @@
 
 import { BK_KINDS, buildBlockKit } from "@/lib/block-kit";
 import { fmtDate } from "@/lib/format";
-
-const SLACK_API = "https://slack.com/api";
-
-async function slackApi(method, body) {
-  const res = await fetch(`${SLACK_API}/${method}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}`,
-      "Content-Type": "application/json; charset=utf-8",
-    },
-    body: JSON.stringify(body),
-  });
-  const json = await res.json();
-  if (!json.ok) throw new Error(`Slack ${method} failed: ${json.error}`);
-  return json;
-}
+import { slackApi } from "@/lib/slack-api";
 
 async function dmByEmail(email, payload) {
   const lookup = await slackApi("users.lookupByEmail", { email }).catch((e) => {

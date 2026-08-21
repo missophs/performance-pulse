@@ -72,6 +72,12 @@ export default function OneOnOnePage() {
   const [wrap, setWrap] = useState(EMPTY_WRAP);
   const wrapNextInit = useRef(false);
 
+  // Topics added while preparing don't ping the partner one at a time —
+  // that fires a Slack DM per click, which is noisy when someone is adding
+  // several topics before a meeting. Instead we batch them and send one
+  // notification when they leave the Prepare tab (see flushTopicNotify).
+  const pendingTopicNotify = useRef({ count: 0, texts: [] });
+
   async function loadAll() {
     setLoading(true);
     const userId = (await supabase.auth.getUser()).data.user.id;
@@ -124,13 +130,35 @@ export default function OneOnOnePage() {
 
   // ------------------------------------------------------------ topics ----
 
-  async function addTopicRow(text, why, category, { silent } = {}) {
+  async function addTopicRow(text, why, category) {
     await addTopic(supabase, pairId, { text, why: why || "", category, role, name: myName });
-    if (!silent) {
-      await notify(supabase, pairId, `${myName} added a topic: ${text}`, role, otherRole, "oneOnOne", "topic");
-    }
+    pendingTopicNotify.current.count += 1;
+    pendingTopicNotify.current.texts.push(text);
     loadAll();
   }
+
+  async function flushTopicNotify() {
+    const pending = pendingTopicNotify.current;
+    if (!pending.count) return;
+    pendingTopicNotify.current = { count: 0, texts: [] };
+    const text =
+      pending.count === 1
+        ? `${myName} added a topic: ${pending.texts[0]}`
+        : `${myName} added ${pending.count} topics to your 1:1 agenda`;
+    await notify(supabase, pairId, text, role, otherRole, "oneOnOne", "topic");
+  }
+
+  function goToSub(tab) {
+    if (sub === "prepare" && tab !== "prepare") flushTopicNotify();
+    setSub(tab);
+  }
+
+  useEffect(() => {
+    return () => {
+      flushTopicNotify();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function submitTopicForm() {
     const text = topicText.trim();
@@ -146,7 +174,8 @@ export default function OneOnOnePage() {
 
   async function addFromHardConvo(outcome, body) {
     await addTopic(supabase, pairId, { text: outcome, why: body, category: "Other", role, name: myName });
-    await notify(supabase, pairId, `${myName} added a topic to the agenda`, role, otherRole, "oneOnOne");
+    pendingTopicNotify.current.count += 1;
+    pendingTopicNotify.current.texts.push(outcome);
     loadAll();
   }
 
@@ -313,13 +342,13 @@ export default function OneOnOnePage() {
       <p className="subtitle">Prepare, talk, reflect, act, follow up — one conversation at a time.</p>
 
       <div className="tabs">
-        <button className={`tab${sub === "prepare" ? " active" : ""}`} onClick={() => setSub("prepare")}>
+        <button className={`tab${sub === "prepare" ? " active" : ""}`} onClick={() => goToSub("prepare")}>
           1. Prepare
         </button>
-        <button className={`tab${sub === "talk" ? " active" : ""}`} onClick={() => setSub("talk")}>
+        <button className={`tab${sub === "talk" ? " active" : ""}`} onClick={() => goToSub("talk")}>
           2. Talk
         </button>
-        <button className={`tab${sub === "wrap" ? " active" : ""}`} onClick={() => setSub("wrap")}>
+        <button className={`tab${sub === "wrap" ? " active" : ""}`} onClick={() => goToSub("wrap")}>
           3. Wrap up
         </button>
       </div>

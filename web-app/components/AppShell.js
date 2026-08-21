@@ -1,11 +1,14 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { PulseProvider, usePulse } from "@/components/PulseContext";
 import { createClient } from "@/lib/supabase/client";
 import { initials } from "@/lib/format";
+import { updateProfile } from "@/lib/data";
 import NotificationBell from "@/components/NotificationBell";
+import Modal from "@/components/ui/Modal";
 
 const NAV = [
   { view: "dashboard", href: "/dashboard", label: "Dashboard" },
@@ -29,14 +32,36 @@ export default function AppShell({ ctx, counts, children }) {
 }
 
 function ShellBody({ counts, children }) {
-  const { role, myName, isMgr } = usePulse();
+  const { role, myName, isMgr, supabase } = usePulse();
   const pathname = usePathname();
   const router = useRouter();
+
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState(myName);
+  const [savingName, setSavingName] = useState(false);
 
   async function signOut() {
     const supabase = createClient();
     await supabase.auth.signOut();
     router.push("/login");
+    router.refresh();
+  }
+
+  function openNameEdit() {
+    setNameInput(myName);
+    setEditingName(true);
+  }
+
+  async function saveName() {
+    const trimmed = nameInput.trim();
+    if (!trimmed) return;
+    setSavingName(true);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    await updateProfile(supabase, user.id, { full_name: trimmed });
+    setSavingName(false);
+    setEditingName(false);
     router.refresh();
   }
 
@@ -77,7 +102,9 @@ function ShellBody({ counts, children }) {
             </span>
             <NotificationBell />
             <div className={`avatar ${isMgr ? "mgr" : "emp"}`}>{initials(myName)}</div>
-            <div className="who">{myName}</div>
+            <button className="who" onClick={openNameEdit} style={{ background: "none", border: "none", cursor: "pointer", font: "inherit", color: "inherit" }} title="Change your display name">
+              {myName}
+            </button>
             <button className="btn ghost sm" onClick={signOut}>
               Sign out
             </button>
@@ -86,6 +113,27 @@ function ShellBody({ counts, children }) {
 
         {children}
       </main>
+
+      <Modal
+        open={editingName}
+        title="Your display name"
+        note="This is what your 1:1 partner sees you as, everywhere in the app and in Slack."
+        onClose={() => setEditingName(false)}
+        onSave={saveName}
+        saveLabel={savingName ? "Saving…" : "Save"}
+        saveDisabled={!nameInput.trim() || savingName}
+      >
+        <div className="field">
+          <label htmlFor="displayName">Your name</label>
+          <input
+            id="displayName"
+            type="text"
+            value={nameInput}
+            onChange={(e) => setNameInput(e.target.value)}
+            placeholder="e.g. Melissa Weiss"
+          />
+        </div>
+      </Modal>
     </div>
   );
 }

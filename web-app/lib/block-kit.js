@@ -6,7 +6,7 @@
 // is the point (see the privacy banner on the Slack tab) — do not "improve"
 // this into something that includes content.
 
-const APP_URL = "https://example.com/performance-pulse";
+const APP_URL = "https://performance-pulse-lyart.vercel.app";
 
 export const BK_KINDS = [
   { id: "topic", label: "Topic added" },
@@ -27,19 +27,26 @@ function bkContext(md) {
 function bkHeader() {
   return { type: "header", text: { type: "plain_text", text: "Performance Pulse", emoji: true } };
 }
-function bkOpenAction(label) {
-  return {
-    type: "actions",
-    elements: [
-      {
-        type: "button",
-        text: { type: "plain_text", text: label || "Open Performance Pulse", emoji: true },
-        style: "primary",
-        url: APP_URL,
-        action_id: "open_app",
-      },
-    ],
-  };
+// Primary button acts right here in Slack (interactivity endpoint); the
+// secondary link is a fallback for anyone who'd rather use the website —
+// people get to choose either way.
+function bkOpenAction(label, inSlackActionId) {
+  const elements = [];
+  if (inSlackActionId) {
+    elements.push({
+      type: "button",
+      text: { type: "plain_text", text: label || "Open in Slack", emoji: true },
+      style: "primary",
+      action_id: inSlackActionId,
+    });
+  }
+  elements.push({
+    type: "button",
+    text: { type: "plain_text", text: inSlackActionId ? "Open full app" : label || "Open Performance Pulse", emoji: true },
+    url: APP_URL,
+    action_id: "open_app",
+  });
+  return { type: "actions", elements };
 }
 function bkFoot() {
   return bkContext(
@@ -60,7 +67,7 @@ export function buildBlockKit(kind, ctx) {
     text = `${partnerName} added a topic to your 1:1 agenda`;
     b.push(bkSection(`*${partnerName}* added a topic to your 1:1 agenda.`));
     b.push(bkContext(`${openTopicsCount} topic${openTopicsCount === 1 ? "" : "s"} open  ·  Next 1:1 ${next1on1When}`));
-    b.push(bkOpenAction("See the agenda"));
+    b.push(bkOpenAction("See the agenda", "open_list_topics"));
   } else if (kind === "upcoming") {
     text = `Your 1:1 with ${partnerName} is ${next1on1When}`;
     b.push(bkSection(`Your 1:1 with *${partnerName}* is *${next1on1When}*.`));
@@ -71,17 +78,17 @@ export function buildBlockKit(kind, ctx) {
           : "Nothing on the agenda yet"
       )
     );
-    b.push(bkOpenAction("Prepare for it"));
+    b.push(bkOpenAction("Prepare for it", "open_list_topics"));
   } else if (kind === "feedback") {
     text = `${partnerName} left you feedback`;
     b.push(bkSection(`*${partnerName}* left you feedback.`));
     b.push(bkContext("Read it when you have a quiet minute, not between meetings."));
-    b.push(bkOpenAction("Read it"));
+    b.push(bkOpenAction("Read it", "open_list_feedback"));
   } else if (kind === "request") {
     text = `${partnerName} asked you for feedback`;
     b.push(bkSection(`*${partnerName}* asked you for feedback.`));
     b.push(bkContext("No deadline. Answer it whenever you're ready."));
-    b.push(bkOpenAction("Answer it"));
+    b.push(bkOpenAction("Answer it", "open_add_feedback"));
   } else if (kind === "dev") {
     text = `${partnerName} added a development plan`;
     b.push(bkSection(`*${partnerName}* ${isMgr ? "requested" : "recommended"} a development plan for you.`));
@@ -90,17 +97,17 @@ export function buildBlockKit(kind, ctx) {
         `${devPlansCount} plan${devPlansCount === 1 ? "" : "s"} in the workspace  ·  Nothing is agreed until you both say so`
       )
     );
-    b.push(bkOpenAction("Take a look"));
+    b.push(bkOpenAction("Take a look", "open_list_devplans"));
   } else if (kind === "action") {
     text = `${mineActionsCount} action${mineActionsCount === 1 ? "" : "s"} assigned to you`;
     b.push(bkSection(`You have *${mineActionsCount} open action${mineActionsCount === 1 ? "" : "s"}* from your 1:1s.`));
     b.push(bkContext("Listed in the app with owners and dates. No nagging, no scores."));
-    b.push(bkOpenAction("See what's open"));
+    b.push(bkOpenAction("See what's open", "open_list_actions"));
   } else {
     text = `Your 1:1 with ${partnerName} is wrapped up`;
     b.push(bkSection(`Your 1:1 with *${partnerName}* is wrapped up.`));
     b.push(bkContext("What you discussed, what you agreed, and who owns what — all written down."));
-    b.push(bkOpenAction("Read the summary"));
+    b.push(bkOpenAction("Read the summary", "open_last_meeting"));
   }
 
   b.push({ type: "divider" });

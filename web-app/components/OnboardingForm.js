@@ -3,10 +3,11 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { createPair } from "@/lib/data";
+import { createPair, updateProfile } from "@/lib/data";
 
 export default function OnboardingForm() {
   const router = useRouter();
+  const [name, setName] = useState("");
   const [role, setRole] = useState("employee");
   const [partnerEmail, setPartnerEmail] = useState("");
   const [busy, setBusy] = useState(false);
@@ -18,6 +19,10 @@ export default function OnboardingForm() {
     setError("");
     try {
       const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      await updateProfile(supabase, user.id, { full_name: name.trim() });
       await createPair(supabase, role, partnerEmail.trim());
       router.push("/dashboard");
       router.refresh();
@@ -29,6 +34,17 @@ export default function OnboardingForm() {
 
   return (
     <form onSubmit={submit} style={{ marginTop: 16 }}>
+      <label htmlFor="yourName">Your name</label>
+      <input
+        id="yourName"
+        type="text"
+        required
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="What your 1:1 partner should see you as"
+        style={{ marginBottom: 16 }}
+      />
+
       <label>You are the</label>
       <div className="role-pick">
         <label>

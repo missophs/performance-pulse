@@ -42,6 +42,12 @@ export async function updatePair(supabase, pairId, fields) {
   return data;
 }
 
+export async function updateProfile(supabase, userId, fields) {
+  const { data, error } = await supabase.from("profiles").update(fields).eq("id", userId).select().single();
+  if (error) throw error;
+  return data;
+}
+
 // -------------------------------------------------------------- topics -----
 
 export async function listTopics(supabase, pairId) {
