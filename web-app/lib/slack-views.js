@@ -133,9 +133,11 @@ export function addTopicModal() {
 export function listTopicsModal(topics) {
   const open = topics.filter(isOpenTopic);
   const blocks = open.length
-    ? open.flatMap((t) => [section(`*${t.category}*\nAdded ${ago(t.created_at)}`, button("Mark discussed", "topic_mark_discussed", t.id))])
+    ? open.flatMap((t) => [
+        section(`*${t.text}*\n${t.category} · added ${ago(t.created_at)}`, button("Mark discussed", "topic_mark_discussed", t.id, "primary")),
+      ])
     : [section("No open topics. Add one from the Home tab.")];
-  blocks.push({ type: "divider" }, actions([openInApp("Open topics in the app for the full text")]));
+  blocks.push({ type: "divider" }, actions([openInApp("Open topics in the app for full notes")]));
   return modal("view_topics", "Open topics", blocks, "Close");
 }
 
@@ -152,9 +154,11 @@ export function addActionModal(ctx) {
 export function listActionsModal(list) {
   const open = list.filter((a) => a.status !== "Done");
   const blocks = open.length
-    ? open.flatMap((a) => [section(`*${a.owner_label}*${a.due_date ? `\nDue ${a.due_date}` : "\nNo due date"}`, button("Mark done", "action_mark_done", a.id))])
+    ? open.flatMap((a) => [
+        section(`*${a.text}*\n${a.owner_label}${a.due_date ? ` · due ${a.due_date}` : " · no due date"}`, button("Mark done", "action_mark_done", a.id, "primary")),
+      ])
     : [section("No open actions. Add one from the Home tab.")];
-  blocks.push({ type: "divider" }, actions([openInApp("Open actions in the app for the full text")]));
+  blocks.push({ type: "divider" }, actions([openInApp("Open actions in the app for full notes")]));
   return modal("view_actions", "Open actions", blocks, "Close");
 }
 
@@ -262,7 +266,7 @@ export function listFeedbackModal(feedback, requests) {
   const blocks = [
     ...fbBlocks,
     ...(reqBlocks.length ? [{ type: "divider" }, section("*Open requests*")] : []),
-    ...reqBlocks.map((r) => section(`Requested ${ago(r.created_at)}`, button("Mark answered", "feedback_request_answered", r.id))),
+    ...reqBlocks.map((r) => section(`Requested ${ago(r.created_at)}`, button("Mark answered", "feedback_request_answered", r.id, "primary"))),
     { type: "divider" },
     actions([openInApp("Open feedback in the app for the full text")]),
   ];

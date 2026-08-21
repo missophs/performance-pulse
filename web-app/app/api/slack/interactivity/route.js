@@ -177,6 +177,19 @@ export async function POST(request) {
 
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
   const slackUserId = payload.user?.id;
+
+  try {
+    return await handleInteraction(admin, slackUserId, payload);
+  } catch (err) {
+    // A Supabase hiccup or a Slack API error here used to raw-500 the whole
+    // request — Slack then leaves the button/modal looking stuck with no
+    // explanation. Fail soft instead: log it, ack the request either way.
+    console.error("slack interactivity failed:", err);
+    return Response.json({ ok: true });
+  }
+}
+
+async function handleInteraction(admin, slackUserId, payload) {
   const ctx = slackUserId ? await resolveSlackUser(admin, slackUserId) : null;
   if (!ctx) return Response.json({ ok: true }); // not linked — nothing we can do
 
