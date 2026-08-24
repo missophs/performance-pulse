@@ -74,28 +74,58 @@ Done:
   `performance-pulse-lyart.vercel.app`: typed a topic, reloaded without
   submitting, text came back; clicked Discard, reloaded again, stayed
   cleared.
+- **2026-08-24: Day 2 of save/pause/go-back — rolled to Goals,
+  Development, Achievements, Feedback.** Same `form_drafts` pattern as
+  Day 1, applied to the "add new" flow only in each (not editing an
+  existing goal/plan — those already have a saved row to revisit, so a
+  separate draft doesn't apply there):
+  - **Goals** (`goals/page.js`, kind `"goal"`) and **Development**
+    (`development/page.js`, kind `"dev"`) — both are `<Modal>`-based
+    add/edit forms; draft logic is gated on `!editing`/`!editingDev` so
+    editing an existing item never touches the draft. Development's
+    seeded opens (from Career's "turn into a plan" link, and the
+    learning-and-development suggestion picker) count as "new" too, so
+    they autosave/restore like the plain "Add a development plan" flow.
+  - **Achievements** (`performance/page.js`, kind `"achievement"`) — no
+    edit flow exists for achievements, so no gating needed.
+  - **Feedback** (`performance/page.js`, kind `"feedback"`) — scoped to
+    "give" mode only (`fbMode === "give"`); "answer" mode (responding to
+    a specific feedback request) is tied to that request, not a
+    standalone draft, and was deliberately left out to avoid one draft
+    bleeding across different requests.
+  - `components/ui/Modal.js` gained an optional `onDiscard`/
+    `discardLabel` prop (renders a "Discard" button in the modal footer,
+    between Cancel and Save) since all four forms needed the same
+    affordance Day 1 built inline for the topic form.
+  - All draft calls fail soft, same as Day 1. Deployed via `vercel
+    --prod`. Live-verified end-to-end on
+    `performance-pulse-lyart.vercel.app` for all four: typed into each
+    "add" modal, reloaded without saving, reopened the modal — content
+    came back in all four; clicked Discard on each — cleared and stayed
+    cleared.
 
 Still open, in priority order:
 
-1. **Save / pause / go-back across forms — Day 1 done, Day 2 next.**
-   Only the check-in wizard has a real draft-save + resume + back-
-   navigation flow (plus a separate, simpler `review_drafts` table/pattern
-   used by the review flow — `getReviewDraft`/`saveReviewDraft` in
-   `lib/data.js`, one draft per pair+role, upserted) and now the topic-add
-   form (see Done, 2026-08-24). Goals, Development, Achievements, Feedback
-   still submit immediately with no draft state, and closing a modal
-   without saving silently discards what was typed. Melissa asked for
-   this explicitly on 2026-08-24 ("a way to go back... if someone wants to
-   change something before they submit") — this is the third and last
-   item from that request; the other two (suggested topics, delayed Slack
-   pings) are done, see Done section above.
+1. **Save / pause / go-back across forms — Day 1 and Day 2 done, Day 3
+   next.** Only the check-in wizard has a real draft-save + resume +
+   back-navigation flow (plus a separate, simpler `review_drafts`
+   table/pattern used by the review flow — `getReviewDraft`/
+   `saveReviewDraft` in `lib/data.js`, one draft per pair+role, upserted)
+   and now Topics, Goals, Development, Achievements, and Feedback (give
+   mode) all have autosave/restore/discard on their "add new" forms (see
+   Done, 2026-08-24). Melissa asked for this explicitly on 2026-08-24
+   ("a way to go back... if someone wants to change something before
+   they submit") — this is the third and last item from that request;
+   the other two (suggested topics, delayed Slack pings) are done, see
+   Done section above.
 
    Agreed plan (2026-08-24), broken over a few days at Melissa's request:
    - **Day 1 (done, 2026-08-24):** `form_drafts` table +
      `getFormDraft`/`saveFormDraft`/`clearFormDraft`, wired into the
      topic-add form as proof of concept. See Done section above.
-   - **Day 2 (in progress):** roll the same pattern to the other 4
-     website forms (Goals, Development, Achievements, Feedback).
+   - **Day 2 (done, 2026-08-24):** rolled the same pattern to the other
+     4 website forms (Goals, Development, Achievements, Feedback — give
+     mode). See Done section above.
    - **Day 3 (not started):** Slack side. Different problem — a Slack
      modal has no multi-step "back," so "don't lose my work" there likely
      means reopening "Add a topic"/etc. restores whatever was last typed,

@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { usePulse } from "@/components/PulseContext";
 import { useToast } from "@/components/ui/ToastProvider";
-import { listDevelopmentPlans, saveDevelopmentPlan, deleteDevelopmentPlan, getMyPair, updatePair, notify } from "@/lib/data";
+import { listDevelopmentPlans, saveDevelopmentPlan, deleteDevelopmentPlan, getMyPair, updatePair, notify, getFormDraft, saveFormDraft, clearFormDraft } from "@/lib/data";
 import { fmtDate, ago } from "@/lib/format";
 import { devStatusBadge } from "@/lib/badges";
 import { DEV_TYPES, DEV_STATES, DEV_IDEAS, ldMatch } from "@/lib/development-content";
@@ -117,11 +117,31 @@ function DevelopmentPageInner() {
     setDevModalOpen(true);
   }
 
-  function openAddDev() {
+  async function openAddDev() {
     setEditingDev(null);
-    setDevForm(BLANK_DEV);
+    const draft = await getFormDraft(supabase, pairId, role, "dev").catch(() => null);
+    setDevForm({ ...BLANK_DEV, ...draft?.draft });
     setIdeasOpen(false);
     setDevModalOpen(true);
+  }
+
+  // Autosave a draft of a new (not editing) plan — covers the plain "Add a
+  // development plan" flow as well as the seeded/LD-suggestion opens above,
+  // since those also start a new (unsaved) plan.
+  useEffect(() => {
+    if (!devModalOpen || editingDev) return;
+    const hasContent = devForm.area.trim() || devForm.why.trim() || devForm.activity.trim() || devForm.support.trim() || devForm.target || devForm.measure.trim();
+    const timer = setTimeout(() => {
+      if (hasContent) saveFormDraft(supabase, pairId, role, "dev", devForm).catch(() => {});
+      else clearFormDraft(supabase, pairId, role, "dev").catch(() => {});
+    }, 800);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [devForm, devModalOpen, editingDev]);
+
+  async function discardDevDraft() {
+    setDevForm(BLANK_DEV);
+    await clearFormDraft(supabase, pairId, role, "dev").catch(() => {});
   }
   function openEditDev(d) {
     setEditingDev(d);
@@ -147,8 +167,10 @@ function DevelopmentPageInner() {
     const area = devForm.area.trim();
     if (!area) return;
     const payload = { ...devForm, area, id: editingDev?.id };
+    const wasNew = !editingDev;
     await saveDevelopmentPlan(supabase, pairId, payload, role, myName);
     closeDevModal();
+    if (wasNew) await clearFormDraft(supabase, pairId, role, "dev").catch(() => {});
     if (editingDev) {
       await safeNotify(`${myName} updated a development plan: ${area}`);
     } else {
@@ -291,6 +313,7 @@ function DevelopmentPageInner() {
         onSave={handleSaveDev}
         saveLabel={editingDev ? "Save changes" : "Save plan"}
         saveDisabled={!devForm.area.trim()}
+        onDiscard={editingDev ? undefined : discardDevDraft}
       >
         <div className="field">
           <label htmlFor="dvArea">Development area</label>

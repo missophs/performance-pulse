@@ -22,6 +22,9 @@ import {
   addConcern,
   getReviewDraft,
   saveReviewDraft,
+  getFormDraft,
+  saveFormDraft,
+  clearFormDraft,
   listGoals,
   listDevelopmentPlans,
   listCareerAnswers,
@@ -107,12 +110,34 @@ export default function PerformancePage() {
   const [achDate, setAchDate] = useState(today());
   const achTitleRef = useRef(null);
 
-  function openAchievementModal() {
+  async function openAchievementModal() {
+    const draft = await getFormDraft(supabase, pairId, role, "achievement").catch(() => null);
+    const d = draft?.draft;
+    setAchTitle(d?.title || "");
+    setAchCat(d?.category || ACH_CATS[0]);
+    setAchImpact(d?.impact || "");
+    setAchDate(d?.date || today());
+    setAchOpen(true);
+  }
+
+  // Autosave a draft so closing the modal without saving doesn't lose it.
+  useEffect(() => {
+    if (!achOpen) return;
+    const hasContent = achTitle.trim() || achImpact.trim() || achCat !== ACH_CATS[0];
+    const timer = setTimeout(() => {
+      if (hasContent) saveFormDraft(supabase, pairId, role, "achievement", { title: achTitle, category: achCat, impact: achImpact, date: achDate }).catch(() => {});
+      else clearFormDraft(supabase, pairId, role, "achievement").catch(() => {});
+    }, 800);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [achTitle, achCat, achImpact, achDate, achOpen]);
+
+  async function discardAchievementDraft() {
     setAchTitle("");
     setAchCat(ACH_CATS[0]);
     setAchImpact("");
     setAchDate(today());
-    setAchOpen(true);
+    await clearFormDraft(supabase, pairId, role, "achievement").catch(() => {});
   }
 
   async function saveAchievement() {
@@ -125,6 +150,7 @@ export default function PerformancePage() {
       title, category: achCat, impact: achImpact.trim(), date: achDate || today(), role, name: myName,
     });
     setAchOpen(false);
+    await clearFormDraft(supabase, pairId, role, "achievement").catch(() => {});
     await notify(supabase, pairId, `${myName} logged an achievement: ${title}`, role, otherRole, "performance");
     toast("Saved", "Added to your achievements.");
     loadAll();
@@ -147,15 +173,38 @@ export default function PerformancePage() {
   const [fbShowCoach, setFbShowCoach] = useState(false);
   const fbTextRef = useRef(null);
 
-  function openGiveFeedback() {
+  async function openGiveFeedback() {
     setFbMode("give");
     setFbRequestId(null);
     setFbRequestAbout("");
+    const draft = await getFormDraft(supabase, pairId, role, "feedback").catch(() => null);
+    const d = draft?.draft;
+    setFbType(d?.type || fbTypes[0]);
+    setFbText(d?.text || "");
+    setFbExample(d?.example || "");
+    setFbShowCoach(false);
+    setFbOpen(true);
+  }
+
+  // Autosave a draft, "give" mode only — "answer" mode is tied to a
+  // specific feedback request and isn't a standalone draft.
+  useEffect(() => {
+    if (!fbOpen || fbMode !== "give") return;
+    const hasContent = fbText.trim() || fbExample.trim() || fbType !== fbTypes[0];
+    const timer = setTimeout(() => {
+      if (hasContent) saveFormDraft(supabase, pairId, role, "feedback", { type: fbType, text: fbText, example: fbExample }).catch(() => {});
+      else clearFormDraft(supabase, pairId, role, "feedback").catch(() => {});
+    }, 800);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fbText, fbExample, fbType, fbOpen, fbMode]);
+
+  async function discardFeedbackDraft() {
     setFbType(fbTypes[0]);
     setFbText("");
     setFbExample("");
     setFbShowCoach(false);
-    setFbOpen(true);
+    await clearFormDraft(supabase, pairId, role, "feedback").catch(() => {});
   }
 
   function openAnswerRequest(req) {
@@ -187,6 +236,7 @@ export default function PerformancePage() {
       await setFeedbackRequestStatus(supabase, fbRequestId, "closed");
     }
     setFbOpen(false);
+    if (fbMode === "give") await clearFormDraft(supabase, pairId, role, "feedback").catch(() => {});
     const msg = fbMode === "answer" ? `${myName} answered your feedback request` : `${myName} gave you feedback`;
     await notify(supabase, pairId, msg, role, otherRole, "performance", "feedback");
     toast("Sent", `${partnerName} can see this in Feedback.`);
@@ -539,6 +589,7 @@ export default function PerformancePage() {
         onClose={() => setAchOpen(false)}
         onSave={saveAchievement}
         saveLabel="Add achievement"
+        onDiscard={discardAchievementDraft}
       >
         <div className="field">
           <label htmlFor="acTitle">What happened</label>
@@ -567,6 +618,7 @@ export default function PerformancePage() {
         onClose={() => setFbOpen(false)}
         onSave={() => saveFeedback(false)}
         saveLabel="Send feedback"
+        onDiscard={fbMode === "give" ? discardFeedbackDraft : undefined}
       >
         <div className="field">
           <label htmlFor="fbType">Type</label>

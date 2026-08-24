@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePulse } from "@/components/PulseContext";
 import { useToast } from "@/components/ui/ToastProvider";
-import { listGoals, saveGoal, deleteGoal, addTopic, notify } from "@/lib/data";
+import { listGoals, saveGoal, deleteGoal, addTopic, notify, getFormDraft, saveFormDraft, clearFormDraft } from "@/lib/data";
 import { fmtDate, ago, staleGoal } from "@/lib/format";
 import { goalStatusBadge } from "@/lib/badges";
 import Badge from "@/components/ui/Badge";
@@ -46,10 +46,29 @@ export default function GoalsPage() {
     }
   }
 
-  function openAdd() {
+  async function openAdd() {
     setEditing(null);
-    setForm({ ...BLANK, owner: employeeName });
+    const draft = await getFormDraft(supabase, pairId, role, "goal").catch(() => null);
+    setForm({ ...BLANK, owner: employeeName, ...draft?.draft });
     setModalOpen(true);
+  }
+
+  // Autosave a draft of a new (not editing) goal so closing the modal
+  // without saving doesn't lose what was typed.
+  useEffect(() => {
+    if (!modalOpen || editing) return;
+    const hasContent = form.text.trim() || form.why.trim() || form.measure.trim() || form.target || form.obstacles.trim() || form.support.trim();
+    const timer = setTimeout(() => {
+      if (hasContent) saveFormDraft(supabase, pairId, role, "goal", form).catch(() => {});
+      else clearFormDraft(supabase, pairId, role, "goal").catch(() => {});
+    }, 800);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, modalOpen, editing]);
+
+  async function discardDraft() {
+    setForm({ ...BLANK, owner: employeeName });
+    await clearFormDraft(supabase, pairId, role, "goal").catch(() => {});
   }
 
   function openEdit(g) {
@@ -77,8 +96,10 @@ export default function GoalsPage() {
     const text = form.text.trim();
     if (!text) return;
     const payload = { ...form, text, id: editing?.id };
+    const wasNew = !editing;
     await saveGoal(supabase, pairId, payload, myName);
     closeModal();
+    if (wasNew) await clearFormDraft(supabase, pairId, role, "goal").catch(() => {});
     if (editing) {
       await safeNotify(`${myName} updated the goal: ${text}`);
     } else {
@@ -167,6 +188,7 @@ export default function GoalsPage() {
         onSave={handleSave}
         saveLabel={editing ? "Save changes" : "Add goal"}
         saveDisabled={!form.text.trim()}
+        onDiscard={editing ? undefined : discardDraft}
       >
         <div className="field">
           <label htmlFor="glText">The goal</label>
