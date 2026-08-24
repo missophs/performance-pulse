@@ -30,7 +30,10 @@ Done:
   raw-500ing and leaving a button/modal stuck.
 - Mark discussed/done/answered buttons are highlighted (primary style).
 - **2026-08-24 code-review pass (10 bugs found and fixed, all deployed and
-  build/lint-clean; see git log same date for commits once made):**
+  build/lint-clean).** Committed together with the two items below as
+  `e0c2da9` ("Fix code-review bugs, add topic suggestions, batch delayed
+  Slack pings") — all three had been live in production but uncommitted
+  until this commit.
   `isOpenTopic` (`lib/format.js`) now excludes `"Discussed"`, so Slack's
   "Mark discussed" actually clears a topic from the open list/count (it
   silently didn't before); `wrapUpModal` now reuses `isOpenTopic` instead of
@@ -57,16 +60,36 @@ Done:
 
 Still open, in priority order:
 
-1. **Save / pause / go-back across forms.** Only the check-in wizard has
-   a real draft-save + resume + back-navigation flow. Topics, Goals,
+1. **Save / pause / go-back across forms — IN PROGRESS, not started yet.**
+   Only the check-in wizard has a real draft-save + resume + back-
+   navigation flow (plus a separate, simpler `review_drafts` table/pattern
+   used by the review flow — `getReviewDraft`/`saveReviewDraft` in
+   `lib/data.js`, one draft per pair+role, upserted). Topics, Goals,
    Development, Achievements, Feedback all submit immediately with no
-   draft state, and closing a modal without saving silently discards
-   what was typed. The biggest remaining item — touches `lib/data.js`
-   (new draft storage), each form's page, and `components/ui/Modal.js`.
-   Melissa asked for this explicitly on 2026-08-24 ("a way to go back... if
-   someone wants to change something before they submit") — this is the
-   third and last item from that request; the other two (suggested
-   topics, delayed Slack pings) are done, see Done section above. Next up.
+   draft state, and closing a modal without saving silently discards what
+   was typed. Melissa asked for this explicitly on 2026-08-24 ("a way to
+   go back... if someone wants to change something before they submit") —
+   this is the third and last item from that request; the other two
+   (suggested topics, delayed Slack pings) are done, see Done section
+   above.
+
+   Agreed plan (2026-08-24), broken over a few days at Melissa's request:
+   - **Day 1 (not started):** new `form_drafts` table (pair_id, role,
+     kind, draft jsonb, updated_at) — generalizes the existing
+     `review_drafts` pattern with a `kind` column so multiple form types
+     can each hold their own draft at once. Add
+     `getFormDraft`/`saveFormDraft`/`clearFormDraft` to `lib/data.js`.
+     Wire into **one** form only, as proof of concept: the topic-add
+     modal in `one-on-one/page.js` — autosave while typing, restore the
+     draft on return, clear on submit, "Discard" button to clear without
+     submitting.
+   - **Day 2 (not started):** roll the same pattern to the other 4
+     website forms (Goals, Development, Achievements, Feedback).
+   - **Day 3 (not started):** Slack side. Different problem — a Slack
+     modal has no multi-step "back," so "don't lose my work" there likely
+     means reopening "Add a topic"/etc. restores whatever was last typed,
+     not a page-style back button. Needs its own design, not a straight
+     port of the website pattern.
 2. **Modal submissions in Slack can hit Slack's 3-second response
    window.** `view_submission` handling awaits a full 7-query home-data
    reload + a `views.publish` call before responding — on a cold
