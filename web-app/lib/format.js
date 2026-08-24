@@ -54,7 +54,7 @@ export function isOverdue(dueDate, status) {
 
 // Shared "what counts as open/active" predicates — used by the dashboard
 // layout (nav badges), the dashboard page (stat tiles), and the bell.
-export const isOpenTopic = (t) => t.status !== "Resolved" && t.status !== "Parking Lot";
+export const isOpenTopic = (t) => t.status !== "Resolved" && t.status !== "Parking Lot" && t.status !== "Discussed";
 export const isActiveGoal = (g) => g.status !== "Complete" && g.status !== "Deferred";
 export const isOpenAction = (a) => a.status !== "Done";
 export const isActiveDev = (d) => d.status !== "Complete" && d.status !== "Deferred";

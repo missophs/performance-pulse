@@ -15,6 +15,11 @@ export default function OnboardingForm() {
 
   async function submit(e) {
     e.preventDefault();
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setError("Enter your name.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -22,7 +27,7 @@ export default function OnboardingForm() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      await updateProfile(supabase, user.id, { full_name: name.trim() });
+      await updateProfile(supabase, user.id, { full_name: trimmedName });
       await createPair(supabase, role, partnerEmail.trim());
       router.push("/dashboard");
       router.refresh();

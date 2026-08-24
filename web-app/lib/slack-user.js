@@ -15,10 +15,18 @@ export async function resolveSlackUser(supabaseAdmin, slackUserId) {
   const email = info.user?.profile?.email;
   if (!email) return null;
 
+  // PostgREST .or() parses this as a filter expression, not a literal — a
+  // comma or parenthesis in the value would otherwise break the clause or
+  // change what it matches. Quote the value and escape internal quotes per
+  // https://postgrest.org/en/stable/references/api/tables_views.html#operators
+  const safeEmail = `"${email.replace(/"/g, '\\"')}"`;
+  // Slack's interactivity/event endpoints have a ~3s response budget, so this
+  // is one query (an embedded select) instead of the pair lookup followed by
+  // a separate profiles lookup — one less round trip on every request.
   const { data: pair, error } = await supabaseAdmin
     .from("pairs")
-    .select("*")
-    .or(`employee_email.eq.${email},manager_email.eq.${email}`)
+    .select("*, employee:profiles!employee_id(id, full_name), manager:profiles!manager_id(id, full_name)")
+    .or(`employee_email.eq.${safeEmail},manager_email.eq.${safeEmail}`)
     .maybeSingle();
   if (error) throw error;
   if (!pair) return null;
@@ -27,12 +35,8 @@ export async function resolveSlackUser(supabaseAdmin, slackUserId) {
   const role = isMgr ? "manager" : "employee";
   const otherRole = isMgr ? "employee" : "manager";
 
-  const { data: profiles } = await supabaseAdmin
-    .from("profiles")
-    .select("id, full_name")
-    .in("id", [pair.employee_id, pair.manager_id].filter(Boolean));
-  const employeeName = profiles?.find((p) => p.id === pair.employee_id)?.full_name || pair.employee_email;
-  const managerName = profiles?.find((p) => p.id === pair.manager_id)?.full_name || pair.manager_email;
+  const employeeName = pair.employee?.full_name || pair.employee_email;
+  const managerName = pair.manager?.full_name || pair.manager_email;
 
   return {
     slackUserId,

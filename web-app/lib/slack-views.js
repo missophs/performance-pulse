@@ -11,7 +11,7 @@
 // export view/message history, so the real content never transits Slack.
 
 import { isOpenTopic, ago } from "@/lib/format";
-import { TOPIC_CATEGORIES } from "@/lib/one-on-one-content";
+import { TOPIC_CATEGORIES, SUGGESTIONS } from "@/lib/one-on-one-content";
 
 const APP_URL = "https://performance-pulse-lyart.vercel.app";
 const GOAL_STATES = ["Not Started", "In Progress", "At Risk", "Complete", "Deferred"];
@@ -67,7 +67,7 @@ const modal = (callbackId, title, blocks, submit = "Save", privateMetadata) => (
 export function homeView(ctx, d) {
   const openTopics = d.topics.filter(isOpenTopic);
   const openActions = d.actions.filter((a) => a.status !== "Done");
-  const openRequests = d.feedbackRequests.filter((r) => r.status !== "Answered" && r.status !== "Declined");
+  const openRequests = d.feedbackRequests.filter((r) => r.status === "open");
   const next1on1 = ctx.pair.next_1on1_date ? `${ctx.pair.next_1on1_date}${ctx.pair.next_1on1_time ? " " + ctx.pair.next_1on1_time : ""}` : "not scheduled";
 
   const blocks = [
@@ -122,19 +122,38 @@ export function notLinkedHomeView() {
 
 // -------------------------------------------------------------- topics -----
 
-export function addTopicModal() {
+// Suggestion values carry their category so the interactivity route doesn't
+// need a second lookup: "<category>::<suggestion text>". Combined length
+// tops out around 113 chars across the whole fixed library, well inside
+// Slack's 150-char option-value cap.
+function suggestionOptionGroups(role) {
+  const roleSuggestions = SUGGESTIONS[role] || {};
+  return Object.entries(roleSuggestions).map(([cat, texts]) => ({
+    label: { type: "plain_text", text: cat.slice(0, 75) },
+    options: texts.map((t) => opt(t, `${cat}::${t}`)),
+  }));
+}
+
+export function addTopicModal(ctx) {
+  const groups = suggestionOptionGroups(ctx.role);
   return modal("add_topic", "Add a topic", [
-    inputBlock("text", "Topic", plainInput("val", { placeholder: "What do you want to talk about?" })),
+    inputBlock(
+      "suggested",
+      "Pick a suggestion (optional)",
+      { type: "static_select", action_id: "val", option_groups: groups, placeholder: { type: "plain_text", text: "Browse suggested topics" } },
+      true
+    ),
+    inputBlock("text", "Or write your own", plainInput("val", { placeholder: "What do you want to talk about?" }), true),
     inputBlock("why", "Why it matters", plainInput("val", { multiline: true }), true),
-    inputBlock("category", "Category", staticSelect("val", TOPIC_CATEGORIES, TOPIC_CATEGORIES[0])),
+    inputBlock("category", "Category (for your own topic)", staticSelect("val", TOPIC_CATEGORIES, TOPIC_CATEGORIES[0]), true),
   ]);
 }
 
 export function listTopicsModal(topics) {
   const open = topics.filter(isOpenTopic);
   const blocks = open.length
-    ? open.flatMap((t) => [
-        section(`*${t.text}*\n${t.category} · added ${ago(t.created_at)}`, button("Mark discussed", "topic_mark_discussed", t.id, "primary")),
+    ? open.flatMap((t, i) => [
+        section(`*Topic ${i + 1}* — ${t.category} · added ${ago(t.created_at)}`, button("Mark discussed", "topic_mark_discussed", t.id, "primary")),
       ])
     : [section("No open topics. Add one from the Home tab.")];
   blocks.push({ type: "divider" }, actions([openInApp("Open topics in the app for full notes")]));
@@ -154,8 +173,8 @@ export function addActionModal(ctx) {
 export function listActionsModal(list) {
   const open = list.filter((a) => a.status !== "Done");
   const blocks = open.length
-    ? open.flatMap((a) => [
-        section(`*${a.text}*\n${a.owner_label}${a.due_date ? ` · due ${a.due_date}` : " · no due date"}`, button("Mark done", "action_mark_done", a.id, "primary")),
+    ? open.flatMap((a, i) => [
+        section(`*Action ${i + 1}* — ${a.owner_label}${a.due_date ? ` · due ${a.due_date}` : " · no due date"}`, button("Mark done", "action_mark_done", a.id, "primary")),
       ])
     : [section("No open actions. Add one from the Home tab.")];
   blocks.push({ type: "divider" }, actions([openInApp("Open actions in the app for full notes")]));
@@ -262,7 +281,7 @@ export function listFeedbackModal(feedback, requests) {
   const fbBlocks = feedback.length
     ? [section(`*${feedback.length} feedback entr${feedback.length === 1 ? "y" : "ies"}*\n${summary}`)]
     : [section("No feedback yet.")];
-  const reqBlocks = requests.filter((r) => r.status !== "Answered" && r.status !== "Declined");
+  const reqBlocks = requests.filter((r) => r.status === "open");
   const blocks = [
     ...fbBlocks,
     ...(reqBlocks.length ? [{ type: "divider" }, section("*Open requests*")] : []),
@@ -284,7 +303,7 @@ export function lastMeetingModal(meetings) {
 // ------------------------------------------------------------- wrap up -----
 
 export function wrapUpModal(topics) {
-  const open = topics.filter((t) => t.status !== "Discussed" && t.status !== "Resolved");
+  const open = topics.filter(isOpenTopic);
   const checkboxOptions = open.map((t) => opt(t.text, t.id));
   return modal("wrap_up", "Wrap up your 1:1", [
     inputBlock("date", "Meeting date", { type: "datepicker", action_id: "val", initial_date: new Date().toISOString().slice(0, 10) }),

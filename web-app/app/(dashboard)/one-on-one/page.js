@@ -76,7 +76,9 @@ export default function OneOnOnePage() {
   // that fires a Slack DM per click, which is noisy when someone is adding
   // several topics before a meeting. Instead we batch them and send one
   // notification when they leave the Prepare tab (see flushTopicNotify).
-  const pendingTopicNotify = useRef({ count: 0, texts: [] });
+  // A timer also flushes a few seconds after the last add, so the
+  // notification isn't lost if the tab is closed before switching away.
+  const pendingTopicNotify = useRef({ count: 0, texts: [], timer: null });
 
   async function loadAll() {
     setLoading(true);
@@ -114,6 +116,13 @@ export default function OneOnOnePage() {
     }
   }, [pair]);
 
+  useEffect(() => {
+    return () => {
+      flushTopicNotify();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   if (loading) {
     return (
       <section>
@@ -130,17 +139,25 @@ export default function OneOnOnePage() {
 
   // ------------------------------------------------------------ topics ----
 
+  function queueTopicNotify(text) {
+    const pending = pendingTopicNotify.current;
+    pending.count += 1;
+    pending.texts.push(text);
+    if (pending.timer) clearTimeout(pending.timer);
+    pending.timer = setTimeout(flushTopicNotify, 4000);
+  }
+
   async function addTopicRow(text, why, category) {
     await addTopic(supabase, pairId, { text, why: why || "", category, role, name: myName });
-    pendingTopicNotify.current.count += 1;
-    pendingTopicNotify.current.texts.push(text);
+    queueTopicNotify(text);
     loadAll();
   }
 
   async function flushTopicNotify() {
     const pending = pendingTopicNotify.current;
+    if (pending.timer) clearTimeout(pending.timer);
     if (!pending.count) return;
-    pendingTopicNotify.current = { count: 0, texts: [] };
+    pendingTopicNotify.current = { count: 0, texts: [], timer: null };
     const text =
       pending.count === 1
         ? `${myName} added a topic: ${pending.texts[0]}`
@@ -152,13 +169,6 @@ export default function OneOnOnePage() {
     if (sub === "prepare" && tab !== "prepare") flushTopicNotify();
     setSub(tab);
   }
-
-  useEffect(() => {
-    return () => {
-      flushTopicNotify();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   async function submitTopicForm() {
     const text = topicText.trim();
@@ -174,8 +184,10 @@ export default function OneOnOnePage() {
 
   async function addFromHardConvo(outcome, body) {
     await addTopic(supabase, pairId, { text: outcome, why: body, category: "Other", role, name: myName });
-    pendingTopicNotify.current.count += 1;
-    pendingTopicNotify.current.texts.push(outcome);
+    // Deliberately not queued through queueTopicNotify/flushTopicNotify: this
+    // path is exempt from a real Slack DM (no "topic" kind here), only an
+    // in-app notification, same as before topic-add batching existed.
+    await notify(supabase, pairId, `${myName} added a topic to the agenda`, role, otherRole, "oneOnOne");
     loadAll();
   }
 

@@ -6,6 +6,7 @@
 // `payload`, containing the JSON Slack actually cares about.
 
 import { createClient } from "@supabase/supabase-js";
+import { after } from "next/server";
 import { verifySlackSignature } from "@/lib/slack-verify";
 import { resolveSlackUser } from "@/lib/slack-user";
 import { slackApi } from "@/lib/slack-api";
@@ -46,6 +47,19 @@ import {
   updateProfile,
 } from "@/lib/data";
 
+// Slack's interactivity endpoint is one request/response — there's no
+// browser tab to hold state in like the website's topic-add batching. This
+// schedules the ping a few seconds after the response goes back to Slack
+// (via Next's after()) instead of firing it synchronously on save, so a
+// notification never lands before the person's actually done.
+const DELAYED_NOTIFY_MS = 4000;
+function delayedNotify(admin, pairId, text, role, otherRole, view, kind) {
+  after(async () => {
+    await new Promise((resolve) => setTimeout(resolve, DELAYED_NOTIFY_MS));
+    await notify(admin, pairId, text, role, otherRole, view, kind).catch((e) => console.error("delayed notify:", e));
+  });
+}
+
 async function refreshHome(admin, ctx) {
   const view = homeView(ctx, await loadHomeData(admin, ctx.pairId));
   await slackApi("views.publish", { user_id: ctx.slackUserId, view }).catch((e) => console.error("home publish:", e));
@@ -55,7 +69,7 @@ async function refreshHome(admin, ctx) {
 
 const OPENERS = {
   open_edit_name: async (admin, ctx) => editNameModal(ctx),
-  open_add_topic: async () => addTopicModal(),
+  open_add_topic: async (admin, ctx) => addTopicModal(ctx),
   open_add_action: async (admin, ctx) => addActionModal(ctx),
   open_wrap_up: async (admin, ctx) => wrapUpModal((await loadHomeData(admin, ctx.pairId)).topics),
   open_add_goal: async () => addGoalModal(),
@@ -87,7 +101,7 @@ const QUICK_ACTIONS = {
     await notify(admin, ctx.pairId, `${ctx.myName} marked an action done`, ctx.role, ctx.otherRole, "actions");
   },
   feedback_request_answered: async (admin, ctx, id) => {
-    await setFeedbackRequestStatus(admin, id, "Answered");
+    await setFeedbackRequestStatus(admin, id, "closed");
   },
 };
 
@@ -110,8 +124,20 @@ const SUBMISSIONS = {
     ctx.myName = name; // so the Home-tab refresh right after this shows the new name immediately
   },
   add_topic: async (admin, ctx, v) => {
-    const text = fieldVal(v, "text");
-    await addTopic(admin, ctx.pairId, { text, why: fieldVal(v, "why"), category: fieldVal(v, "category"), role: ctx.role, name: ctx.myName });
+    const suggested = fieldVal(v, "suggested");
+    const manualText = (fieldVal(v, "text") || "").trim();
+    let text, category;
+    if (suggested) {
+      const sep = suggested.indexOf("::");
+      category = suggested.slice(0, sep);
+      text = suggested.slice(sep + 2);
+    } else if (manualText) {
+      text = manualText;
+      category = fieldVal(v, "category") || "Other";
+    } else {
+      return { error: { blockId: "text", message: "Pick a suggestion above, or write your own topic." } };
+    }
+    await addTopic(admin, ctx.pairId, { text, why: fieldVal(v, "why"), category, role: ctx.role, name: ctx.myName });
     await notify(admin, ctx.pairId, `${ctx.myName} added a topic: ${text}`, ctx.role, ctx.otherRole, "oneOnOne", "topic");
   },
   add_action: async (admin, ctx, v) => {
@@ -127,7 +153,7 @@ const SUBMISSIONS = {
       { text, why: fieldVal(v, "why"), measure: fieldVal(v, "measure"), owner: ctx.myName, target: fieldVal(v, "target"), status: fieldVal(v, "status"), progress: 0 },
       ctx.myName
     );
-    await notify(admin, ctx.pairId, `${ctx.myName} added a goal: ${text}`, ctx.role, ctx.otherRole, "goals");
+    delayedNotify(admin, ctx.pairId, `${ctx.myName} added a goal: ${text}`, ctx.role, ctx.otherRole, "goals");
   },
   add_devplan: async (admin, ctx, v) => {
     const area = fieldVal(v, "area");
@@ -138,20 +164,20 @@ const SUBMISSIONS = {
       ctx.role,
       ctx.myName
     );
-    await notify(admin, ctx.pairId, `${ctx.myName} added a development plan: ${area}`, ctx.role, ctx.otherRole, "development");
+    delayedNotify(admin, ctx.pairId, `${ctx.myName} added a development plan: ${area}`, ctx.role, ctx.otherRole, "development");
   },
   add_achievement: async (admin, ctx, v) => {
     const title = fieldVal(v, "title");
     await addAchievement(admin, ctx.pairId, { title, category: fieldVal(v, "category"), impact: fieldVal(v, "impact"), date: fieldVal(v, "date"), role: ctx.role, name: ctx.myName });
-    await notify(admin, ctx.pairId, `${ctx.myName} logged an achievement: ${title}`, ctx.role, ctx.otherRole, "performance");
+    delayedNotify(admin, ctx.pairId, `${ctx.myName} logged an achievement: ${title}`, ctx.role, ctx.otherRole, "performance");
   },
   add_feedback: async (admin, ctx, v) => {
     await addFeedback(admin, ctx.pairId, { giverRole: ctx.role, fromName: ctx.myName, toName: ctx.partnerName, type: fieldVal(v, "type"), text: fieldVal(v, "text"), example: fieldVal(v, "example") });
-    await notify(admin, ctx.pairId, `${ctx.myName} left you feedback`, ctx.role, ctx.otherRole, "performance", "feedback");
+    delayedNotify(admin, ctx.pairId, `${ctx.myName} left you feedback`, ctx.role, ctx.otherRole, "performance", "feedback");
   },
   add_feedback_request: async (admin, ctx, v) => {
     await addFeedbackRequest(admin, ctx.pairId, { fromRole: ctx.role, fromName: ctx.myName, about: fieldVal(v, "about"), why: fieldVal(v, "why") });
-    await notify(admin, ctx.pairId, `${ctx.myName} asked you for feedback`, ctx.role, ctx.otherRole, "performance", "request");
+    delayedNotify(admin, ctx.pairId, `${ctx.myName} asked you for feedback`, ctx.role, ctx.otherRole, "performance", "request");
   },
   wrap_up: async (admin, ctx, v) => {
     const discussedTopicIds = fieldVal(v, "discussed_topics") || [];
@@ -224,7 +250,10 @@ async function handleInteraction(admin, slackUserId, payload) {
   if (payload.type === "view_submission") {
     const handler = SUBMISSIONS[payload.view?.callback_id];
     if (handler) {
-      await handler(admin, ctx, payload.view.state.values);
+      const result = await handler(admin, ctx, payload.view.state.values);
+      if (result?.error) {
+        return Response.json({ response_action: "errors", errors: { [result.error.blockId]: result.error.message } });
+      }
       await refreshHome(admin, ctx);
     }
     return Response.json({}); // close the modal
