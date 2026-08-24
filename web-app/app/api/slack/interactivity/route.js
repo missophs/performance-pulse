@@ -45,6 +45,9 @@ import {
   notify,
   listMeetings,
   updateProfile,
+  getFormDraft,
+  saveFormDraft,
+  clearFormDraft,
 } from "@/lib/data";
 
 // Slack's interactivity endpoint is one request/response — there's no
@@ -67,15 +70,20 @@ async function refreshHome(admin, ctx) {
 
 // -------------------------------------------------------- open a modal -----
 
+async function draftFor(admin, ctx, kind) {
+  const row = await getFormDraft(admin, ctx.pairId, ctx.role, kind).catch(() => null);
+  return row?.draft;
+}
+
 const OPENERS = {
   open_edit_name: async (admin, ctx) => editNameModal(ctx),
-  open_add_topic: async (admin, ctx) => addTopicModal(ctx),
+  open_add_topic: async (admin, ctx) => addTopicModal(ctx, await draftFor(admin, ctx, "topic")),
   open_add_action: async (admin, ctx) => addActionModal(ctx),
   open_wrap_up: async (admin, ctx) => wrapUpModal((await loadHomeData(admin, ctx.pairId)).topics),
-  open_add_goal: async () => addGoalModal(),
-  open_add_devplan: async () => addDevPlanModal(),
-  open_add_achievement: async () => addAchievementModal(),
-  open_add_feedback: async (admin, ctx) => addFeedbackModal(ctx),
+  open_add_goal: async (admin, ctx) => addGoalModal(await draftFor(admin, ctx, "goal")),
+  open_add_devplan: async (admin, ctx) => addDevPlanModal(await draftFor(admin, ctx, "dev")),
+  open_add_achievement: async (admin, ctx) => addAchievementModal(await draftFor(admin, ctx, "achievement")),
+  open_add_feedback: async (admin, ctx) => addFeedbackModal(ctx, await draftFor(admin, ctx, "feedback")),
   open_add_feedback_request: async () => addFeedbackRequestModal(),
   open_list_topics: async (admin, ctx) => listTopicsModal((await loadHomeData(admin, ctx.pairId)).topics),
   open_list_actions: async (admin, ctx) => listActionsModal((await loadHomeData(admin, ctx.pairId)).actions),
@@ -138,6 +146,7 @@ const SUBMISSIONS = {
       return { error: { blockId: "text", message: "Pick a suggestion above, or write your own topic." } };
     }
     await addTopic(admin, ctx.pairId, { text, why: fieldVal(v, "why"), category, role: ctx.role, name: ctx.myName });
+    await clearFormDraft(admin, ctx.pairId, ctx.role, "topic").catch(() => {});
     await notify(admin, ctx.pairId, `${ctx.myName} added a topic: ${text}`, ctx.role, ctx.otherRole, "oneOnOne", "topic");
   },
   add_action: async (admin, ctx, v) => {
@@ -153,6 +162,7 @@ const SUBMISSIONS = {
       { text, why: fieldVal(v, "why"), measure: fieldVal(v, "measure"), owner: ctx.myName, target: fieldVal(v, "target"), status: fieldVal(v, "status"), progress: 0 },
       ctx.myName
     );
+    await clearFormDraft(admin, ctx.pairId, ctx.role, "goal").catch(() => {});
     delayedNotify(admin, ctx.pairId, `${ctx.myName} added a goal: ${text}`, ctx.role, ctx.otherRole, "goals");
   },
   add_devplan: async (admin, ctx, v) => {
@@ -164,15 +174,18 @@ const SUBMISSIONS = {
       ctx.role,
       ctx.myName
     );
+    await clearFormDraft(admin, ctx.pairId, ctx.role, "dev").catch(() => {});
     delayedNotify(admin, ctx.pairId, `${ctx.myName} added a development plan: ${area}`, ctx.role, ctx.otherRole, "development");
   },
   add_achievement: async (admin, ctx, v) => {
     const title = fieldVal(v, "title");
     await addAchievement(admin, ctx.pairId, { title, category: fieldVal(v, "category"), impact: fieldVal(v, "impact"), date: fieldVal(v, "date"), role: ctx.role, name: ctx.myName });
+    await clearFormDraft(admin, ctx.pairId, ctx.role, "achievement").catch(() => {});
     delayedNotify(admin, ctx.pairId, `${ctx.myName} logged an achievement: ${title}`, ctx.role, ctx.otherRole, "performance");
   },
   add_feedback: async (admin, ctx, v) => {
     await addFeedback(admin, ctx.pairId, { giverRole: ctx.role, fromName: ctx.myName, toName: ctx.partnerName, type: fieldVal(v, "type"), text: fieldVal(v, "text"), example: fieldVal(v, "example") });
+    await clearFormDraft(admin, ctx.pairId, ctx.role, "feedback").catch(() => {});
     delayedNotify(admin, ctx.pairId, `${ctx.myName} left you feedback`, ctx.role, ctx.otherRole, "performance", "feedback");
   },
   add_feedback_request: async (admin, ctx, v) => {

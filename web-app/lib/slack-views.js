@@ -52,6 +52,7 @@ const button = (text, actionId, value, style) => ({
   ...(style ? { style } : {}),
 });
 const openInApp = (label = "Open in app") => ({ type: "button", text: { type: "plain_text", text: label, emoji: true }, url: APP_URL, action_id: "open_app" });
+const datePicker = (actionId, initial) => ({ type: "datepicker", action_id: actionId, ...(initial ? { initial_date: initial } : {}) });
 const modal = (callbackId, title, blocks, submit = "Save", privateMetadata) => ({
   type: "modal",
   callback_id: callbackId,
@@ -134,19 +135,24 @@ function suggestionOptionGroups(role) {
   }));
 }
 
-export function addTopicModal(ctx) {
+export function addTopicModal(ctx, draft) {
   const groups = suggestionOptionGroups(ctx.role);
-  return modal("add_topic", "Add a topic", [
-    inputBlock(
-      "suggested",
-      "Pick a suggestion (optional)",
-      { type: "static_select", action_id: "val", option_groups: groups, placeholder: { type: "plain_text", text: "Browse suggested topics" } },
-      true
-    ),
-    inputBlock("text", "Or write your own", plainInput("val", { placeholder: "What do you want to talk about?" }), true),
-    inputBlock("why", "Why it matters", plainInput("val", { multiline: true }), true),
-    inputBlock("category", "Category (for your own topic)", staticSelect("val", TOPIC_CATEGORIES, TOPIC_CATEGORIES[0]), true),
-  ]);
+  return modal(
+    "add_topic",
+    "Add a topic",
+    [
+      inputBlock(
+        "suggested",
+        "Pick a suggestion (optional)",
+        { type: "static_select", action_id: "val", option_groups: groups, placeholder: { type: "plain_text", text: "Browse suggested topics" } },
+        true
+      ),
+      inputBlock("text", "Or write your own", plainInput("val", { placeholder: "What do you want to talk about?", initial: draft?.text }), true),
+      inputBlock("why", "Why it matters", plainInput("val", { multiline: true, initial: draft?.why }), true),
+      inputBlock("category", "Category (for your own topic)", staticSelect("val", TOPIC_CATEGORIES, draft?.category || TOPIC_CATEGORIES[0]), true),
+    ],
+    "Save"
+  );
 }
 
 export function listTopicsModal(topics) {
@@ -183,14 +189,19 @@ export function listActionsModal(list) {
 
 // ---------------------------------------------------------------- goals ----
 
-export function addGoalModal() {
-  return modal("add_goal", "Add a goal", [
-    inputBlock("text", "Goal", plainInput("val")),
-    inputBlock("why", "Why it matters", plainInput("val", { multiline: true }), true),
-    inputBlock("measure", "How you'll know it's met", plainInput("val"), true),
-    inputBlock("target", "Target date", { type: "datepicker", action_id: "val" }, true),
-    inputBlock("status", "Status", staticSelect("val", GOAL_STATES, GOAL_STATES[0])),
-  ]);
+export function addGoalModal(draft) {
+  return modal(
+    "add_goal",
+    "Add a goal",
+    [
+      inputBlock("text", "Goal", plainInput("val", { initial: draft?.text })),
+      inputBlock("why", "Why it matters", plainInput("val", { multiline: true, initial: draft?.why }), true),
+      inputBlock("measure", "How you'll know it's met", plainInput("val", { initial: draft?.measure }), true),
+      inputBlock("target", "Target date", datePicker("val", draft?.target), true),
+      inputBlock("status", "Status", staticSelect("val", GOAL_STATES, draft?.status || GOAL_STATES[0])),
+    ],
+    "Save"
+  );
 }
 
 export function listGoalsModal(goals) {
@@ -208,13 +219,18 @@ export function listGoalsModal(goals) {
 
 // --------------------------------------------------------- development -----
 
-export function addDevPlanModal() {
-  return modal("add_devplan", "Add a development plan", [
-    inputBlock("area", "Area", plainInput("val", { placeholder: "e.g. Executive presentation skills" })),
-    inputBlock("type", "Type", staticSelect("val", DEV_TYPES, DEV_TYPES[0])),
-    inputBlock("activity", "Activity", plainInput("val", { multiline: true }), true),
-    inputBlock("target", "Target date", { type: "datepicker", action_id: "val" }, true),
-  ]);
+export function addDevPlanModal(draft) {
+  return modal(
+    "add_devplan",
+    "Add a development plan",
+    [
+      inputBlock("area", "Area", plainInput("val", { placeholder: "e.g. Executive presentation skills", initial: draft?.area })),
+      inputBlock("type", "Type", staticSelect("val", DEV_TYPES, draft?.type || DEV_TYPES[0])),
+      inputBlock("activity", "Activity", plainInput("val", { multiline: true, initial: draft?.activity }), true),
+      inputBlock("target", "Target date", datePicker("val", draft?.target), true),
+    ],
+    "Save"
+  );
 }
 
 export function listDevPlansModal(plans) {
@@ -232,13 +248,18 @@ export function listDevPlansModal(plans) {
 
 // ---------------------------------------------------------- achievements ---
 
-export function addAchievementModal() {
-  return modal("add_achievement", "Log an achievement", [
-    inputBlock("title", "What happened", plainInput("val")),
-    inputBlock("category", "Category", staticSelect("val", ACH_CATS, ACH_CATS[0])),
-    inputBlock("impact", "Impact", plainInput("val", { multiline: true }), true),
-    inputBlock("date", "Date", { type: "datepicker", action_id: "val" }, true),
-  ]);
+export function addAchievementModal(draft) {
+  return modal(
+    "add_achievement",
+    "Log an achievement",
+    [
+      inputBlock("title", "What happened", plainInput("val", { initial: draft?.title })),
+      inputBlock("category", "Category", staticSelect("val", ACH_CATS, draft?.category || ACH_CATS[0])),
+      inputBlock("impact", "Impact", plainInput("val", { multiline: true, initial: draft?.impact }), true),
+      inputBlock("date", "Date", datePicker("val", draft?.date), true),
+    ],
+    "Save"
+  );
 }
 
 export function listAchievementsModal(list) {
@@ -256,13 +277,18 @@ export function listAchievementsModal(list) {
 
 // ------------------------------------------------------------- feedback ----
 
-export function addFeedbackModal(ctx) {
+export function addFeedbackModal(ctx, draft) {
   const types = ctx.isMgr ? MGR_FB_TYPES : EMP_FB_TYPES;
-  return modal("add_feedback", `Feedback for ${ctx.partnerName}`, [
-    inputBlock("type", "Type", staticSelect("val", types, types[0])),
-    inputBlock("text", "Feedback", plainInput("val", { multiline: true })),
-    inputBlock("example", "A specific example", plainInput("val", { multiline: true }), true),
-  ]);
+  return modal(
+    "add_feedback",
+    `Feedback for ${ctx.partnerName}`,
+    [
+      inputBlock("type", "Type", staticSelect("val", types, draft?.type || types[0])),
+      inputBlock("text", "Feedback", plainInput("val", { multiline: true, initial: draft?.text })),
+      inputBlock("example", "A specific example", plainInput("val", { multiline: true, initial: draft?.example }), true),
+    ],
+    "Save"
+  );
 }
 
 export function addFeedbackRequestModal() {
