@@ -103,40 +103,35 @@ Done:
     "add" modal, reloaded without saving, reopened the modal — content
     came back in all four; clicked Discard on each — cleared and stayed
     cleared.
-- **2026-08-24: Day 3 of save/pause/go-back — Slack side, descoped after
-  hitting a real Slack platform limit.** Original plan: closing one of
-  Slack's 5 add-modals (topic/goal/dev/achievement/feedback) would save
-  a draft the way the website does, via `notify_on_close: true` +
-  `view_closed`. Built and live-tested it — and Slack's `view_closed`
-  payload does **not** include `plain_text_input` values, only
-  structured fields (`static_select`, `datepicker`). Confirmed directly:
-  typed real text into a Goal field, closed the modal, and the
-  server-side payload only carried the untouched `status` dropdown —
-  every free-text field was silently absent. Since the whole point is
-  not losing what someone *wrote*, not a dropdown default, that
-  mechanism doesn't deliver the feature — so it's rolled back
-  (`notify_on_close`, the `view_closed` handler, and the field-merge
-  logic are all removed again).
-  What's kept, because it's real and uses an ordinary, well-worn Slack
-  Block Kit mechanism (`initial_value`/`initial_option`, same pattern
-  already used elsewhere in `lib/slack-views.js`): the 5 add-modals now
-  fetch the matching `form_drafts` row on open and prefill from it, so
-  a draft started on the website shows up already filled in when the
-  matching modal is opened in Slack. Submitting successfully in Slack
-  also clears that draft, same as the website does. Deployed via
-  `vercel --prod`. Not independently live-verified end-to-end (the
-  Slack test account here is linked as "manager" and the website
-  session as "employee" on the same pair, so I couldn't produce a
-  same-role draft to visually confirm the prefill renders) — flagging
-  this as **not run** rather than claiming it works; worth a real
-  spot-check next time you're in both at once. What *is* directly
-  confirmed live: Slack still saves/submits normally, and no regression
-  in existing Slack functionality from the rollback.
+- **2026-08-24: Day 3 of save/pause/go-back — Slack side, via an explicit
+  "Save draft" button.** First attempt (`notify_on_close` +
+  `view_closed`, saving automatically when the modal is closed) doesn't
+  work: confirmed live that Slack's `view_closed` payload drops every
+  `plain_text_input` value, keeping only structured fields
+  (`static_select`, `datepicker`) — so it silently couldn't save the
+  one thing that matters, what someone actually wrote. Rolled that back.
+  What ships instead: each of the 5 add-modals (topic, goal, dev plan,
+  achievement, feedback) now has its own **"Save draft"** button at the
+  top. Clicking it — unlike closing the modal — sends Slack's full
+  current field state (this *does* include free text), which gets
+  merged into the same `form_drafts` row the website uses and shown
+  back with a "✅ Draft saved" confirmation right in the modal. Opening
+  that same "Add a goal" (etc.) form again later — from the Home tab,
+  no special navigation needed — comes back pre-filled, whether the
+  draft was saved from Slack or from the website. Submitting
+  successfully still clears it, same as before.
+  Deployed via `vercel --prod`. Live-verified end-to-end in Slack (not
+  just read from code): opened "Add a goal," typed a goal and a "why,"
+  clicked Save draft, saw the confirmation banner and the fields still
+  populated; confirmed the row in Supabase directly; closed the modal
+  entirely (X, back to Slack's Home tab); reopened "Add a goal" fresh —
+  both fields came back. Then cleared the test draft the same way
+  (typed empty, Save draft) so no leftover test data was left behind.
 
 Still open, in priority order:
 
-1. **Save / pause / go-back across forms — Day 1, 2, and 3 (partial)
-   done.** Only the check-in wizard has a real draft-save + resume +
+1. **Save / pause / go-back across forms — Day 1, 2, and 3 all done.**
+   Only the check-in wizard has a real draft-save + resume +
    back-navigation flow (plus a separate, simpler `review_drafts`
    table/pattern used by the review flow — `getReviewDraft`/
    `saveReviewDraft` in `lib/data.js`, one draft per pair+role, upserted)
@@ -155,21 +150,15 @@ Still open, in priority order:
    - **Day 2 (done, 2026-08-24):** rolled the same pattern to the other
      4 website forms (Goals, Development, Achievements, Feedback — give
      mode). See Done section above.
-   - **Day 3 (partial, 2026-08-24):** Slack side. Turns out Slack can't
-     do the "save whatever you just typed" half at all —
-     `view_closed` doesn't carry free-text field values, a platform
-     limit, not a bug (see Done section above for how this was
-     confirmed). What Slack *can* do, and now does: an add-modal opens
-     pre-filled from the matching website draft, and a successful Slack
-     submission clears it. If real save-as-you-type in Slack still
-     matters, the only path Slack's API offers is
-     `dispatch_action_config` with `on_enter_pressed` on the
-     single-line fields (topic/goal/dev/achievement each have exactly
-     one) — captures a field when Enter is pressed in it, before
-     Save. Not attempted yet: it changes what Enter does inside those
-     fields, and multiline fields (why/activity/impact/example) can't
-     use it at all, so it'd only ever cover part of each form. Worth a
-     conversation before building it.
+   - **Day 3 (done, 2026-08-24):** Slack side. Slack can't autosave on
+     Cancel/X — `view_closed` drops free-text field values, a platform
+     limit, not a bug (see Done section above). Shipped an explicit
+     "Save draft" button in each of the 5 add-modals instead: click it
+     anytime while filling the form (including the paragraph fields),
+     it saves to the same `form_drafts` row the website uses, and shows
+     a "Draft saved" confirmation. Reopening that form later — in
+     Slack or on the website — comes back pre-filled. Live-verified
+     end-to-end, see Done section above.
 2. **Modal submissions in Slack can hit Slack's 3-second response
    window.** `view_submission` handling awaits a full 7-query home-data
    reload + a `views.publish` call before responding — on a cold

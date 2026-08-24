@@ -97,6 +97,22 @@ const OPENERS = {
   open_last_meeting: async (admin, ctx) => lastMeetingModal(await listMeetings(admin, ctx.pairId)),
 };
 
+// --------------------------------------------- save a draft mid-modal ------
+
+// Slack's view_closed event drops plain_text_input values (confirmed live —
+// a real platform limit, not something fixable here), so a modal can't
+// autosave on Cancel/X. A button click doesn't have that limit — it carries
+// the full current field state — so each add-modal gets an explicit "Save
+// draft" button instead. draftFor() above (used when the modal is opened)
+// is what shows the saved draft again later.
+const SAVE_DRAFT = {
+  save_draft_topic: { kind: "topic", fields: ["text", "why", "category"], build: (ctx, draft) => addTopicModal(ctx, draft, true) },
+  save_draft_goal: { kind: "goal", fields: ["text", "why", "measure", "target", "status"], build: (ctx, draft) => addGoalModal(draft, true) },
+  save_draft_devplan: { kind: "dev", fields: ["area", "type", "activity", "target"], build: (ctx, draft) => addDevPlanModal(draft, true) },
+  save_draft_achievement: { kind: "achievement", fields: ["title", "category", "impact", "date"], build: (ctx, draft) => addAchievementModal(draft, true) },
+  save_draft_feedback: { kind: "feedback", fields: ["type", "text", "example"], build: (ctx, draft) => addFeedbackModal(ctx, draft, true) },
+};
+
 // ----------------------------------------------------- direct mutations ----
 
 const QUICK_ACTIONS = {
@@ -239,6 +255,20 @@ async function handleInteraction(admin, slackUserId, payload) {
     if (OPENERS[action.action_id]) {
       const view = await OPENERS[action.action_id](admin, ctx, action.value);
       await slackApi("views.open", { trigger_id: payload.trigger_id, view });
+    } else if (SAVE_DRAFT[action.action_id]) {
+      const spec = SAVE_DRAFT[action.action_id];
+      const values = payload.view?.state?.values;
+      const partial = {};
+      for (const f of spec.fields) {
+        const val = fieldVal(values, f);
+        if (val !== undefined) partial[f] = val;
+      }
+      const existing = await getFormDraft(admin, ctx.pairId, ctx.role, spec.kind).catch(() => null);
+      const merged = { ...existing?.draft, ...partial };
+      await saveFormDraft(admin, ctx.pairId, ctx.role, spec.kind, merged).catch(() => {});
+      if (payload.view?.id) {
+        await slackApi("views.update", { view_id: payload.view.id, view: spec.build(ctx, merged) }).catch((e) => console.error("save draft view update:", e));
+      }
     } else if (QUICK_ACTIONS[action.action_id]) {
       await QUICK_ACTIONS[action.action_id](admin, ctx, action.value);
       await refreshHome(admin, ctx);

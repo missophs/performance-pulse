@@ -127,6 +127,16 @@ export function notLinkedHomeView() {
 // need a second lookup: "<category>::<suggestion text>". Combined length
 // tops out around 113 chars across the whole fixed library, well inside
 // Slack's 150-char option-value cap.
+// Slack strips plain_text_input values from the view_closed event, so a
+// modal can't autosave on Cancel/X the way the website does — confirmed
+// live, not fixable here. Instead each add-modal gets an explicit "Save
+// draft" button; button clicks (unlike view_closed) carry the full current
+// field state, so that works. Draft prefill on open (see draftFor() in
+// app/api/slack/interactivity/route.js) is what shows it again later.
+function draftControls(actionId, saved) {
+  return [...(saved ? [context("✅ *Draft saved* — safe to close, it'll be here when you reopen this.")] : []), actions([button("Save draft", actionId)])];
+}
+
 function suggestionOptionGroups(role) {
   const roleSuggestions = SUGGESTIONS[role] || {};
   return Object.entries(roleSuggestions).map(([cat, texts]) => ({
@@ -135,12 +145,13 @@ function suggestionOptionGroups(role) {
   }));
 }
 
-export function addTopicModal(ctx, draft) {
+export function addTopicModal(ctx, draft, saved = false) {
   const groups = suggestionOptionGroups(ctx.role);
   return modal(
     "add_topic",
     "Add a topic",
     [
+      ...draftControls("save_draft_topic", saved),
       inputBlock(
         "suggested",
         "Pick a suggestion (optional)",
@@ -189,11 +200,12 @@ export function listActionsModal(list) {
 
 // ---------------------------------------------------------------- goals ----
 
-export function addGoalModal(draft) {
+export function addGoalModal(draft, saved = false) {
   return modal(
     "add_goal",
     "Add a goal",
     [
+      ...draftControls("save_draft_goal", saved),
       inputBlock("text", "Goal", plainInput("val", { initial: draft?.text })),
       inputBlock("why", "Why it matters", plainInput("val", { multiline: true, initial: draft?.why }), true),
       inputBlock("measure", "How you'll know it's met", plainInput("val", { initial: draft?.measure }), true),
@@ -219,11 +231,12 @@ export function listGoalsModal(goals) {
 
 // --------------------------------------------------------- development -----
 
-export function addDevPlanModal(draft) {
+export function addDevPlanModal(draft, saved = false) {
   return modal(
     "add_devplan",
     "Add a development plan",
     [
+      ...draftControls("save_draft_devplan", saved),
       inputBlock("area", "Area", plainInput("val", { placeholder: "e.g. Executive presentation skills", initial: draft?.area })),
       inputBlock("type", "Type", staticSelect("val", DEV_TYPES, draft?.type || DEV_TYPES[0])),
       inputBlock("activity", "Activity", plainInput("val", { multiline: true, initial: draft?.activity }), true),
@@ -248,11 +261,12 @@ export function listDevPlansModal(plans) {
 
 // ---------------------------------------------------------- achievements ---
 
-export function addAchievementModal(draft) {
+export function addAchievementModal(draft, saved = false) {
   return modal(
     "add_achievement",
     "Log an achievement",
     [
+      ...draftControls("save_draft_achievement", saved),
       inputBlock("title", "What happened", plainInput("val", { initial: draft?.title })),
       inputBlock("category", "Category", staticSelect("val", ACH_CATS, draft?.category || ACH_CATS[0])),
       inputBlock("impact", "Impact", plainInput("val", { multiline: true, initial: draft?.impact }), true),
@@ -277,12 +291,13 @@ export function listAchievementsModal(list) {
 
 // ------------------------------------------------------------- feedback ----
 
-export function addFeedbackModal(ctx, draft) {
+export function addFeedbackModal(ctx, draft, saved = false) {
   const types = ctx.isMgr ? MGR_FB_TYPES : EMP_FB_TYPES;
   return modal(
     "add_feedback",
     `Feedback for ${ctx.partnerName}`,
     [
+      ...draftControls("save_draft_feedback", saved),
       inputBlock("type", "Type", staticSelect("val", types, draft?.type || types[0])),
       inputBlock("text", "Feedback", plainInput("val", { multiline: true, initial: draft?.text })),
       inputBlock("example", "A specific example", plainInput("val", { multiline: true, initial: draft?.example }), true),
