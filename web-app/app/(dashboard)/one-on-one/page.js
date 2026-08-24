@@ -18,6 +18,9 @@ import {
   getCheckinDraft,
   saveCheckinDraftProgress,
   completeCheckinDraft,
+  getFormDraft,
+  saveFormDraft,
+  clearFormDraft,
   saveWrapUp,
   listActions,
   saveAction,
@@ -83,13 +86,18 @@ export default function OneOnOnePage() {
   async function loadAll() {
     setLoading(true);
     const userId = (await supabase.auth.getUser()).data.user.id;
-    const [p, t, oc, cs, ac, draft] = await Promise.all([
+    const [p, t, oc, cs, ac, draft, topicDraft] = await Promise.all([
       getMyPair(supabase, userId),
       listTopics(supabase, pairId),
       getOpenCheckin(supabase, pairId, role),
       listCustomSuggestions(supabase, pairId),
       listActions(supabase, pairId),
       getCheckinDraft(supabase, pairId, role),
+      // Soft-fails: form_drafts is applied by hand via the Supabase SQL
+      // Editor (see supabase/migrations/0003_form_drafts.sql), separately
+      // from code deploys, so this can 404 for a while after a deploy.
+      // That shouldn't take down the whole Prepare tab.
+      getFormDraft(supabase, pairId, role, "topic").catch(() => null),
     ]);
     setPair(p);
     setTopics(t);
@@ -100,6 +108,11 @@ export default function OneOnOnePage() {
       const state = draft.draft_state || { queue: [], step: 0, asked: [] };
       setCheckinDraft({ id: draft.id, queue: state.queue, step: state.step, asked: state.asked });
       setResumeAnswer(state.pendingAnswer || "");
+    }
+    if (topicDraft?.draft) {
+      setTopicText(topicDraft.draft.text || "");
+      setTopicCat(topicDraft.draft.category || TOPIC_CATEGORIES[0]);
+      setTopicWhy(topicDraft.draft.why || "");
     }
     setLoading(false);
   }
@@ -122,6 +135,23 @@ export default function OneOnOnePage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Autosave the topic-add form as a draft so it survives a closed tab or a
+  // switch away from Prepare. Skipped while the initial load is still
+  // populating these fields from a previously-saved draft.
+  useEffect(() => {
+    if (loading) return;
+    const hasContent = topicText.trim() || topicWhy.trim() || topicCat !== TOPIC_CATEGORIES[0];
+    const timer = setTimeout(() => {
+      if (hasContent) {
+        saveFormDraft(supabase, pairId, role, "topic", { text: topicText, category: topicCat, why: topicWhy }).catch(() => {});
+      } else {
+        clearFormDraft(supabase, pairId, role, "topic").catch(() => {});
+      }
+    }, 800);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topicText, topicCat, topicWhy, loading]);
 
   if (loading) {
     return (
@@ -175,7 +205,16 @@ export default function OneOnOnePage() {
     if (!text) return;
     await addTopicRow(text, topicWhy.trim(), topicCat);
     setTopicText("");
+    setTopicCat(TOPIC_CATEGORIES[0]);
     setTopicWhy("");
+    await clearFormDraft(supabase, pairId, role, "topic").catch(() => {});
+  }
+
+  async function discardTopicDraft() {
+    setTopicText("");
+    setTopicCat(TOPIC_CATEGORIES[0]);
+    setTopicWhy("");
+    await clearFormDraft(supabase, pairId, role, "topic").catch(() => {});
   }
 
   async function addFromSuggestion(text, category) {
@@ -439,9 +478,16 @@ export default function OneOnOnePage() {
               </label>
               <textarea id="topicWhy" value={topicWhy} onChange={(e) => setTopicWhy(e.target.value)} placeholder="A sentence of context so the conversation starts warm." />
             </div>
-            <button className="btn" onClick={submitTopicForm}>
-              Add topic
-            </button>
+            <div className="row" style={{ gap: 8 }}>
+              <button className="btn" onClick={submitTopicForm}>
+                Add topic
+              </button>
+              {(topicText.trim() || topicWhy.trim() || topicCat !== TOPIC_CATEGORIES[0]) && (
+                <button className="btn ghost" onClick={discardTopicDraft}>
+                  Discard
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

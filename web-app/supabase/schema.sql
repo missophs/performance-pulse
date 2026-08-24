@@ -225,6 +225,19 @@ create table review_drafts (
   primary key (pair_id, role)
 );
 
+-- Generalizes review_drafts to cover multiple in-progress forms at once
+-- (topics, goals, development, achievements, feedback) — one row per
+-- pair+role+kind, so e.g. a manager's in-progress topic draft and an
+-- employee's in-progress feedback draft don't collide.
+create table form_drafts (
+  pair_id uuid not null references pairs (id) on delete cascade,
+  role text not null,
+  kind text not null,
+  draft jsonb not null default '{}',
+  updated_at timestamptz not null default now(),
+  primary key (pair_id, role, kind)
+);
+
 create table custom_suggestions (
   id uuid primary key default gen_random_uuid(),
   pair_id uuid not null references pairs (id) on delete cascade,
@@ -276,6 +289,7 @@ alter table concerns enable row level security;
 alter table actions enable row level security;
 alter table notifications enable row level security;
 alter table review_drafts enable row level security;
+alter table form_drafts enable row level security;
 alter table custom_suggestions enable row level security;
 alter table documents enable row level security;
 alter table handbook_links enable row level security;
@@ -395,7 +409,7 @@ declare
   pair_scoped_tables text[] := array[
     'topics', 'checkins', 'meetings', 'achievements', 'feedback_entries',
     'feedback_requests', 'goals', 'development_plans', 'career_answers',
-    'concerns', 'actions', 'notifications', 'review_drafts',
+    'concerns', 'actions', 'notifications', 'review_drafts', 'form_drafts',
     'custom_suggestions', 'documents', 'handbook_links', 'messages'
   ];
 begin

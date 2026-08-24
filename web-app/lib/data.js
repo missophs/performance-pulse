@@ -370,6 +370,37 @@ export async function saveReviewDraft(supabase, pairId, role, draft) {
   if (error) throw error;
 }
 
+// ------------------------------------------------------------ form drafts --
+
+export async function getFormDraft(supabase, pairId, role, kind) {
+  const { data, error } = await supabase
+    .from("form_drafts")
+    .select("*")
+    .eq("pair_id", pairId)
+    .eq("role", role)
+    .eq("kind", kind)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+export async function saveFormDraft(supabase, pairId, role, kind, draft) {
+  const { error } = await supabase
+    .from("form_drafts")
+    .upsert({ pair_id: pairId, role, kind, draft, updated_at: new Date().toISOString() });
+  if (error) throw error;
+}
+
+export async function clearFormDraft(supabase, pairId, role, kind) {
+  const { error } = await supabase
+    .from("form_drafts")
+    .delete()
+    .eq("pair_id", pairId)
+    .eq("role", role)
+    .eq("kind", kind);
+  if (error) throw error;
+}
+
 // ----------------------------------------------------------------- goals ---
 
 export async function listGoals(supabase, pairId) {
