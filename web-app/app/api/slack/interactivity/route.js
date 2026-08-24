@@ -163,7 +163,7 @@ const SUBMISSIONS = {
     }
     await addTopic(admin, ctx.pairId, { text, why: fieldVal(v, "why"), category, role: ctx.role, name: ctx.myName });
     await clearFormDraft(admin, ctx.pairId, ctx.role, "topic").catch(() => {});
-    await notify(admin, ctx.pairId, `${ctx.myName} added a topic: ${text}`, ctx.role, ctx.otherRole, "oneOnOne", "topic");
+    delayedNotify(admin, ctx.pairId, `${ctx.myName} added a topic: ${text}`, ctx.role, ctx.otherRole, "oneOnOne", "topic");
   },
   add_action: async (admin, ctx, v) => {
     const text = fieldVal(v, "text");

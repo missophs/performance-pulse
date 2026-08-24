@@ -127,6 +127,21 @@ Done:
   entirely (X, back to Slack's Home tab); reopened "Add a goal" fresh —
   both fields came back. Then cleared the test draft the same way
   (typed empty, Save draft) so no leftover test data was left behind.
+- **2026-08-24: Slack-side topic-add no longer pings instantly.**
+  `SUBMISSIONS.add_topic` (`app/api/slack/interactivity/route.js`) now uses
+  `delayedNotify()` — the same 4s-after-response delay already used by
+  add_goal/add_devplan/add_achievement/add_feedback — instead of calling
+  `notify()` synchronously. Also confirmed (by reading the code, all five
+  `SAVE_DRAFT` handlers and all five `SUBMISSIONS` handlers): the "Save
+  draft" button never calls `notify`/`delayedNotify` anywhere — a ping only
+  ever fires from an actual Submit, never from Save draft. That was already
+  true before today; this change only fixes the topic-add timing.
+  Deployed via `vercel --prod`. Live-verified: submitted a real topic in
+  Slack, then compared `topics.created_at` to the matching
+  `notifications.created_at` directly in Supabase — 5.0s apart, versus
+  0.35s apart for a topic added before this fix (old instant-ping
+  behavior, kept for comparison). Test topic marked Discussed afterward
+  to clean up.
 
 Still open, in priority order:
 
@@ -166,35 +181,28 @@ Still open, in priority order:
    Worth moving the refresh after the response, or dropping it from the
    critical path. (`resolveSlackUser` itself was cut from 2 Supabase
    queries to 1 on 2026-08-24, which helps but doesn't fully resolve this.)
-3. **Slack-side topic-add still pings instantly.** The batching in
-   `app/(dashboard)/one-on-one/page.js` only covers the website (rapid
-   adds before leaving the Prepare tab). Adding a topic through Slack's
-   own "Add a topic" modal (`SUBMISSIONS.add_topic`) still notifies right
-   away. Not part of the 2026-08-24 batching request (that covered goal/
-   dev/achievement/feedback only — see Done section above) — could get
-   the same `delayedNotify()` treatment if wanted.
-4. **Two hand-synced action tables in `interactivity/route.js`.**
+3. **Two hand-synced action tables in `interactivity/route.js`.**
    `QUICK_ACTIONS` and the inline `listAgain` object duplicate the same
    three action ids; adding a new quick action to one and forgetting the
    other means a list modal quietly shows stale data with no error.
-5. **Rare crash:** `resolveSlackUser` (`lib/slack-user.js`) throws if a
+4. **Rare crash:** `resolveSlackUser` (`lib/slack-user.js`) throws if a
    Slack account's email matches an `employee_email` on one pair and a
    `manager_email` on a different pair (a middle-manager org shape) —
    inherited from the same pattern in `getMyPair` (`lib/data.js`), not
    new here, but unguarded in the Slack route. Low priority, real edge
    case.
-6. **Migration file gap:** the `pg_net`-based Slack-ping trigger
+5. **Migration file gap:** the `pg_net`-based Slack-ping trigger
    (`notify_slack_on_notification()` + the `notifications_slack_notify`
    trigger) exists only as a live object in the Supabase database, not
    in `supabase/migrations/` — would need to be reconstructed by hand if
    the database were ever reset or a new environment stood up.
-7. **Suggested-content pickers elsewhere.** Topics now has one (see Done,
+6. **Suggested-content pickers elsewhere.** Topics now has one (see Done,
    2026-08-24). Goals/Achievements/Feedback have no suggestion mechanism
    on the website to mirror. Development does, but it's a different,
    keyword-matched "propose activities" flow (button-triggered, not a
    fixed per-category list) — would need its own design for Slack, not a
    copy of the topic pattern.
-8. **Goal/achievement adds never send a real Slack DM, on Slack or the
+7. **Goal/achievement adds never send a real Slack DM, on Slack or the
    website** (side discovery, 2026-08-24, while testing the delayed-ping
    work above): `SUBMISSIONS.add_goal`/`add_achievement`
    (`app/api/slack/interactivity/route.js`) and their website equivalents
