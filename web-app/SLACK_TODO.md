@@ -57,33 +57,44 @@ Done:
   remain for a custom topic. Server-side validation (`response_action:
   "errors"`) requires one or the other. Live-verified: picking a suggestion
   saves with the suggestion's own category, matching website behavior.
+- **2026-08-24: Day 1 of save/pause/go-back — `form_drafts` table + topic
+  form wired up.** New `form_drafts` table (pair_id, role, kind, draft
+  jsonb, updated_at; PK on all three) generalizes `review_drafts` with a
+  `kind` column. Added `getFormDraft`/`saveFormDraft`/`clearFormDraft` to
+  `lib/data.js` (`supabase/migrations/0003_form_drafts.sql`, applied by
+  hand in the SQL Editor — this project has no automated migrations).
+  Wired into the topic-add form only (`one-on-one/page.js`, Prepare tab):
+  800ms-debounced autosave while typing, restore on page load, clear on
+  submit, new "Discard" button to clear without submitting. All calls
+  fail soft (`.catch(() => {})`/`.catch(() => null)`) so a deploy that
+  lands before the migration runs doesn't break the Prepare tab. Deployed
+  via `vercel --prod` (git push to `performance-pulse` remote does **not**
+  auto-deploy this project — no Git integration wired up, deploys are
+  CLI-triggered). Live-verified end-to-end on
+  `performance-pulse-lyart.vercel.app`: typed a topic, reloaded without
+  submitting, text came back; clicked Discard, reloaded again, stayed
+  cleared.
 
 Still open, in priority order:
 
-1. **Save / pause / go-back across forms — IN PROGRESS, not started yet.**
+1. **Save / pause / go-back across forms — Day 1 done, Day 2 next.**
    Only the check-in wizard has a real draft-save + resume + back-
    navigation flow (plus a separate, simpler `review_drafts` table/pattern
    used by the review flow — `getReviewDraft`/`saveReviewDraft` in
-   `lib/data.js`, one draft per pair+role, upserted). Topics, Goals,
-   Development, Achievements, Feedback all submit immediately with no
-   draft state, and closing a modal without saving silently discards what
-   was typed. Melissa asked for this explicitly on 2026-08-24 ("a way to
-   go back... if someone wants to change something before they submit") —
-   this is the third and last item from that request; the other two
-   (suggested topics, delayed Slack pings) are done, see Done section
-   above.
+   `lib/data.js`, one draft per pair+role, upserted) and now the topic-add
+   form (see Done, 2026-08-24). Goals, Development, Achievements, Feedback
+   still submit immediately with no draft state, and closing a modal
+   without saving silently discards what was typed. Melissa asked for
+   this explicitly on 2026-08-24 ("a way to go back... if someone wants to
+   change something before they submit") — this is the third and last
+   item from that request; the other two (suggested topics, delayed Slack
+   pings) are done, see Done section above.
 
    Agreed plan (2026-08-24), broken over a few days at Melissa's request:
-   - **Day 1 (not started):** new `form_drafts` table (pair_id, role,
-     kind, draft jsonb, updated_at) — generalizes the existing
-     `review_drafts` pattern with a `kind` column so multiple form types
-     can each hold their own draft at once. Add
-     `getFormDraft`/`saveFormDraft`/`clearFormDraft` to `lib/data.js`.
-     Wire into **one** form only, as proof of concept: the topic-add
-     modal in `one-on-one/page.js` — autosave while typing, restore the
-     draft on return, clear on submit, "Discard" button to clear without
-     submitting.
-   - **Day 2 (not started):** roll the same pattern to the other 4
+   - **Day 1 (done, 2026-08-24):** `form_drafts` table +
+     `getFormDraft`/`saveFormDraft`/`clearFormDraft`, wired into the
+     topic-add form as proof of concept. See Done section above.
+   - **Day 2 (in progress):** roll the same pattern to the other 4
      website forms (Goals, Development, Achievements, Feedback).
    - **Day 3 (not started):** Slack side. Different problem — a Slack
      modal has no multi-step "back," so "don't lose my work" there likely
