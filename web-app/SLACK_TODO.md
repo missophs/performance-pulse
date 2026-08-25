@@ -223,6 +223,37 @@ Done:
   briefly sees "Loading…" where content used to appear at once. If boot alone
   ever exceeds 3s, no code change helps — that would need a warm-up ping.
 
+- **2026-08-25: Goals and achievements now send a real Slack DM on submit**
+  (was open item 5). Root cause was one thing, not four: `sendSlackPing`
+  (`lib/slack-send.js`) skips any notification whose `kind` isn't in
+  `BK_KINDS`, and the goal/achievement adds never passed one — so they
+  reached the in-app bell and stopped. Added both ids to `BK_KINDS` **and**
+  a branch each in `buildBlockKit`; both halves are required, because the
+  builder ends in a catch-all `else`, so a registered kind with no branch
+  would have sent people a "1:1 wrapped up" DM. The four add call sites
+  (`SUBMISSIONS.add_goal`/`add_achievement`, `goals/page.js`,
+  `performance/page.js`) now pass the kind; `safeNotify` in `goals/page.js`
+  gained a `kind` parameter.
+
+  **Scoped to adds, on submit, at Melissa's explicit instruction** ("i only
+  want a ping after the person hits submit"). Editing a goal, deleting one,
+  and adding a check-in pass no kind and are provably skipped — verified by
+  calling `sendSlackPing` directly on those three shapes, each returning
+  `{skipped}`. Draft-saves never notified and still don't.
+  Privacy holds: the DM is built from kind + partner name + counts and
+  never reads `notification.text`, so the goal/achievement wording stays
+  out of Slack. Verified by planting realistic private wording in a test
+  and confirming none of it appears anywhere in the payload.
+
+  Committed as `b9f8dfe`, deployed via `vercel --prod` (`fxtm4kl3f`).
+  Both new payloads pass `blocks.validate`; both route to their own branch
+  rather than the wrap catch-all; buttons resolve to real `OPENERS` ids.
+  Build clean (lint shows 16 errors, all pre-existing in untouched code —
+  confirmed identical count before and after). **Live-verified end to end:**
+  submitted a real signed `add_goal` to production, which wrote a
+  `notifications` row with `kind:"goal"` and delivered an actual Slack DM
+  that Melissa confirmed receiving. Both test goals deleted afterward.
+
 Still open, in priority order:
 
 1. **Save / pause / go-back across forms — Day 1, 2, and 3 all done.**
@@ -271,17 +302,33 @@ Still open, in priority order:
    keyword-matched "propose activities" flow (button-triggered, not a
    fixed per-category list) — would need its own design for Slack, not a
    copy of the topic pattern.
-5. **Goal/achievement adds never send a real Slack DM, on Slack or the
-   website** (side discovery, 2026-08-24, while testing the delayed-ping
-   work above): `SUBMISSIONS.add_goal`/`add_achievement`
-   (`app/api/slack/interactivity/route.js`) and their website equivalents
-   (`goals/page.js`, `performance/page.js`) never pass a `kind` to
-   `notify()`, and `BK_KINDS` (`lib/block-kit.js`) has no `goal`/
-   `achievement` id — only an in-app notification ever fires, never a DM.
-   `development` plans are inconsistent: the website's `add_devplan` can
-   pass the `"dev"` kind conditionally, but Slack's `add_devplan` never
-   did. Predates 2026-08-24, not a regression from it. Not fixed —
-   flagging in case Melissa wants goals/achievements to actually ping.
+5. **Slack's `add_devplan` still sends no DM, while the website's does.**
+   Left over from the goal/achievement fix (see Done, 2026-08-25), which
+   deliberately scoped to goals and achievements only. The website's
+   dev-plan add passes the `"dev"` kind conditionally; Slack's
+   `SUBMISSIONS.add_devplan` (`app/api/slack/interactivity/route.js`)
+   passes none, so adding a plan from Slack pings in-app but never DMs.
+   `"dev"` is already in `BK_KINDS` with its own `buildBlockKit` branch,
+   so this is a one-argument change — but check the website's condition
+   first and decide whether Slack should match it or always ping.
+
+6. **Submissions can still exceed Slack's 3s window on a cold start.**
+   Measured 2026-08-25 against production with a signed synthetic
+   `add_goal` submission: **5.2s cold, 1.76s warm** (both include the
+   round trip from a laptop, so the server-side figures are a little
+   lower). The 2026-08-25 fix moved the Home-tab republish off this path,
+   but `resolveSlackUser` + the save + `clearFormDraft` are all still
+   awaited before responding, because Slack needs the response to know
+   whether to close the modal or show field errors.
+   Lower severity than the opener case was: on a submission timeout the
+   row is still written and the ping still fires, so the person sees an
+   error over work that actually succeeded — annoying, not lossy.
+   The placeholder trick doesn't apply here (there's no view to update
+   yet). The real options are to keep the function warm, or to respond
+   immediately and move the save into `after()` — but that last one gives
+   up server-side validation, so it can only apply to submissions that
+   never return `response_action: "errors"` (`add_goal` doesn't;
+   `add_topic` does). Needs a decision before it's worth building.
 
 Not built, deliberately out of scope so far: the `"upcoming"` (1:1
 reminder) ping — nothing triggers it yet; it needs a scheduled job, not
