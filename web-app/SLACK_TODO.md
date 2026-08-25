@@ -182,7 +182,46 @@ Done:
   built before responding, and the `trigger_id` expires in ~3s. A cold
   click on "Topics" was observed timing out with "Operation timed out. Apps
   need to respond within 3 seconds" on 2026-08-25 (retry succeeded). That
-  one needs cold-start work, not `after()` — see open item 1 below.
+  one needed a different fix — see the next Done entry.
+
+- **2026-08-25: Modal openers now open instantly, then fill themselves in**
+  (was open item 2 — the cold-start opener timeout left over from the fix
+  above). Slack expires a `trigger_id` ~3s after the click, so `views.open`
+  can't be deferred with `after()` the way a submission can. But `views.update`
+  takes a `view_id`, not a `trigger_id`, and so has no deadline — confirmed
+  against Slack's own docs (`https://docs.slack.dev/surfaces/modals.md`).
+  Slack doesn't document the placeholder pattern as a named best practice;
+  it follows from that asymmetry.
+
+  So openers now do the slow half after the deadline instead of before it. A
+  new fast path in `POST` intercepts `block_actions` whose `action_id` is in
+  `OPENERS` **before** the Supabase client is created, opens a data-free
+  `loadingModal()`, and returns. Everything else — Supabase client,
+  `resolveSlackUser`, `loadHomeData`, building the real view — runs inside
+  `after()` and swaps in via `views.update`. Pre-deadline work is now just
+  signature verification plus one Slack call, which is the floor.
+
+  `OPENERS` entries changed shape from `action_id: async fn` to
+  `action_id: { title, build }`; the `title` lets the placeholder carry the
+  same header as the final view, so only the body swaps and there's no visible
+  title flicker. Every exit path replaces the placeholder with something —
+  unresolvable Slack user and any thrown error both swap in `noticeModal()` —
+  so a click can't strand someone on "Loading…". Both new views in
+  `lib/slack-views.js` are deliberately `submit`-less (a modal with no `input`
+  block must not declare `submit`).
+
+  Committed as `6bfbdc2`, deployed via `vercel --prod` (`2oc2xdoms`).
+  Verified: `blocks.validate` returns `ok:true` for both new views; lint and
+  build clean; all 16 `OPENERS` entries confirmed to carry both `title` and
+  `build`. Timed against the live endpoint with a signed synthetic
+  `block_actions` payload (real signature path, deliberately bogus
+  `trigger_id`): **937ms cold** on the first request after deploy, 348ms and
+  292ms warm — all comfortably inside the 3s window, versus the observed
+  timeout before. A forged signature still gets a 401.
+
+  **Caveat:** this removes the *timeout*, not the cold start. The user now
+  briefly sees "Loading…" where content used to appear at once. If boot alone
+  ever exceeds 3s, no code change helps — that would need a warm-up ping.
 
 Still open, in priority order:
 
@@ -215,33 +254,24 @@ Still open, in priority order:
      a "Draft saved" confirmation. Reopening that form later — in
      Slack or on the website — comes back pre-filled. Live-verified
      end-to-end, see Done section above.
-2. **Cold starts can still time out the modal-*opening* path.** Distinct
-   from the submission fix (see Done, 2026-08-25): `OPENERS` must build the
-   modal and call `views.open` within Slack's 3s window because
-   `trigger_id` expires, so the work can't move to `after()`. Observed live
-   2026-08-25 (first click on "Topics" failed, retry worked). Fixes would
-   target cold start / query count itself — e.g. trimming `loadHomeData` to
-   just the slice a given modal needs (each opener uses one field of the
-   7-query load), or keeping the function warm. Low user impact (retry
-   works), but it's the one remaining place a person sees a raw Slack error.
-3. **Rare crash:** `resolveSlackUser` (`lib/slack-user.js`) throws if a
+2. **Rare crash:** `resolveSlackUser` (`lib/slack-user.js`) throws if a
    Slack account's email matches an `employee_email` on one pair and a
    `manager_email` on a different pair (a middle-manager org shape) —
    inherited from the same pattern in `getMyPair` (`lib/data.js`), not
    new here, but unguarded in the Slack route. Low priority, real edge
    case.
-4. **Migration file gap:** the `pg_net`-based Slack-ping trigger
+3. **Migration file gap:** the `pg_net`-based Slack-ping trigger
    (`notify_slack_on_notification()` + the `notifications_slack_notify`
    trigger) exists only as a live object in the Supabase database, not
    in `supabase/migrations/` — would need to be reconstructed by hand if
    the database were ever reset or a new environment stood up.
-5. **Suggested-content pickers elsewhere.** Topics now has one (see Done,
+4. **Suggested-content pickers elsewhere.** Topics now has one (see Done,
    2026-08-24). Goals/Achievements/Feedback have no suggestion mechanism
    on the website to mirror. Development does, but it's a different,
    keyword-matched "propose activities" flow (button-triggered, not a
    fixed per-category list) — would need its own design for Slack, not a
    copy of the topic pattern.
-6. **Goal/achievement adds never send a real Slack DM, on Slack or the
+5. **Goal/achievement adds never send a real Slack DM, on Slack or the
    website** (side discovery, 2026-08-24, while testing the delayed-ping
    work above): `SUBMISSIONS.add_goal`/`add_achievement`
    (`app/api/slack/interactivity/route.js`) and their website equivalents
