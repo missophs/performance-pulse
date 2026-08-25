@@ -507,13 +507,30 @@ Still open, in priority order:
    account... a user who needs a second 1:1 relationship needs a second
    account for now."
 
-   **Reproducing the middle-manager case (for 2026-08-26).** Two test
-   accounts are enough, not three. Create pairing 1 with A as employee and
-   B as manager, then pairing 2 with B as employee and A as manager. Each
-   `employee_id` and each `manager_id` is then used exactly once, so both
-   indexes are satisfied, and *both* accounts become middle managers.
-   Signing in as either one exercises the bug on the website and the new
-   guard in Slack.
+   **Reproducing the middle-manager case (for 2026-08-26).** Two real
+   signups plus one email that never signs up:
+   1. Account **A** signs up, onboards as **employee**, partner email =
+      `boss@test.com` (never used again). Creates pairing 1 with
+      `manager_id` left null.
+   2. Account **C** signs up, onboards as **employee**, partner email =
+      **A's address**. `create_pair` finds A's profile and sets
+      `manager_id = A`, creating pairing 2.
+
+   A is now employee on pairing 1 and manager on pairing 2. Both indexes
+   hold (`employee_id`: A, C; `manager_id`: null, A — the partial indexes
+   skip nulls). Sign in as A to hit the website bug and the new Slack
+   guard.
+
+   Note what this shows: nobody creates this shape deliberately. A sets up
+   their own 1:1, their report separately names them as manager, and the
+   shape appears from two ordinary actions.
+
+   An earlier version of this recipe paired A and B both ways round. That
+   is valid in the database but **cannot be built through the UI**:
+   `app/onboarding/page.js:14` redirects to `/dashboard` the moment you
+   have a pairing, so B can never create the second one. Which is itself a
+   gap in the work list below — there is no "add another pairing" flow
+   anywhere in the app, only a first-run one.
 
    The Slack-side guard shipped 2026-08-25 (see Done) makes this fail
    politely instead of silently. It does not make it work.
@@ -567,8 +584,12 @@ Still open, in priority order:
      risks — this choice is the whole ballgame.
    - The switcher itself goes in `app/(dashboard)/layout.js` so it's on
      every page, showing the *other person's* name.
-   - Onboarding / "add a pairing" assumes you have zero or one. Needs to
-     handle "add another."
+   - **There is no "add another pairing" flow at all.** `app/onboarding`
+     is first-run only — it redirects to `/dashboard` as soon as you have
+     one pairing, and nothing else creates pairs. So multi-pair support
+     needs a way to *make* the second pairing, not just switch between
+     pairings that somehow already exist. Easy to miss when scoping this:
+     the switcher is the visible half, this is the other half.
 
    *Slack (after the website — the hard part is shared)*
    - `resolveSlackUser` returns all pairings; today's `{ ambiguous: true }`
