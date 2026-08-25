@@ -378,6 +378,24 @@ Still open, in priority order:
    never return `response_action: "errors"` (`add_goal` doesn't;
    `add_topic` does). Needs a decision before it's worth building.
 
+7. **You can't tell your own topics apart in Slack's list modals.**
+   Found by Melissa 2026-08-25: the "Open topics" modal showed two rows
+   both reading `Where things stand`, one "added yesterday" and one
+   "added just now", and she read it as a duplication bug. It isn't — the
+   redaction is working as designed (Slack is a wider trust boundary than
+   the app, so topic text never goes there, see the privacy entry in
+   Done). But category + relative date is thin: two topics filed under
+   the same category are separated only by when they were added, so
+   picking which one to "Mark discussed" is close to guesswork.
+   Affects every redacted list modal, not just topics.
+   No fix chosen yet, and it's a genuine tension rather than an
+   oversight: anything that makes the rows distinguishable leaks
+   something about the topic. Options worth weighing — an exact date
+   instead of "yesterday"; the author's name; a stable per-topic
+   reference the app also shows; or accepting the ambiguity and pushing
+   "Mark discussed" toward the app, where the text is visible anyway.
+   Do not "fix" this by putting topic text in the modal.
+
 Not built, deliberately out of scope so far: the `"upcoming"` (1:1
 reminder) ping — nothing triggers it yet; it needs a scheduled job, not
 just a `notify()` call site.
