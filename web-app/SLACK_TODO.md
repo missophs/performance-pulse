@@ -481,17 +481,39 @@ Still open, in priority order:
    now the biggest open item, and it is not the "rare edge case" the old
    item 2 called it.
 
-   **The finding (2026-08-25).** The database *forbids* what Melissa's org
-   actually looks like. `supabase/schema.sql` lines 40-41 create partial
-   unique indexes `pairs_employee_id_key` and `pairs_manager_id_key` — one
-   pairing per employee account, one per manager account. The comment at
-   line 20 says it outright: "v1 is one pair per account... a user who
-   needs a second 1:1 relationship needs a second account for now." So a
-   manager adding a second report doesn't hit a crash, they hit a unique
-   violation from `create_pair`. Melissa confirmed 2026-08-25 that she has
-   **both** unsupported shapes in real use: middle managers (employee on
+   **The finding (2026-08-25).** Melissa confirmed she has two org shapes
+   in real use that the app doesn't handle: middle managers (employee on
    one pairing, manager on another) and managers with more than one
-   report. The app cannot model her org today.
+   report. They fail in *different* ways, and the difference matters —
+   an earlier version of this note wrongly said the database blocks both.
+
+   `supabase/schema.sql` lines 40-41 are two separate partial unique
+   indexes: `pairs_employee_id_key` on `employee_id`, and
+   `pairs_manager_id_key` on `manager_id`. Read carefully, they allow one
+   pairing *per column*, not one pairing per person. So:
+   - **Middle manager — the database permits this.** One pairing uses
+     their `employee_id`, the other their `manager_id`; neither index is
+     violated. The rows exist happily. It's the *app* that breaks on them,
+     because `getMyPair` and `resolveSlackUser` both look up by email,
+     match both rows, and expect one. This is why the Slack crash was
+     reachable in production at all, and it means the case can be
+     reproduced today without touching the schema.
+   - **Manager with 2+ reports — the database blocks this.** The second
+     pairing reuses their `manager_id`, so `create_pair` fails with a
+     unique violation before any app code runs. Not reproducible until the
+     index is dropped.
+
+   The comment at line 20 states the intent: "v1 is one pair per
+   account... a user who needs a second 1:1 relationship needs a second
+   account for now."
+
+   **Reproducing the middle-manager case (for 2026-08-26).** Two test
+   accounts are enough, not three. Create pairing 1 with A as employee and
+   B as manager, then pairing 2 with B as employee and A as manager. Each
+   `employee_id` and each `manager_id` is then used exactly once, so both
+   indexes are satisfied, and *both* accounts become middle managers.
+   Signing in as either one exercises the bug on the website and the new
+   guard in Slack.
 
    The Slack-side guard shipped 2026-08-25 (see Done) makes this fail
    politely instead of silently. It does not make it work.
@@ -506,6 +528,17 @@ Still open, in priority order:
    switcher shows for a middle manager whose two pairings have different
    roles ("You & Dana" reads the same whether you're the manager or the
    employee in it).
+
+   **Pick up here (2026-08-26).** In order:
+   1. Melissa creates the two test accounts above and signs in as one.
+      Expect: the website errors (open item 2's root cause, `getMyPair`),
+      and the Slack Home tab shows the "more than one pairing" notice
+      rather than a blank screen — that second half is the only part of
+      the 2026-08-25 fix never verified against a real account.
+   2. Answer the landing-page question, then the role-labelling question.
+   3. Only then start the database step. Nothing above it is reversible
+      by itself: dropping `pairs_manager_id_key` is what makes broken
+      states creatable, so the app should be ready to handle them first.
 
    **The work, in order.**
 
