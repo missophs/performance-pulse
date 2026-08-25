@@ -143,6 +143,21 @@ Done:
   behavior, kept for comparison). Test topic marked Discussed afterward
   to clean up.
 
+- **2026-08-25: merged the two hand-synced quick-action tables** (was open
+  item 2). `QUICK_ACTIONS` and the inline `listAgain` object in
+  `app/api/slack/interactivity/route.js` duplicated the same three action
+  ids; each `QUICK_ACTIONS` entry now carries both its `run()` mutation and
+  its `refreshList()` modal redraw, so adding a quick action can't mean
+  updating one table and forgetting the other. Pure refactor — same action
+  ids, same behavior. Committed as `ba2ad38`, deployed via `vercel --prod`.
+  Live-verified in Slack (not just read from code): opened Topics from the
+  Home tab, clicked "Mark discussed" on a topic — the list modal redrew in
+  place from 2 topics to 1, and the Home tab count went from "2 open topics"
+  to "1 open topic," confirming `run()`, `refreshList()`, and `refreshHome()`
+  all still fire. Also reproduced open item 1 live while testing: the first
+  (cold) click returned Slack's "Operation timed out. Apps need to respond
+  within 3 seconds"; the retry succeeded.
+
 Still open, in priority order:
 
 1. **Save / pause / go-back across forms — Day 1, 2, and 3 all done.**
@@ -181,28 +196,24 @@ Still open, in priority order:
    Worth moving the refresh after the response, or dropping it from the
    critical path. (`resolveSlackUser` itself was cut from 2 Supabase
    queries to 1 on 2026-08-24, which helps but doesn't fully resolve this.)
-3. **Two hand-synced action tables in `interactivity/route.js`.**
-   `QUICK_ACTIONS` and the inline `listAgain` object duplicate the same
-   three action ids; adding a new quick action to one and forgetting the
-   other means a list modal quietly shows stale data with no error.
-4. **Rare crash:** `resolveSlackUser` (`lib/slack-user.js`) throws if a
+3. **Rare crash:** `resolveSlackUser` (`lib/slack-user.js`) throws if a
    Slack account's email matches an `employee_email` on one pair and a
    `manager_email` on a different pair (a middle-manager org shape) —
    inherited from the same pattern in `getMyPair` (`lib/data.js`), not
    new here, but unguarded in the Slack route. Low priority, real edge
    case.
-5. **Migration file gap:** the `pg_net`-based Slack-ping trigger
+4. **Migration file gap:** the `pg_net`-based Slack-ping trigger
    (`notify_slack_on_notification()` + the `notifications_slack_notify`
    trigger) exists only as a live object in the Supabase database, not
    in `supabase/migrations/` — would need to be reconstructed by hand if
    the database were ever reset or a new environment stood up.
-6. **Suggested-content pickers elsewhere.** Topics now has one (see Done,
+5. **Suggested-content pickers elsewhere.** Topics now has one (see Done,
    2026-08-24). Goals/Achievements/Feedback have no suggestion mechanism
    on the website to mirror. Development does, but it's a different,
    keyword-matched "propose activities" flow (button-triggered, not a
    fixed per-category list) — would need its own design for Slack, not a
    copy of the topic pattern.
-7. **Goal/achievement adds never send a real Slack DM, on Slack or the
+6. **Goal/achievement adds never send a real Slack DM, on Slack or the
    website** (side discovery, 2026-08-24, while testing the delayed-ping
    work above): `SUBMISSIONS.add_goal`/`add_achievement`
    (`app/api/slack/interactivity/route.js`) and their website equivalents
