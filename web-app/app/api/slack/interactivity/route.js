@@ -29,6 +29,8 @@ import {
   listFeedbackModal,
   wrapUpModal,
   lastMeetingModal,
+  loadingModal,
+  noticeModal,
 } from "@/lib/slack-views";
 import {
   setTopicStatus,
@@ -79,26 +81,31 @@ async function draftFor(admin, ctx, kind) {
   return row?.draft;
 }
 
+// `title` is shown in the placeholder modal that opens instantly, so it should
+// match the title `build` returns — only the body swaps when the data lands.
 const OPENERS = {
-  open_edit_name: async (admin, ctx) => editNameModal(ctx),
-  open_add_topic: async (admin, ctx) => addTopicModal(ctx, await draftFor(admin, ctx, "topic")),
-  open_add_action: async (admin, ctx) => addActionModal(ctx),
-  open_wrap_up: async (admin, ctx) => wrapUpModal((await loadHomeData(admin, ctx.pairId)).topics),
-  open_add_goal: async (admin, ctx) => addGoalModal(await draftFor(admin, ctx, "goal")),
-  open_add_devplan: async (admin, ctx) => addDevPlanModal(await draftFor(admin, ctx, "dev")),
-  open_add_achievement: async (admin, ctx) => addAchievementModal(await draftFor(admin, ctx, "achievement")),
-  open_add_feedback: async (admin, ctx) => addFeedbackModal(ctx, await draftFor(admin, ctx, "feedback")),
-  open_add_feedback_request: async () => addFeedbackRequestModal(),
-  open_list_topics: async (admin, ctx) => listTopicsModal((await loadHomeData(admin, ctx.pairId)).topics),
-  open_list_actions: async (admin, ctx) => listActionsModal((await loadHomeData(admin, ctx.pairId)).actions),
-  open_list_goals: async (admin, ctx) => listGoalsModal((await loadHomeData(admin, ctx.pairId)).goals),
-  open_list_devplans: async (admin, ctx) => listDevPlansModal((await loadHomeData(admin, ctx.pairId)).devPlans),
-  open_list_achievements: async (admin, ctx) => listAchievementsModal((await loadHomeData(admin, ctx.pairId)).achievements),
-  open_list_feedback: async (admin, ctx) => {
-    const d = await loadHomeData(admin, ctx.pairId);
-    return listFeedbackModal(d.feedback, d.feedbackRequests);
+  open_edit_name: { title: "Your name", build: async (admin, ctx) => editNameModal(ctx) },
+  open_add_topic: { title: "Add a topic", build: async (admin, ctx) => addTopicModal(ctx, await draftFor(admin, ctx, "topic")) },
+  open_add_action: { title: "Add an action", build: async (admin, ctx) => addActionModal(ctx) },
+  open_wrap_up: { title: "Wrap up", build: async (admin, ctx) => wrapUpModal((await loadHomeData(admin, ctx.pairId)).topics) },
+  open_add_goal: { title: "Add a goal", build: async (admin, ctx) => addGoalModal(await draftFor(admin, ctx, "goal")) },
+  open_add_devplan: { title: "Add a development plan", build: async (admin, ctx) => addDevPlanModal(await draftFor(admin, ctx, "dev")) },
+  open_add_achievement: { title: "Log an achievement", build: async (admin, ctx) => addAchievementModal(await draftFor(admin, ctx, "achievement")) },
+  open_add_feedback: { title: "Give feedback", build: async (admin, ctx) => addFeedbackModal(ctx, await draftFor(admin, ctx, "feedback")) },
+  open_add_feedback_request: { title: "Ask for feedback", build: async () => addFeedbackRequestModal() },
+  open_list_topics: { title: "Open topics", build: async (admin, ctx) => listTopicsModal((await loadHomeData(admin, ctx.pairId)).topics) },
+  open_list_actions: { title: "Open actions", build: async (admin, ctx) => listActionsModal((await loadHomeData(admin, ctx.pairId)).actions) },
+  open_list_goals: { title: "Goals", build: async (admin, ctx) => listGoalsModal((await loadHomeData(admin, ctx.pairId)).goals) },
+  open_list_devplans: { title: "Development plans", build: async (admin, ctx) => listDevPlansModal((await loadHomeData(admin, ctx.pairId)).devPlans) },
+  open_list_achievements: { title: "Achievements", build: async (admin, ctx) => listAchievementsModal((await loadHomeData(admin, ctx.pairId)).achievements) },
+  open_list_feedback: {
+    title: "Feedback",
+    build: async (admin, ctx) => {
+      const d = await loadHomeData(admin, ctx.pairId);
+      return listFeedbackModal(d.feedback, d.feedbackRequests);
+    },
   },
-  open_last_meeting: async (admin, ctx) => lastMeetingModal(await listMeetings(admin, ctx.pairId)),
+  open_last_meeting: { title: "Last 1:1", build: async (admin, ctx) => lastMeetingModal(await listMeetings(admin, ctx.pairId)) },
 };
 
 // --------------------------------------------- save a draft mid-modal ------
@@ -246,6 +253,13 @@ export async function POST(request) {
   const form = new URLSearchParams(rawBody);
   const payload = JSON.parse(form.get("payload") || "{}");
 
+  // Opening a modal is the one path with a hard deadline: Slack expires the
+  // trigger_id 3s after the click, and a cold start plus a Supabase round trip
+  // can miss it. So openers get a fast path that reaches views.open without
+  // touching the database at all — see openDeferred.
+  const opener = payload.type === "block_actions" ? OPENERS[payload.actions?.[0]?.action_id] : null;
+  if (opener) return await openDeferred(opener, payload);
+
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
   const slackUserId = payload.user?.id;
 
@@ -260,6 +274,40 @@ export async function POST(request) {
   }
 }
 
+// Publish a placeholder modal immediately, then fill it in once the data is
+// loaded. views.update takes a view_id rather than a trigger_id, so the slow
+// half has no deadline. Every exit path replaces the placeholder with
+// something, so a click can't leave "Loading…" on screen forever.
+async function openDeferred(opener, payload) {
+  const opened = await slackApi("views.open", {
+    trigger_id: payload.trigger_id,
+    view: loadingModal(opener.title),
+  }).catch((e) => {
+    console.error("loading modal open:", e);
+    return null;
+  });
+  if (!opened?.view?.id) return Response.json({ ok: true });
+
+  after(async () => {
+    const viewId = opened.view.id;
+    const swap = (view) => slackApi("views.update", { view_id: viewId, view }).catch((e) => console.error("opener view update:", e));
+    try {
+      const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+      const ctx = payload.user?.id ? await resolveSlackUser(admin, payload.user.id) : null;
+      if (!ctx) {
+        await swap(noticeModal(opener.title, "We couldn't match your Slack account to a Performance Pulse profile. Open the app once to link it, then try again."));
+        return;
+      }
+      await swap(await opener.build(admin, ctx, payload.actions?.[0]?.value));
+    } catch (err) {
+      console.error("opener build failed:", err);
+      await swap(noticeModal(opener.title, "Something went wrong loading this. Please close and try again."));
+    }
+  });
+
+  return Response.json({ ok: true });
+}
+
 async function handleInteraction(admin, slackUserId, payload) {
   const ctx = slackUserId ? await resolveSlackUser(admin, slackUserId) : null;
   if (!ctx) return Response.json({ ok: true }); // not linked — nothing we can do
@@ -268,10 +316,7 @@ async function handleInteraction(admin, slackUserId, payload) {
     const action = payload.actions?.[0];
     if (!action) return Response.json({ ok: true });
 
-    if (OPENERS[action.action_id]) {
-      const view = await OPENERS[action.action_id](admin, ctx, action.value);
-      await slackApi("views.open", { trigger_id: payload.trigger_id, view });
-    } else if (SAVE_DRAFT[action.action_id]) {
+    if (SAVE_DRAFT[action.action_id]) {
       const spec = SAVE_DRAFT[action.action_id];
       const values = payload.view?.state?.values;
       const partial = {};

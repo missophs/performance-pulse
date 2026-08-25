@@ -63,6 +63,36 @@ const modal = (callbackId, title, blocks, submit = "Save", privateMetadata) => (
   ...(privateMetadata ? { private_metadata: privateMetadata } : {}),
 });
 
+// ------------------------------------------------------------- loading -----
+
+// Slack expires a trigger_id 3 seconds after the click, and a cold start plus
+// a Supabase round trip can miss that — the person then sees a raw "operation
+// timed out" error. So openers publish this placeholder immediately (no data
+// needed to build it), then swap in the real view with views.update, which
+// takes a view_id instead of a trigger_id and so has no deadline.
+// No `submit` here: there's nothing to save until the real view lands.
+export function loadingModal(title) {
+  return {
+    type: "modal",
+    callback_id: "loading",
+    title: { type: "plain_text", text: title.slice(0, 24) },
+    close: { type: "plain_text", text: "Cancel" },
+    blocks: [section("_Loading…_")],
+  };
+}
+
+// Shown in place of the placeholder when the real view can't be built, so a
+// failure never leaves someone staring at "Loading…" forever.
+export function noticeModal(title, message) {
+  return {
+    type: "modal",
+    callback_id: "notice",
+    title: { type: "plain_text", text: title.slice(0, 24) },
+    close: { type: "plain_text", text: "Close" },
+    blocks: [section(message)],
+  };
+}
+
 // ---------------------------------------------------------------- home -----
 
 export function homeView(ctx, d) {
