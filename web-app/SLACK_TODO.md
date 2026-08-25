@@ -143,6 +143,19 @@ Done:
   behavior, kept for comparison). Test topic marked Discussed afterward
   to clean up.
 
+- **2026-08-25: the project has tests now — `npm test`.** There was no test
+  setup at all. Node's built-in runner, no new dependencies;
+  `test/resolve-alias.mjs` teaches it the `@/` mapping Next gets from
+  jsconfig, and `--experimental-test-module-mocks` covers stubbing
+  `slack-api`. Five tests pin `resolveSlackUser`'s pair-count branches
+  (none / one as employee / one as manager / two / no email). Confirmed
+  they actually catch a regression by deleting the two-pair guard and
+  watching the suite go red, then restoring it.
+  Started here on purpose: multi-pair support (open item 2) is next, and
+  its worst failure is showing the wrong pairing under a plausible name —
+  which nothing catches by eye. Run `npm test` before and after touching
+  pair lookup.
+
 - **2026-08-25: a Slack account on two pairs no longer crashes the Slack
   routes** (was open item 2). `resolveSlackUser` (`lib/slack-user.js`) used
   `.maybeSingle()`, which treats a second matching row as an error, so a
