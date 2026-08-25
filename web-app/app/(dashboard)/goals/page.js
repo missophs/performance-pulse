@@ -38,9 +38,12 @@ export default function GoalsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pairId]);
 
-  async function safeNotify(text, view) {
+  // `kind` is what turns a notification into a real Slack DM (see BK_KINDS in
+  // lib/block-kit.js) — only passed for a brand-new goal, so edits, removals,
+  // and check-ins stay in-app only.
+  async function safeNotify(text, view, kind) {
     try {
-      await notify(supabase, pairId, text, role, otherRole, view || null);
+      await notify(supabase, pairId, text, role, otherRole, view || null, kind || null);
     } catch {
       // best effort — a failed ping shouldn't block the save
     }
@@ -103,7 +106,7 @@ export default function GoalsPage() {
     if (editing) {
       await safeNotify(`${myName} updated the goal: ${text}`);
     } else {
-      await safeNotify(`${myName} added a goal: ${text}`, "goals");
+      await safeNotify(`${myName} added a goal: ${text}`, "goals", "goal");
     }
     loadAll();
   }

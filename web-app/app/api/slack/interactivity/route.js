@@ -202,7 +202,7 @@ const SUBMISSIONS = {
       ctx.myName
     );
     await clearFormDraft(admin, ctx.pairId, ctx.role, "goal").catch(() => {});
-    delayedNotify(admin, ctx.pairId, `${ctx.myName} added a goal: ${text}`, ctx.role, ctx.otherRole, "goals");
+    delayedNotify(admin, ctx.pairId, `${ctx.myName} added a goal: ${text}`, ctx.role, ctx.otherRole, "goals", "goal");
   },
   add_devplan: async (admin, ctx, v) => {
     const area = fieldVal(v, "area");
@@ -220,7 +220,7 @@ const SUBMISSIONS = {
     const title = fieldVal(v, "title");
     await addAchievement(admin, ctx.pairId, { title, category: fieldVal(v, "category"), impact: fieldVal(v, "impact"), date: fieldVal(v, "date"), role: ctx.role, name: ctx.myName });
     await clearFormDraft(admin, ctx.pairId, ctx.role, "achievement").catch(() => {});
-    delayedNotify(admin, ctx.pairId, `${ctx.myName} logged an achievement: ${title}`, ctx.role, ctx.otherRole, "performance");
+    delayedNotify(admin, ctx.pairId, `${ctx.myName} logged an achievement: ${title}`, ctx.role, ctx.otherRole, "performance", "achievement");
   },
   add_feedback: async (admin, ctx, v) => {
     await addFeedback(admin, ctx.pairId, { giverRole: ctx.role, fromName: ctx.myName, toName: ctx.partnerName, type: fieldVal(v, "type"), text: fieldVal(v, "text"), example: fieldVal(v, "example") });

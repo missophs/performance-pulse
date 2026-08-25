@@ -14,6 +14,8 @@ export const BK_KINDS = [
   { id: "feedback", label: "Feedback waiting" },
   { id: "request", label: "Feedback asked for" },
   { id: "dev", label: "Development plan" },
+  { id: "goal", label: "Goal added" },
+  { id: "achievement", label: "Achievement logged" },
   { id: "action", label: "Action due" },
   { id: "wrap", label: "1:1 wrapped up" },
 ];
@@ -98,6 +100,16 @@ export function buildBlockKit(kind, ctx) {
       )
     );
     b.push(bkOpenAction("Take a look", "open_list_devplans"));
+  } else if (kind === "goal") {
+    text = `${partnerName} added a goal`;
+    b.push(bkSection(`*${partnerName}* added a goal.`));
+    b.push(bkContext("Nothing to approve — it's there for your next 1:1."));
+    b.push(bkOpenAction("Take a look", "open_list_goals"));
+  } else if (kind === "achievement") {
+    text = `${partnerName} logged an achievement`;
+    b.push(bkSection(`*${partnerName}* logged an achievement.`));
+    b.push(bkContext("Worth reading now, so review time isn't a scramble to remember."));
+    b.push(bkOpenAction("See it", "open_list_achievements"));
   } else if (kind === "action") {
     text = `${mineActionsCount} action${mineActionsCount === 1 ? "" : "s"} assigned to you`;
     b.push(bkSection(`You have *${mineActionsCount} open action${mineActionsCount === 1 ? "" : "s"}* from your 1:1s.`));

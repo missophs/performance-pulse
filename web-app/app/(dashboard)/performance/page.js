@@ -151,7 +151,7 @@ export default function PerformancePage() {
     });
     setAchOpen(false);
     await clearFormDraft(supabase, pairId, role, "achievement").catch(() => {});
-    await notify(supabase, pairId, `${myName} logged an achievement: ${title}`, role, otherRole, "performance");
+    await notify(supabase, pairId, `${myName} logged an achievement: ${title}`, role, otherRole, "performance", "achievement");
     toast("Saved", "Added to your achievements.");
     loadAll();
   }
