@@ -115,17 +115,32 @@ const SAVE_DRAFT = {
 
 // ----------------------------------------------------- direct mutations ----
 
+// Each quick action pairs its mutation with how to redraw the list modal it
+// was clicked from (if any) — kept together so adding one can't mean
+// forgetting the other, which used to silently leave a stale list modal.
 const QUICK_ACTIONS = {
-  topic_mark_discussed: async (admin, ctx, id) => {
-    await setTopicStatus(admin, id, "Discussed");
-    await notify(admin, ctx.pairId, `Topic marked Discussed by ${ctx.myName}`, ctx.role, ctx.otherRole, "oneOnOne");
+  topic_mark_discussed: {
+    run: async (admin, ctx, id) => {
+      await setTopicStatus(admin, id, "Discussed");
+      await notify(admin, ctx.pairId, `Topic marked Discussed by ${ctx.myName}`, ctx.role, ctx.otherRole, "oneOnOne");
+    },
+    refreshList: async (admin, ctx) => listTopicsModal((await loadHomeData(admin, ctx.pairId)).topics),
   },
-  action_mark_done: async (admin, ctx, id) => {
-    await toggleActionDone(admin, id, true);
-    await notify(admin, ctx.pairId, `${ctx.myName} marked an action done`, ctx.role, ctx.otherRole, "actions");
+  action_mark_done: {
+    run: async (admin, ctx, id) => {
+      await toggleActionDone(admin, id, true);
+      await notify(admin, ctx.pairId, `${ctx.myName} marked an action done`, ctx.role, ctx.otherRole, "actions");
+    },
+    refreshList: async (admin, ctx) => listActionsModal((await loadHomeData(admin, ctx.pairId)).actions),
   },
-  feedback_request_answered: async (admin, ctx, id) => {
-    await setFeedbackRequestStatus(admin, id, "closed");
+  feedback_request_answered: {
+    run: async (admin, ctx, id) => {
+      await setFeedbackRequestStatus(admin, id, "closed");
+    },
+    refreshList: async (admin, ctx) => {
+      const d = await loadHomeData(admin, ctx.pairId);
+      return listFeedbackModal(d.feedback, d.feedbackRequests);
+    },
   },
 };
 
@@ -270,21 +285,12 @@ async function handleInteraction(admin, slackUserId, payload) {
         await slackApi("views.update", { view_id: payload.view.id, view: spec.build(ctx, merged) }).catch((e) => console.error("save draft view update:", e));
       }
     } else if (QUICK_ACTIONS[action.action_id]) {
-      await QUICK_ACTIONS[action.action_id](admin, ctx, action.value);
+      const spec = QUICK_ACTIONS[action.action_id];
+      await spec.run(admin, ctx, action.value);
       await refreshHome(admin, ctx);
       // Also refresh the list modal in place, if this click came from one.
       if (payload.view?.id) {
-        const listAgain = {
-          topic_mark_discussed: async () => listTopicsModal((await loadHomeData(admin, ctx.pairId)).topics),
-          action_mark_done: async () => listActionsModal((await loadHomeData(admin, ctx.pairId)).actions),
-          feedback_request_answered: async () => {
-            const d = await loadHomeData(admin, ctx.pairId);
-            return listFeedbackModal(d.feedback, d.feedbackRequests);
-          },
-        }[action.action_id];
-        if (listAgain) {
-          await slackApi("views.update", { view_id: payload.view.id, view: await listAgain() }).catch((e) => console.error("view update:", e));
-        }
+        await slackApi("views.update", { view_id: payload.view.id, view: await spec.refreshList(admin, ctx) }).catch((e) => console.error("view update:", e));
       }
     }
     return Response.json({ ok: true });
