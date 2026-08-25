@@ -218,7 +218,7 @@ const SUBMISSIONS = {
       ctx.myName
     );
     await clearFormDraft(admin, ctx.pairId, ctx.role, "dev").catch(() => {});
-    delayedNotify(admin, ctx.pairId, `${ctx.myName} added a development plan: ${area}`, ctx.role, ctx.otherRole, "development");
+    delayedNotify(admin, ctx.pairId, `${ctx.myName} added a development plan: ${area}`, ctx.role, ctx.otherRole, "development", "dev");
   },
   add_achievement: async (admin, ctx, v) => {
     const title = fieldVal(v, "title");
