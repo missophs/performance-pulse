@@ -302,6 +302,44 @@ Done:
   (`<name> 2.js`); nothing imported them and the `block-kit` copy was a
   stale pre-digest version.
 
+- **Activity log for state changes — done, 2026-08-25.** Melissa asked for
+  "history for options so we know that happened", after a test click on
+  Slack's "Mark discussed" quietly closed one of her real topics and the
+  only evidence was a notification reading `Topic marked Discussed` with
+  no topic name. `buildHistory` only ever derived entries from a record's
+  `created_at`, so nothing recorded a thing being *changed*.
+
+  New `activity_log` table (`supabase/migrations/0004_activity_log.sql`,
+  folded into `schema.sql`), append-only at the database level: select and
+  insert policies only, no update or delete, so Postgres refuses to
+  rewrite it. Verified after applying — `pg_policies` returns exactly
+  INSERT and SELECT. Note this binds the *app*; the service-role key
+  bypasses RLS by design, so server-side code can still delete.
+  `entity_id` is deliberately not a foreign key (wrap-up deletes discussed
+  topics and the record must outlive the row) and `label` snapshots the
+  text on write for the same reason.
+
+  Writes happen inside `setTopicStatus`, `toggleActionDone` and
+  `setFeedbackRequestStatus` rather than at the eight call sites, so the
+  website and Slack quick actions are both covered — the same choke-point
+  trick as the DM batching. Each records old -> new, actor, and source
+  ("web" or "slack"). Logging is best-effort and never throws: failing to
+  record must not cost someone the action they took.
+  Surfaced in the History tab under a new "Changes" filter. The log holds
+  real topic text, so it stays in the app — Slack still sees only counts
+  and categories.
+
+  Committed `fde5c4d`, deployed `bcpanr0ru`. Migration applied to the live
+  database on 2026-08-25 (via the Supabase SQL Editor — there's no DB
+  password or `psql` in this environment, so DDL can't be run from code).
+  Build clean; lint 16 errors before and after, identical, none on touched
+  lines. Tested end to end against the live database, twice: before the
+  migration, marking a topic Discussed still succeeded with only a warning
+  (the graceful-degradation path); after it, the row logged
+  `open -> Discussed` with actor and source, and rendered in History as
+  `[Changes] "Topic marked Discussed" — <label> — <actor> (from Slack)`.
+  Throwaway topics deleted after each run.
+
 Still open, in priority order:
 
 1. **Save / pause / go-back across forms — Day 1, 2, and 3 all done.**
