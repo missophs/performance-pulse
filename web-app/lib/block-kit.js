@@ -56,6 +56,45 @@ function bkFoot() {
   );
 }
 
+// Singular/plural nouns for the digest's count line. BK_KINDS labels read as
+// event names ("Goal added"), which don't compose into "2 goals · 1 topic".
+const KIND_NOUNS = {
+  topic: ["topic", "topics"],
+  upcoming: ["1:1 reminder", "1:1 reminders"],
+  feedback: ["piece of feedback", "pieces of feedback"],
+  request: ["feedback request", "feedback requests"],
+  dev: ["development plan", "development plans"],
+  goal: ["goal", "goals"],
+  achievement: ["achievement", "achievements"],
+  action: ["action", "actions"],
+  wrap: ["1:1 wrap-up", "1:1 wrap-ups"],
+};
+
+/**
+ * One DM covering several notifications that landed together, so adding three
+ * goals in a row is one message instead of three. Same privacy rule as
+ * buildBlockKit: counts and kinds only, never what anyone actually wrote.
+ * kindCounts: [{ kind, count }], highest count first.
+ */
+export function buildDigestBlockKit(kindCounts, ctx) {
+  const total = kindCounts.reduce((n, k) => n + k.count, 0);
+  const parts = kindCounts.map(({ kind, count }) => {
+    const noun = KIND_NOUNS[kind] || ["update", "updates"];
+    return `${count} ${count === 1 ? noun[0] : noun[1]}`;
+  });
+  return {
+    text: `${ctx.partnerName} made ${total} updates`,
+    blocks: [
+      bkHeader(),
+      bkSection(`*${ctx.partnerName}* made ${total} updates.`),
+      bkContext(parts.join("  ·  ")),
+      bkOpenAction("Open Performance Pulse"),
+      { type: "divider" },
+      bkFoot(),
+    ],
+  };
+}
+
 /**
  * Build a Block Kit payload for one ping kind, from live counts only.
  * ctx: { partnerName, isMgr, openTopicsCount, next1on1When, mineActionsCount, devPlansCount }
