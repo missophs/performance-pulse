@@ -485,3 +485,38 @@ create policy "pair members can upload documents" on storage.objects for insert 
 create policy "pair members can delete documents" on storage.objects for delete using (
   bucket_id = 'documents' and is_pair_member((storage.foldername(name))[1]::uuid)
 );
+
+-- ============================================================================
+-- Slack ping trigger: every notifications row POSTs itself to
+-- /api/slack/notify, which decides whether it earns a real Slack DM.
+-- Full notes, including the secret you must fill in, are in
+-- supabase/migrations/0005_slack_notify_trigger.sql. Without this, Slack DMs
+-- stop silently — nothing errors, the pings just never arrive.
+-- ============================================================================
+
+create extension if not exists pg_net with schema extensions;
+
+-- ⚠️ Replace PUT_THE_WEBHOOK_SECRET_HERE with the value of the
+-- SLACK_NOTIFY_WEBHOOK_SECRET environment variable set on the Vercel project.
+create or replace function notify_slack_on_notification()
+returns trigger
+language plpgsql
+security definer
+as $function$
+begin
+  perform net.http_post(
+    url := 'https://performance-pulse-lyart.vercel.app/api/slack/notify',
+    body := jsonb_build_object('record', to_jsonb(NEW)),
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'x-webhook-secret', 'PUT_THE_WEBHOOK_SECRET_HERE'
+    ),
+    timeout_milliseconds := 5000
+  );
+  return NEW;
+end;
+$function$;
+
+create trigger notifications_slack_notify
+  after insert on notifications
+  for each row execute function notify_slack_on_notification();

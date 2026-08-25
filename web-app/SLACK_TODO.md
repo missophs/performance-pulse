@@ -1,6 +1,6 @@
 # Slack integration — status and what's left
 
-Updated 2026-08-24. DM pings (see `lib/block-kit.js` / `lib/slack-send.js`)
+Updated 2026-08-25. DM pings (see `lib/block-kit.js` / `lib/slack-send.js`)
 and full in-Slack interactivity (Home tab, add/view modals, quick actions —
 see `app/api/slack/events/`, `app/api/slack/interactivity/`, `lib/slack-*.js`)
 are both live in production.
@@ -8,9 +8,9 @@ are both live in production.
 Done:
 
 - Real Slack DM pings for every `BK_KINDS` kind, sent via
-  `app/api/slack/notify/route.js` (a Supabase Database trigger — see
-  `notify_slack_on_notification()` in the Supabase SQL Editor; not yet
-  captured as a migration file, see below).
+  `app/api/slack/notify/route.js` (a Supabase Database trigger —
+  `notify_slack_on_notification()`, now captured in
+  `supabase/migrations/0005_slack_notify_trigger.sql`).
 - Home tab + modals for topics, actions, goals, development plans,
   achievements, feedback, and wrap-up — add, view, and quick actions
   (mark discussed/done/answered) all work from inside Slack.
@@ -24,8 +24,8 @@ Done:
   (click your name, top right) or from Slack itself ("Edit your name" on
   the Home tab).
 - Topic-add pings batched into one DM per Prepare session instead of one
-  per click (website only — see item 3 below for the Slack-side gap,
-  still open).
+  per click (website only at the time; the Slack side was closed separately
+  on 2026-08-24 — see the `delayedNotify` entry below).
 - Interactivity endpoint fails soft on errors (logs + acks) instead of
   raw-500ing and leaving a button/modal stuck.
 - Mark discussed/done/answered buttons are highlighted (primary style).
@@ -363,6 +363,44 @@ Done:
   workspace" — seen in Slack and confirmed by Melissa. Test plan and
   notification deleted afterwards.
 
+- **Slack-ping trigger written down — done, 2026-08-25** (was open item 3).
+  The trigger that makes every Slack DM happen existed only as a live object
+  inside the Supabase database. Nothing in the repo described it, so a
+  database reset or a second environment would have lost it silently: no
+  error anywhere, the pings simply never arrive again.
+
+  Read back out of the live database with `pg_get_functiondef` /
+  `pg_get_triggerdef` and written to
+  `supabase/migrations/0005_slack_notify_trigger.sql`, also folded into
+  `schema.sql`. It's an `after insert` trigger on `notifications` calling
+  `net.http_post` (pg_net 0.20.4) against
+  `/api/slack/notify` with an `x-webhook-secret` header and a 5s timeout.
+  Two details worth recording: pg_net is declared in schema `extensions` but
+  puts its functions in a `net` schema regardless (verified with `pg_proc`),
+  which is why the call is `net.http_post`; and the header name matches
+  `SLACK_NOTIFY_WEBHOOK_SECRET` as read in `notify/route.js:107`.
+
+  **The secret is deliberately not in the file** — it's a placeholder, and a
+  `do` block at the end raises an exception if it's still there, so running
+  the file unedited fails loudly instead of installing a trigger that gets a
+  silent 401 on every ping. That silent-401 case is the exact failure this
+  file exists to prevent, so it shouldn't be reachable by forgetting a step.
+
+  Verified by actually running it, not by reading it: installed the function
+  and trigger into a throwaway `mig_test` schema against the live database,
+  asserted both the trigger installed and the guard sees the placeholder,
+  then dropped the schema — the run raised no exception and reported
+  `mig_test schema remaining: 0`. Production re-checked afterwards: live
+  function 1, live trigger 1, placeholder present in production 0, test
+  schema left behind 0. The live trigger was never touched. Not verified:
+  the file has never been run start-to-finish with a real secret, since
+  doing that would mean replacing the working production trigger.
+
+  Same commit deletes `0004_activity_log 2.sql`, a byte-identical committed
+  duplicate of `0004_activity_log.sql` (same `<name> 2.ext` pattern as the
+  four deleted on 2026-08-25) — a stray copy of a migration is worse than a
+  stray copy of a component, since it reads as a fifth migration to run.
+
 Still open, in priority order:
 
 1. **Save / pause / go-back across forms — Day 1, 2, and 3 all done.**
@@ -400,18 +438,13 @@ Still open, in priority order:
    inherited from the same pattern in `getMyPair` (`lib/data.js`), not
    new here, but unguarded in the Slack route. Low priority, real edge
    case.
-3. **Migration file gap:** the `pg_net`-based Slack-ping trigger
-   (`notify_slack_on_notification()` + the `notifications_slack_notify`
-   trigger) exists only as a live object in the Supabase database, not
-   in `supabase/migrations/` — would need to be reconstructed by hand if
-   the database were ever reset or a new environment stood up.
-4. **Suggested-content pickers elsewhere.** Topics now has one (see Done,
+3. **Suggested-content pickers elsewhere.** Topics now has one (see Done,
    2026-08-24). Goals/Achievements/Feedback have no suggestion mechanism
    on the website to mirror. Development does, but it's a different,
    keyword-matched "propose activities" flow (button-triggered, not a
    fixed per-category list) — would need its own design for Slack, not a
    copy of the topic pattern.
-5. **Submissions can still exceed Slack's 3s window on a cold start.**
+4. **Submissions can still exceed Slack's 3s window on a cold start.**
    Measured 2026-08-25 against production with a signed synthetic
    `add_goal` submission: **5.2s cold, 1.76s warm** (both include the
    round trip from a laptop, so the server-side figures are a little
@@ -429,7 +462,7 @@ Still open, in priority order:
    never return `response_action: "errors"` (`add_goal` doesn't;
    `add_topic` does). Needs a decision before it's worth building.
 
-6. **You can't tell your own topics apart in Slack's list modals.**
+5. **You can't tell your own topics apart in Slack's list modals.**
    Found by Melissa 2026-08-25: the "Open topics" modal showed two rows
    both reading `Where things stand`, one "added yesterday" and one
    "added just now", and she read it as a duplication bug. It isn't — the
