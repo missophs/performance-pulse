@@ -5,6 +5,11 @@ and full in-Slack interactivity (Home tab, add/view modals, quick actions —
 see `app/api/slack/events/`, `app/api/slack/interactivity/`, `lib/slack-*.js`)
 are both live in production.
 
+**Next session (2026-08-26): start at open item 2, multi-pair support.** It
+has its own "Pick up here" list. Everything else in the open list is smaller
+or waiting on a decision. Run `npm test` before and after touching pair
+lookup.
+
 Done:
 
 - Real Slack DM pings for every `BK_KINDS` kind, sent via
@@ -534,6 +539,19 @@ Still open, in priority order:
 
    The Slack-side guard shipped 2026-08-25 (see Done) makes this fail
    politely instead of silently. It does not make it work.
+
+   **How pairing works today** (verified 2026-08-25, needed for any of the
+   above to make sense):
+   - `components/OnboardingForm.js` asks three things: your display name,
+     your role (employee or manager, radio), and your partner's **work
+     email** — not their name. Line 65: "Your employee's work email."
+   - The partner does not need an account. `create_pair`
+     (`schema.sql:356`) looks up their profile by email and stores null if
+     there isn't one; `handle_new_user` (`schema.sql:329`) backfills
+     `employee_id`/`manager_id` the moment that email signs up.
+   - Names come later and are editable — `editNameModal`, and the display
+     name on the onboarding form. This is what makes a switcher legible,
+     and it's why Melissa chose a switcher over a combined view.
 
    **Decided 2026-08-25 (Melissa):** a **switcher — one pairing at a time**,
    not a combined dashboard. Her reasoning: not everything needs to be on
