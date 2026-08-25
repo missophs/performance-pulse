@@ -340,6 +340,29 @@ Done:
   `[Changes] "Topic marked Discussed" — <label> — <actor> (from Slack)`.
   Throwaway topics deleted after each run.
 
+- **Slack's `add_devplan` now DMs — done, 2026-08-25.** Adding a
+  development plan from Slack notified nobody, while the same action on
+  the website did. Cause was a single missing argument: every other
+  `SUBMISSIONS` handler passes a `kind`, which is what turns a
+  notification row into a real DM, and `add_devplan` passed none. `"dev"`
+  was already in `BK_KINDS` with its own `buildBlockKit` branch, so no new
+  message had to be written.
+
+  Checked the website's condition first, as the old note asked: it passes
+  `"dev"` only when a plan is *added*, never on edit or removal. Slack's
+  `add_devplan` only ever creates, so always passing it matches rather
+  than over-pinging. Swept every other notify call in the route at the
+  same time — all `add_*` submissions now carry a kind; the two quick
+  actions (topic discussed, action done) deliberately carry none, matching
+  the website, so status changes stay in-app.
+
+  Committed `1d95f3b`, deployed `dy4eiz9ov`. Build clean, lint clean on
+  the touched file. Live-verified end to end: a real signed `add_devplan`
+  to production wrote a row with `kind:"dev"`, and the DM arrived reading
+  "melissa recommended a development plan for you" with "1 plan in the
+  workspace" — seen in Slack and confirmed by Melissa. Test plan and
+  notification deleted afterwards.
+
 Still open, in priority order:
 
 1. **Save / pause / go-back across forms — Day 1, 2, and 3 all done.**
@@ -388,17 +411,7 @@ Still open, in priority order:
    keyword-matched "propose activities" flow (button-triggered, not a
    fixed per-category list) — would need its own design for Slack, not a
    copy of the topic pattern.
-5. **Slack's `add_devplan` still sends no DM, while the website's does.**
-   Left over from the goal/achievement fix (see Done, 2026-08-25), which
-   deliberately scoped to goals and achievements only. The website's
-   dev-plan add passes the `"dev"` kind conditionally; Slack's
-   `SUBMISSIONS.add_devplan` (`app/api/slack/interactivity/route.js`)
-   passes none, so adding a plan from Slack pings in-app but never DMs.
-   `"dev"` is already in `BK_KINDS` with its own `buildBlockKit` branch,
-   so this is a one-argument change — but check the website's condition
-   first and decide whether Slack should match it or always ping.
-
-6. **Submissions can still exceed Slack's 3s window on a cold start.**
+5. **Submissions can still exceed Slack's 3s window on a cold start.**
    Measured 2026-08-25 against production with a signed synthetic
    `add_goal` submission: **5.2s cold, 1.76s warm** (both include the
    round trip from a laptop, so the server-side figures are a little
@@ -416,7 +429,7 @@ Still open, in priority order:
    never return `response_action: "errors"` (`add_goal` doesn't;
    `add_topic` does). Needs a decision before it's worth building.
 
-7. **You can't tell your own topics apart in Slack's list modals.**
+6. **You can't tell your own topics apart in Slack's list modals.**
    Found by Melissa 2026-08-25: the "Open topics" modal showed two rows
    both reading `Where things stand`, one "added yesterday" and one
    "added just now", and she read it as a duplication bug. It isn't — the
