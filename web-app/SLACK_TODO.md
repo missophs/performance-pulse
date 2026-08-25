@@ -464,18 +464,96 @@ Still open, in priority order:
      a "Draft saved" confirmation. Reopening that form later — in
      Slack or on the website — comes back pre-filled. Live-verified
      end-to-end, see Done section above.
-2. **Same middle-manager crash, still live on the website.** The Slack
-   route is fixed (see Done, 2026-08-25), but `getMyPair` (`lib/data.js`)
-   still calls `.maybeSingle()` on
-   `employee_id.eq.<uid>,manager_id.eq.<uid>`, so a profile that is the
-   employee on one pair and the manager on another throws there too. Same
-   root cause, different surface — and it's why the Slack copy says the
-   app "doesn't handle that yet" rather than "use the website," which
-   would send someone to a page that fails the same way.
-   Fixing it is not a copy of the Slack fix: the website has room to
-   actually *support* two pairs (a switcher), whereas Slack has no good
-   place to put one. Decide which we want before building — a guard that
-   degrades gracefully is an hour, real multi-pair support is not.
+2. **Multi-pair support: one account, several 1:1 relationships.** This is
+   now the biggest open item, and it is not the "rare edge case" the old
+   item 2 called it.
+
+   **The finding (2026-08-25).** The database *forbids* what Melissa's org
+   actually looks like. `supabase/schema.sql` lines 40-41 create partial
+   unique indexes `pairs_employee_id_key` and `pairs_manager_id_key` — one
+   pairing per employee account, one per manager account. The comment at
+   line 20 says it outright: "v1 is one pair per account... a user who
+   needs a second 1:1 relationship needs a second account for now." So a
+   manager adding a second report doesn't hit a crash, they hit a unique
+   violation from `create_pair`. Melissa confirmed 2026-08-25 that she has
+   **both** unsupported shapes in real use: middle managers (employee on
+   one pairing, manager on another) and managers with more than one
+   report. The app cannot model her org today.
+
+   The Slack-side guard shipped 2026-08-25 (see Done) makes this fail
+   politely instead of silently. It does not make it work.
+
+   **Decided 2026-08-25 (Melissa):** a **switcher — one pairing at a time**,
+   not a combined dashboard. Her reasoning: not everything needs to be on
+   one screen, and the editable display name (`editNameModal`) is what
+   makes pairings tell apart in the switcher.
+
+   **Still to decide (2026-08-26):** what a manager lands on — straight
+   into the last pairing they viewed, or a list page first; and what the
+   switcher shows for a middle manager whose two pairings have different
+   roles ("You & Dana" reads the same whether you're the manager or the
+   employee in it).
+
+   **The work, in order.**
+
+   *Database*
+   - Drop `pairs_employee_id_key` and `pairs_manager_id_key`. Two lines,
+     and everything else depends on it. New migration `0006_`, applied by
+     hand in the SQL editor like the rest (this project has no automated
+     migrations — see `0005`).
+   - Replace them with a unique index on `(employee_id, manager_id)`. Those
+     two indexes were also, incidentally, the only thing stopping the same
+     two people from being paired twice; dropping them without a
+     replacement opens that door.
+   - `create_pair` needs a friendlier error for the duplicate case than a
+     raw unique violation.
+   - Existing rows are unaffected — this only widens what's allowed.
+
+   *Website*
+   - `getMyPair` (`lib/data.js`) becomes `listMyPairs`. Nine call sites:
+     `app/(dashboard)/layout.js`, `dashboard`, `development`,
+     `performance`, `one-on-one`, `export`, `slack`, `app/onboarding`, and
+     `lib/data.js` itself. They all sit under one shared shell, which is
+     the good news.
+   - "Current pairing" needs somewhere to live. A cookie is less work; a
+     URL segment (`/p/<pairId>/dashboard`) costs more but makes it
+     impossible for two tabs to disagree about who you're looking at. See
+     risks — this choice is the whole ballgame.
+   - The switcher itself goes in `app/(dashboard)/layout.js` so it's on
+     every page, showing the *other person's* name.
+   - Onboarding / "add a pairing" assumes you have zero or one. Needs to
+     handle "add another."
+
+   *Slack (after the website — the hard part is shared)*
+   - `resolveSlackUser` returns all pairings; today's `{ ambiguous: true }`
+     sentinel gets replaced by a real selection.
+   - Home tab gets the switcher, modals inherit the selection. Block Kit
+     Builder helps lay this out, but only the appearance — it knows
+     nothing about which pairing is selected or how that's remembered.
+   - Decide what a Slack ping says when a manager has three reports (see
+     risks).
+
+   **What's risky.**
+   - **The label problem — highest risk in the whole app.** Wrong pairing
+     under a plausible name means someone reads their report's private
+     notes believing it's their own conversation with their boss. That is
+     not a permissions breach, it's a labelling breach, and no amount of
+     RLS catches it. Every screen must name the pairing it's showing,
+     visibly, not tucked in a corner.
+   - **Stale selection.** Two browser tabs, or a Slack modal opened before
+     the switch. The cookie approach makes this easy to get wrong in
+     exactly the way above.
+   - **Slack pings.** A manager with three reports gets three streams of
+     pings and nothing in the current message says which pairing fired.
+     Must be fixed with the same care — and *not* by putting topic text in
+     the message (see item 5).
+   - **Already safe, don't break it:** `is_pair_member`
+     (`schema.sql:396`) is written per-pairing, not per-person, so reports
+     can never see each other no matter how many a manager has. Same for
+     `form_drafts` (keyed `pair_id, role, kind`) and `review_drafts`
+     (keyed `pair_id, role`) — drafts are already per-pairing. Verified
+     2026-08-25 by reading the schema.
+   - **Unaudited:** wrap-up/delete flows that assume "your pair" singular.
 3. **Suggested-content pickers elsewhere.** Topics now has one (see Done,
    2026-08-24). Goals/Achievements/Feedback have no suggestion mechanism
    on the website to mirror. Development does, but it's a different,
