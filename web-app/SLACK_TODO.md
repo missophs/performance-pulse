@@ -158,7 +158,43 @@ Done:
   (cold) click returned Slack's "Operation timed out. Apps need to respond
   within 3 seconds"; the retry succeeded.
 
+- **2026-08-25: Home-tab republish moved off Slack's 3-second response
+  path** (was open item 2). `view_submission` awaited a 7-query
+  `loadHomeData` + `views.publish` before responding, so a cold invocation
+  could blow Slack's 3s window even though the save had already succeeded.
+  `refreshHome` now runs inside `after()` (same Next `after()` already used
+  by `delayedNotify`, confirmed against
+  `node_modules/next/dist/docs/01-app/03-api-reference/04-functions/after.md`
+  — runs after the response is sent, supported in Route Handlers). The
+  quick-action path now also loads home data **once** and shares it between
+  the list-modal redraw and the republish, instead of loading it twice (14
+  queries → 7); `refreshList` takes that preloaded data instead of fetching
+  its own. `edit_name`'s `ctx.myName` mutation still lands before the
+  deferred refresh runs, so the Home tab shows the new name.
+  Committed as `e08853a`, deployed via `vercel --prod` (`6a05j6e1j`).
+  Live-verified in Slack: submitted "Add a topic" — the modal closed with
+  no timeout error and the Home tab had already updated to "2 open topics"
+  behind it, proving the deferred republish still lands. Test topic marked
+  Discussed afterward to clean up (back to 1 open topic).
+
+  **Not covered by this fix:** the modal-*opening* path (`OPENERS` →
+  `views.open`) can't be deferred — `views.open` needs the modal content
+  built before responding, and the `trigger_id` expires in ~3s. A cold
+  click on "Topics" was observed timing out with "Operation timed out. Apps
+  need to respond within 3 seconds" on 2026-08-25 (retry succeeded). That
+  one needs cold-start work, not `after()` — see open item 1 below.
+
 Still open, in priority order:
+
+1. **Cold starts can still time out the modal-*opening* path.** Distinct
+   from the submission fix above: `OPENERS` must build the modal and call
+   `views.open` within Slack's 3s window because `trigger_id` expires, so
+   the work can't move to `after()`. Observed live 2026-08-25 (first click
+   on "Topics" failed, retry worked). Fixes would target cold start /
+   query count itself — e.g. trimming `loadHomeData` to just the slice a
+   given modal needs (each opener uses one field of the 7-query load), or
+   keeping the function warm. Low user impact (retry works), but it's the
+   one remaining place a person sees a raw Slack error.
 
 1. **Save / pause / go-back across forms — Day 1, 2, and 3 all done.**
    Only the check-in wizard has a real draft-save + resume +
@@ -189,31 +225,24 @@ Still open, in priority order:
      a "Draft saved" confirmation. Reopening that form later — in
      Slack or on the website — comes back pre-filled. Live-verified
      end-to-end, see Done section above.
-2. **Modal submissions in Slack can hit Slack's 3-second response
-   window.** `view_submission` handling awaits a full 7-query home-data
-   reload + a `views.publish` call before responding — on a cold
-   invocation this can time out even though the data already saved.
-   Worth moving the refresh after the response, or dropping it from the
-   critical path. (`resolveSlackUser` itself was cut from 2 Supabase
-   queries to 1 on 2026-08-24, which helps but doesn't fully resolve this.)
-3. **Rare crash:** `resolveSlackUser` (`lib/slack-user.js`) throws if a
+2. **Rare crash:** `resolveSlackUser` (`lib/slack-user.js`) throws if a
    Slack account's email matches an `employee_email` on one pair and a
    `manager_email` on a different pair (a middle-manager org shape) —
    inherited from the same pattern in `getMyPair` (`lib/data.js`), not
    new here, but unguarded in the Slack route. Low priority, real edge
    case.
-4. **Migration file gap:** the `pg_net`-based Slack-ping trigger
+3. **Migration file gap:** the `pg_net`-based Slack-ping trigger
    (`notify_slack_on_notification()` + the `notifications_slack_notify`
    trigger) exists only as a live object in the Supabase database, not
    in `supabase/migrations/` — would need to be reconstructed by hand if
    the database were ever reset or a new environment stood up.
-5. **Suggested-content pickers elsewhere.** Topics now has one (see Done,
+4. **Suggested-content pickers elsewhere.** Topics now has one (see Done,
    2026-08-24). Goals/Achievements/Feedback have no suggestion mechanism
    on the website to mirror. Development does, but it's a different,
    keyword-matched "propose activities" flow (button-triggered, not a
    fixed per-category list) — would need its own design for Slack, not a
    copy of the topic pattern.
-6. **Goal/achievement adds never send a real Slack DM, on Slack or the
+5. **Goal/achievement adds never send a real Slack DM, on Slack or the
    website** (side discovery, 2026-08-24, while testing the delayed-ping
    work above): `SUBMISSIONS.add_goal`/`add_achievement`
    (`app/api/slack/interactivity/route.js`) and their website equivalents
