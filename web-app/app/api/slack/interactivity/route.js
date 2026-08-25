@@ -63,8 +63,12 @@ function delayedNotify(admin, pairId, text, role, otherRole, view, kind) {
   });
 }
 
-async function refreshHome(admin, ctx) {
-  const view = homeView(ctx, await loadHomeData(admin, ctx.pairId));
+// Slack drops the interaction if we don't respond in 3s, and a cold start
+// plus loadHomeData's 7 queries can blow that on its own — so the Home-tab
+// republish is scheduled with after() rather than awaited before responding.
+// Callers that already loaded home data pass it in so we don't load twice.
+async function refreshHome(admin, ctx, data) {
+  const view = homeView(ctx, data ?? (await loadHomeData(admin, ctx.pairId)));
   await slackApi("views.publish", { user_id: ctx.slackUserId, view }).catch((e) => console.error("home publish:", e));
 }
 
@@ -124,23 +128,20 @@ const QUICK_ACTIONS = {
       await setTopicStatus(admin, id, "Discussed");
       await notify(admin, ctx.pairId, `Topic marked Discussed by ${ctx.myName}`, ctx.role, ctx.otherRole, "oneOnOne");
     },
-    refreshList: async (admin, ctx) => listTopicsModal((await loadHomeData(admin, ctx.pairId)).topics),
+    refreshList: (data) => listTopicsModal(data.topics),
   },
   action_mark_done: {
     run: async (admin, ctx, id) => {
       await toggleActionDone(admin, id, true);
       await notify(admin, ctx.pairId, `${ctx.myName} marked an action done`, ctx.role, ctx.otherRole, "actions");
     },
-    refreshList: async (admin, ctx) => listActionsModal((await loadHomeData(admin, ctx.pairId)).actions),
+    refreshList: (data) => listActionsModal(data.actions),
   },
   feedback_request_answered: {
     run: async (admin, ctx, id) => {
       await setFeedbackRequestStatus(admin, id, "closed");
     },
-    refreshList: async (admin, ctx) => {
-      const d = await loadHomeData(admin, ctx.pairId);
-      return listFeedbackModal(d.feedback, d.feedbackRequests);
-    },
+    refreshList: (data) => listFeedbackModal(data.feedback, data.feedbackRequests),
   },
 };
 
@@ -287,11 +288,14 @@ async function handleInteraction(admin, slackUserId, payload) {
     } else if (QUICK_ACTIONS[action.action_id]) {
       const spec = QUICK_ACTIONS[action.action_id];
       await spec.run(admin, ctx, action.value);
-      await refreshHome(admin, ctx);
-      // Also refresh the list modal in place, if this click came from one.
+      // One load feeds both the open list modal and the Home tab republish.
+      const data = await loadHomeData(admin, ctx.pairId);
+      // The list modal is the visible result of the click, so it stays on the
+      // critical path; the Home tab behind it can catch up after the response.
       if (payload.view?.id) {
-        await slackApi("views.update", { view_id: payload.view.id, view: await spec.refreshList(admin, ctx) }).catch((e) => console.error("view update:", e));
+        await slackApi("views.update", { view_id: payload.view.id, view: spec.refreshList(data) }).catch((e) => console.error("view update:", e));
       }
+      after(() => refreshHome(admin, ctx, data));
     }
     return Response.json({ ok: true });
   }
@@ -303,7 +307,10 @@ async function handleInteraction(admin, slackUserId, payload) {
       if (result?.error) {
         return Response.json({ response_action: "errors", errors: { [result.error.blockId]: result.error.message } });
       }
-      await refreshHome(admin, ctx);
+      // The save already happened above; closing the modal shouldn't wait on
+      // the Home-tab republish (see refreshHome). edit_name's ctx.myName
+      // mutation lands before this runs, so the refresh still shows the new name.
+      after(() => refreshHome(admin, ctx));
     }
     return Response.json({}); // close the modal
   }
