@@ -254,6 +254,54 @@ Done:
   `notifications` row with `kind:"goal"` and delivered an actual Slack DM
   that Melissa confirmed receiving. Both test goals deleted afterward.
 
+- **Too many pings — batched, 2026-08-25.** Melissa: "slack should not
+  always ping and website should not ping after someone does something",
+  clarified as *too many, batch them*. Two halves, fixed differently
+  because they are different problems: a Slack DM interrupts you, the
+  in-app list does not (nothing pops up when a partner acts — toasts only
+  confirm your own actions).
+
+  *Slack side* (`app/api/slack/notify/route.js`, `sendSlackDigest` in
+  `lib/slack-send.js`, `buildDigestBlockKit` in `lib/block-kit.js`):
+  notifications for the same pair+role landing within `BATCH_WINDOW_MS`
+  (5s) collapse into one DM — "Alex made 3 updates" over "2 goals · 1
+  achievement". Batching sits at the delivery point, not in the browser,
+  so it covers Slack-side and website-side actions alike and across
+  kinds. Which row sends is *derived, not stored*: every invocation walks
+  the same window and groups it identically, so the first row of a group
+  sends and the rest stand down — no schema change, no locks. `after()`
+  keeps the wait off the webhook response. Feedback requests are exempt
+  (`NEVER_BATCH`) since someone is waiting on a reply; a burst of one
+  still gets its normal specific message. Rows without a `kind` return
+  immediately rather than holding a function open.
+
+  9 grouping cases pass (single, rapid adds, unbroken 0–10s chain,
+  separate bursts, on the window edge, just past it, mixed kinds, request
+  exemption, null-kind rows) with nothing dropped and nothing sent twice
+  — the chain case is the one a naive "earliest in window" rule fails.
+  Digest payload passes `blocks.validate` and a planted-private-string
+  leak test: counts and kinds only, never `notification.text`.
+  Committed `7066154`, deployed `dfmponhjq`. Live-verified: 2 goals + 1
+  achievement fired 2.4s apart, Melissa confirmed a single notification.
+  Note the bot cannot read its own DMs (`conversations.history` returns
+  `missing_scope`), so DM *wording* can only be confirmed by her.
+
+  *In-app side* (`groupNotifications` in `lib/data.js`, used by
+  `components/NotificationBell.js` and the dashboard Updates card):
+  display-only. Both lists render just the newest eight, so a burst
+  buried everything older. Neighbouring rows from the same person sharing
+  the text before the colon now show as one row with a count, the text
+  after the colon becoming a detail line. Rows are still written
+  individually and nothing is hidden; a group stays unread until every
+  item in it is read; the bell badge still counts individual items, since
+  it answers "how much is new". 10 cases pass, including that a lone item
+  renders exactly as before and that different verbs ("added a goal" vs
+  "removed a goal") never merge. Verified against live data: 28
+  notifications render as 17 rows. Committed `cdd83d3`, deployed
+  `a45z8tdmm`. Same commit deletes four committed duplicate files
+  (`<name> 2.js`); nothing imported them and the `block-kit` copy was a
+  stale pre-digest version.
+
 Still open, in priority order:
 
 1. **Save / pause / go-back across forms — Day 1, 2, and 3 all done.**
