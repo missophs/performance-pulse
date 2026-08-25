@@ -233,7 +233,7 @@ export default function PerformancePage() {
       giverRole: role, fromName: myName, toName: partnerName, type: fbType, text, example,
     });
     if (fbMode === "answer" && fbRequestId) {
-      await setFeedbackRequestStatus(supabase, fbRequestId, "closed");
+      await setFeedbackRequestStatus(supabase, fbRequestId, "closed", { actorName: myName, actorRole: role, source: "web" });
     }
     setFbOpen(false);
     if (fbMode === "give") await clearFormDraft(supabase, pairId, role, "feedback").catch(() => {});
@@ -268,7 +268,7 @@ export default function PerformancePage() {
   }
 
   async function closeRequest(id) {
-    await setFeedbackRequestStatus(supabase, id, "closed");
+    await setFeedbackRequestStatus(supabase, id, "closed", { actorName: myName, actorRole: role, source: "web" });
     loadAll();
   }
 

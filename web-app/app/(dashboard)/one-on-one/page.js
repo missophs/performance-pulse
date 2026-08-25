@@ -241,7 +241,7 @@ export default function OneOnOnePage() {
   }
 
   async function changeTopicStatus(t, status) {
-    await setTopicStatus(supabase, t.id, status);
+    await setTopicStatus(supabase, t.id, status, { actorName: myName, actorRole: role, source: "web" });
     await notify(supabase, pairId, `Topic marked ${status}: ${t.text}`, role, otherRole, "oneOnOne");
     loadAll();
   }
@@ -331,7 +331,7 @@ export default function OneOnOnePage() {
   }
 
   async function toggleAction(a) {
-    await toggleActionDone(supabase, a.id, a.status !== "Done");
+    await toggleActionDone(supabase, a.id, a.status !== "Done", { actorName: myName, actorRole: role, source: "web" });
     loadAll();
   }
 

@@ -95,7 +95,7 @@ export default function ActionsPage() {
   }
 
   async function toggleDone(action) {
-    await toggleActionDone(supabase, action.id, action.status !== "Done");
+    await toggleActionDone(supabase, action.id, action.status !== "Done", { actorName: myName, actorRole: role, source: "web" });
     loadAll();
   }
 

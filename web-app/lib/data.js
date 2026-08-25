@@ -77,12 +77,30 @@ export async function addTopic(supabase, pairId, { text, why, category, role, na
   return data;
 }
 
-export async function setTopicStatus(supabase, id, status) {
+/**
+ * ctx: { actorName, actorRole, source } — who marked it and from where
+ * ("web" or "slack"). Reading the row first is what lets the log record a real
+ * old -> new pair, and means callers don't have to pass the pair or the label.
+ * Both the website and the Slack interactivity route come through here, so
+ * instrumenting this one function covers both surfaces.
+ */
+export async function setTopicStatus(supabase, id, status, ctx = {}) {
+  const { data: before } = await supabase.from("topics").select("pair_id, text, status").eq("id", id).maybeSingle();
   const { error } = await supabase
     .from("topics")
     .update({ status, updated_at: new Date().toISOString() })
     .eq("id", id);
   if (error) throw error;
+  if (before) {
+    await logActivity(supabase, before.pair_id, {
+      entity: "topic",
+      entityId: id,
+      label: before.text,
+      oldValue: before.status,
+      newValue: status,
+      ...ctx,
+    });
+  }
 }
 
 export async function setTopicNotes(supabase, id, notes) {
@@ -313,9 +331,25 @@ export async function addFeedbackRequest(supabase, pairId, { fromRole, fromName,
   return data;
 }
 
-export async function setFeedbackRequestStatus(supabase, id, status) {
+// ctx as in setTopicStatus.
+export async function setFeedbackRequestStatus(supabase, id, status, ctx = {}) {
+  const { data: before } = await supabase
+    .from("feedback_requests")
+    .select("pair_id, about, status, from_name")
+    .eq("id", id)
+    .maybeSingle();
   const { error } = await supabase.from("feedback_requests").update({ status }).eq("id", id);
   if (error) throw error;
+  if (before) {
+    await logActivity(supabase, before.pair_id, {
+      entity: "feedback_request",
+      entityId: id,
+      label: before.about || `Request from ${before.from_name || "your partner"}`,
+      oldValue: before.status,
+      newValue: status,
+      ...ctx,
+    });
+  }
 }
 
 // ------------------------------------------------------------- concerns ----
@@ -576,17 +610,71 @@ export async function saveAction(supabase, pairId, action, name) {
   return data;
 }
 
-export async function toggleActionDone(supabase, id, done) {
+// ctx as in setTopicStatus.
+export async function toggleActionDone(supabase, id, done, ctx = {}) {
+  const { data: before } = await supabase.from("actions").select("pair_id, text, status").eq("id", id).maybeSingle();
+  const status = done ? "Done" : "Open";
   const { error } = await supabase
     .from("actions")
-    .update({ status: done ? "Done" : "Open", updated_at: new Date().toISOString() })
+    .update({ status, updated_at: new Date().toISOString() })
     .eq("id", id);
   if (error) throw error;
+  if (before) {
+    await logActivity(supabase, before.pair_id, {
+      entity: "action",
+      entityId: id,
+      label: before.text,
+      oldValue: before.status,
+      newValue: status,
+      ...ctx,
+    });
+  }
 }
 
 export async function deleteAction(supabase, id) {
   const { error } = await supabase.from("actions").delete().eq("id", id);
   if (error) throw error;
+}
+
+// ------------------------------------------------------- activity log ------
+// Everything else here records only *creation*, so marking a topic discussed
+// or ticking an action done used to leave no trace of who did it or when.
+// Notifications aren't a substitute — they're capped, trimmed and deletable.
+// The table is append-only at the database level (see 0004_activity_log.sql).
+
+/**
+ * Best-effort by design: a failure to record must never cost someone the
+ * action they took. It warns rather than throwing, so a missing table (before
+ * the migration is applied) degrades to "no history" instead of a broken app.
+ */
+async function logActivity(supabase, pairId, entry) {
+  const { error } = await supabase.from("activity_log").insert({
+    pair_id: pairId,
+    entity: entry.entity,
+    entity_id: entry.entityId || null,
+    label: entry.label || "",
+    field: entry.field || "status",
+    old_value: entry.oldValue ?? null,
+    new_value: entry.newValue,
+    actor_name: entry.actorName || "Someone",
+    actor_role: entry.actorRole || "",
+    source: entry.source || "web",
+  });
+  if (error) console.warn("activity_log write failed:", error.message);
+}
+
+export async function listActivity(supabase, pairId) {
+  const { data, error } = await supabase
+    .from("activity_log")
+    .select("*")
+    .eq("pair_id", pairId)
+    .order("created_at", { ascending: false });
+  // Reading history should never take the page down with it.
+  if (error) {
+    console.warn("activity_log read failed:", error.message);
+    return [];
+  }
+  return data;
 }
 
 // -------------------------------------------------------- notifications ----
@@ -797,7 +885,14 @@ export async function addMessage(supabase, pairId, kind, text, role, byName) {
 // --------------------------------------------------------------- history ---
 // Derived, not stored — same as historyEntries() in the original app.
 
-export function buildHistory({ meetings, checkins, achievements, feedback, concerns, goals, development, career, actions }) {
+const CHANGE_TITLE = {
+  topic: (v) => `Topic marked ${v}`,
+  action: (v) => `Action marked ${v}`,
+  feedback_request: (v) => `Feedback request ${v}`,
+};
+
+// `activity` defaults to empty so callers that don't pass it still work.
+export function buildHistory({ meetings, checkins, achievements, feedback, concerns, goals, development, career, actions, activity = [] }) {
   const entries = [];
   for (const m of meetings) {
     entries.push({
@@ -831,6 +926,17 @@ export function buildHistory({ meetings, checkins, achievements, feedback, conce
   }
   for (const a of actions) {
     entries.push({ cat: "Actions", at: a.created_at, title: a.text, body: a.notes, who: a.created_by_name });
+  }
+  // Every entry above is something being *created*. These are things being
+  // changed, which nothing recorded before — see the activity log section.
+  for (const e of activity) {
+    entries.push({
+      cat: "Changes",
+      at: e.created_at,
+      title: CHANGE_TITLE[e.entity] ? CHANGE_TITLE[e.entity](e.new_value) : `Changed to ${e.new_value}`,
+      body: e.label,
+      who: e.source === "slack" ? `${e.actor_name} (from Slack)` : e.actor_name,
+    });
   }
   entries.sort((a, b) => new Date(b.at) - new Date(a.at));
   return entries;

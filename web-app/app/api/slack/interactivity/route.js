@@ -129,24 +129,28 @@ const SAVE_DRAFT = {
 // Each quick action pairs its mutation with how to redraw the list modal it
 // was clicked from (if any) — kept together so adding one can't mean
 // forgetting the other, which used to silently leave a stale list modal.
+// Every quick action here is a state change, so each one passes who clicked it
+// and that it came from Slack — that's what the History tab reads back.
+const fromSlack = (ctx) => ({ actorName: ctx.myName, actorRole: ctx.role, source: "slack" });
+
 const QUICK_ACTIONS = {
   topic_mark_discussed: {
     run: async (admin, ctx, id) => {
-      await setTopicStatus(admin, id, "Discussed");
+      await setTopicStatus(admin, id, "Discussed", fromSlack(ctx));
       await notify(admin, ctx.pairId, `Topic marked Discussed by ${ctx.myName}`, ctx.role, ctx.otherRole, "oneOnOne");
     },
     refreshList: (data) => listTopicsModal(data.topics),
   },
   action_mark_done: {
     run: async (admin, ctx, id) => {
-      await toggleActionDone(admin, id, true);
+      await toggleActionDone(admin, id, true, fromSlack(ctx));
       await notify(admin, ctx.pairId, `${ctx.myName} marked an action done`, ctx.role, ctx.otherRole, "actions");
     },
     refreshList: (data) => listActionsModal(data.actions),
   },
   feedback_request_answered: {
     run: async (admin, ctx, id) => {
-      await setFeedbackRequestStatus(admin, id, "closed");
+      await setFeedbackRequestStatus(admin, id, "closed", fromSlack(ctx));
     },
     refreshList: (data) => listFeedbackModal(data.feedback, data.feedbackRequests),
   },

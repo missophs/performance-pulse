@@ -13,11 +13,12 @@ import {
   listDevelopmentPlans,
   listCareerAnswers,
   listActions,
+  listActivity,
   buildHistory,
 } from "@/lib/data";
 import { ago } from "@/lib/format";
 
-const FILTERS = ["All", "1:1", "Performance", "Goals", "Development", "Career", "Feedback", "Actions"];
+const FILTERS = ["All", "1:1", "Performance", "Goals", "Development", "Career", "Feedback", "Actions", "Changes"];
 
 export default function HistoryPage() {
   const { pairId, supabase } = usePulse();
@@ -29,7 +30,7 @@ export default function HistoryPage() {
 
   async function loadAll() {
     setLoading(true);
-    const [m, ci, ach, fb, cc, g, d, ca, a] = await Promise.all([
+    const [m, ci, ach, fb, cc, g, d, ca, a, act] = await Promise.all([
       listMeetings(supabase, pairId),
       listCheckinsAll(supabase, pairId),
       listAchievements(supabase, pairId),
@@ -39,8 +40,9 @@ export default function HistoryPage() {
       listDevelopmentPlans(supabase, pairId),
       listCareerAnswers(supabase, pairId),
       listActions(supabase, pairId),
+      listActivity(supabase, pairId),
     ]);
-    setHistory(buildHistory({ meetings: m, checkins: ci, achievements: ach, feedback: fb, concerns: cc, goals: g, development: d, career: ca, actions: a }));
+    setHistory(buildHistory({ meetings: m, checkins: ci, achievements: ach, feedback: fb, concerns: cc, goals: g, development: d, career: ca, actions: a, activity: act }));
     setLoading(false);
   }
 

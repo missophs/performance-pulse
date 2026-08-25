@@ -217,6 +217,30 @@ create table notifications (
   created_at timestamptz not null default now()
 );
 
+-- Append-only record of state changes (topic marked discussed, action ticked
+-- done, feedback request closed). Everything else here records only creation,
+-- so a change used to leave no trace of who made it. See 0004_activity_log.sql
+-- for the full reasoning; note there is deliberately no update/delete policy.
+create table activity_log (
+  id uuid primary key default gen_random_uuid(),
+  pair_id uuid not null references pairs (id) on delete cascade,
+  entity text not null,
+  -- Not a foreign key on purpose: wrap-up deletes discussed topics, and the
+  -- record is meant to outlive the row.
+  entity_id uuid,
+  -- App-only. Holds real topic text, so it must never reach Slack.
+  label text not null,
+  field text not null default 'status',
+  old_value text,
+  new_value text not null,
+  actor_name text not null,
+  actor_role text not null,
+  source text not null default 'web',
+  created_at timestamptz not null default now()
+);
+
+create index activity_log_pair_created_idx on activity_log (pair_id, created_at desc);
+
 create table review_drafts (
   pair_id uuid not null references pairs (id) on delete cascade,
   role text not null,
@@ -288,6 +312,7 @@ alter table career_answers enable row level security;
 alter table concerns enable row level security;
 alter table actions enable row level security;
 alter table notifications enable row level security;
+alter table activity_log enable row level security;
 alter table review_drafts enable row level security;
 alter table form_drafts enable row level security;
 alter table custom_suggestions enable row level security;
@@ -433,6 +458,15 @@ begin
   end loop;
 end;
 $$;
+
+-- activity_log is deliberately left out of that loop: it gets select and insert
+-- only, so Postgres itself refuses updates and deletes. An audit trail either
+-- person could quietly rewrite would not be one.
+create policy "pair members can select" on activity_log
+  for select using (is_pair_member(pair_id));
+
+create policy "pair members can insert" on activity_log
+  for insert with check (is_pair_member(pair_id));
 
 -- ============================================================================
 -- Storage bucket for uploaded documents (Dashboard → Documents card).
