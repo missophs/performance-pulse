@@ -145,6 +145,24 @@ export function notLinkedHomeView() {
   };
 }
 
+// Shown when one email is on more than one pair (see resolveSlackUser). No
+// pair is named: we deliberately haven't picked one, and naming them would
+// tell each pair something about the other.
+export function multiplePairsHomeView() {
+  return {
+    type: "home",
+    blocks: [
+      { type: "header", text: { type: "plain_text", text: "Performance Pulse" } },
+      section(
+        "This email address is on more than one Performance Pulse pair, and the app doesn't handle that yet. Rather than guess which pair to show you here, we're showing nothing — you'd have no way to tell whose numbers you were looking at."
+      ),
+    ],
+  };
+}
+
+export const MULTIPLE_PAIRS_NOTICE =
+  "This email address is on more than one Performance Pulse pair, and the app doesn't handle that yet. We'd rather not guess which pair you meant.";
+
 // -------------------------------------------------------------- topics -----
 
 // Suggestion values carry their category so the interactivity route doesn't

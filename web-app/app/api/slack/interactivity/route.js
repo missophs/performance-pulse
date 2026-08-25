@@ -31,6 +31,7 @@ import {
   lastMeetingModal,
   loadingModal,
   noticeModal,
+  MULTIPLE_PAIRS_NOTICE,
 } from "@/lib/slack-views";
 import {
   setTopicStatus,
@@ -298,6 +299,10 @@ async function openDeferred(opener, payload) {
     try {
       const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
       const ctx = payload.user?.id ? await resolveSlackUser(admin, payload.user.id) : null;
+      if (ctx?.ambiguous) {
+        await swap(noticeModal(opener.title, MULTIPLE_PAIRS_NOTICE));
+        return;
+      }
       if (!ctx) {
         await swap(noticeModal(opener.title, "We couldn't match your Slack account to a Performance Pulse profile. Open the app once to link it, then try again."));
         return;
@@ -314,6 +319,17 @@ async function openDeferred(opener, payload) {
 
 async function handleInteraction(admin, slackUserId, payload) {
   const ctx = slackUserId ? await resolveSlackUser(admin, slackUserId) : null;
+  if (ctx?.ambiguous) {
+    // Say so on whatever surface is already open. A silent ok here would mean
+    // buttons that do nothing at all, which is the confusing half of the bug
+    // this guard exists to remove.
+    const notice = noticeModal("Performance Pulse", MULTIPLE_PAIRS_NOTICE);
+    if (payload.type === "view_submission") return Response.json({ response_action: "update", view: notice });
+    if (payload.view?.id) {
+      await slackApi("views.update", { view_id: payload.view.id, view: notice }).catch((e) => console.error("multiple pairs notice:", e));
+    }
+    return Response.json({ ok: true });
+  }
   if (!ctx) return Response.json({ ok: true }); // not linked — nothing we can do
 
   if (payload.type === "block_actions") {

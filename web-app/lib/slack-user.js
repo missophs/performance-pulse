@@ -9,6 +9,13 @@ import { slackApi } from "@/lib/slack-api";
  * slackUserId: the Slack "U..." id from a payload's user.id / event.user.
  * Returns null if this Slack account has no matching pair, so callers can
  * show a friendly "not linked yet" message instead of crashing.
+ *
+ * Returns `{ ambiguous: true }` if the email matches more than one pair — a
+ * middle manager who is the employee on one pair and the manager on another.
+ * The app assumes one pair per person throughout, so rather than guess which
+ * one this request meant (and hand back another pair's counts with nothing on
+ * screen saying so), callers show a "not supported yet" notice. Check
+ * `ctx?.ambiguous` before reading pairId/role.
  */
 export async function resolveSlackUser(supabaseAdmin, slackUserId) {
   const info = await slackApi("users.info", { user: slackUserId });
@@ -23,13 +30,20 @@ export async function resolveSlackUser(supabaseAdmin, slackUserId) {
   // Slack's interactivity/event endpoints have a ~3s response budget, so this
   // is one query (an embedded select) instead of the pair lookup followed by
   // a separate profiles lookup — one less round trip on every request.
-  const { data: pair, error } = await supabaseAdmin
+  // .limit(2), not .maybeSingle(): maybeSingle() turns a second matching row
+  // into a thrown error, which reached Slack as a blank Home tab or a generic
+  // "something went wrong". Two rows is a real org shape, not a fault, so ask
+  // for exactly enough to tell "one" from "more than one" and answer honestly.
+  const { data: pairs, error } = await supabaseAdmin
     .from("pairs")
     .select("*, employee:profiles!employee_id(id, full_name), manager:profiles!manager_id(id, full_name)")
     .or(`employee_email.eq.${safeEmail},manager_email.eq.${safeEmail}`)
-    .maybeSingle();
+    .limit(2);
   if (error) throw error;
-  if (!pair) return null;
+  if (!pairs?.length) return null;
+  if (pairs.length > 1) return { ambiguous: true };
+
+  const pair = pairs[0];
 
   const isMgr = pair.manager_email === email;
   const role = isMgr ? "manager" : "employee";

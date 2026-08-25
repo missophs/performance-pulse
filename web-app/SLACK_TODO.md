@@ -143,6 +143,38 @@ Done:
   behavior, kept for comparison). Test topic marked Discussed afterward
   to clean up.
 
+- **2026-08-25: a Slack account on two pairs no longer crashes the Slack
+  routes** (was open item 2). `resolveSlackUser` (`lib/slack-user.js`) used
+  `.maybeSingle()`, which treats a second matching row as an error, so a
+  middle manager — employee on one pair, manager on another — hit a thrown
+  error on every Slack interaction. It surfaced as a Home tab that silently
+  never published, or "Something went wrong loading this."
+  Now `.limit(2)`: no rows still returns `null` (unchanged "not linked"
+  path), one row returns the same context object as before, and two rows
+  return a `{ ambiguous: true }` sentinel carrying no pair data.
+  All three call sites branch on it — `multiplePairsHomeView()` on the Home
+  tab, a `noticeModal` in the deferred openers, and in `handleInteraction`
+  either a `response_action: "update"` (view_submission) or a `views.update`
+  on the open modal, so buttons say something instead of doing nothing.
+  **Deliberately does not pick a pair.** Both pairs belong to this person,
+  so showing one isn't a leak, but they'd get another pair's counts with
+  nothing on screen saying a substitution happened — and knowing exactly
+  whose data you're looking at is the whole promise here. The copy also
+  names neither pair, since naming them tells each pair about the other.
+  Verified: 5 unit tests against a stubbed Supabase client covering all
+  three branches plus the missing-email path (0 rows → null, 1 row as
+  employee, 1 row as manager, 2 rows → ambiguous with no `pairId`, no email
+  → null) — all pass; both new views return `{"ok":true}` from Slack's
+  `blocks.validate`; `npm run build` succeeds; `npm run lint` reports zero
+  problems in the four touched files (34 pre-existing React-hooks errors
+  elsewhere, unchanged).
+  **Not verified:** the real Slack path. Reproducing it needs an actual
+  middle-manager pair in production, i.e. creating live data, so the guard
+  is proven at the resolver and view level only.
+  **Same bug still live on the website:** `getMyPair` (`lib/data.js`) has
+  the identical `.maybeSingle()` on `employee_id`/`manager_id`. Left alone
+  on purpose — this item was scoped to the Slack route. See open item 2.
+
 - **2026-08-25: merged the two hand-synced quick-action tables** (was open
   item 2). `QUICK_ACTIONS` and the inline `listAgain` object in
   `app/api/slack/interactivity/route.js` duplicated the same three action
@@ -432,12 +464,18 @@ Still open, in priority order:
      a "Draft saved" confirmation. Reopening that form later — in
      Slack or on the website — comes back pre-filled. Live-verified
      end-to-end, see Done section above.
-2. **Rare crash:** `resolveSlackUser` (`lib/slack-user.js`) throws if a
-   Slack account's email matches an `employee_email` on one pair and a
-   `manager_email` on a different pair (a middle-manager org shape) —
-   inherited from the same pattern in `getMyPair` (`lib/data.js`), not
-   new here, but unguarded in the Slack route. Low priority, real edge
-   case.
+2. **Same middle-manager crash, still live on the website.** The Slack
+   route is fixed (see Done, 2026-08-25), but `getMyPair` (`lib/data.js`)
+   still calls `.maybeSingle()` on
+   `employee_id.eq.<uid>,manager_id.eq.<uid>`, so a profile that is the
+   employee on one pair and the manager on another throws there too. Same
+   root cause, different surface — and it's why the Slack copy says the
+   app "doesn't handle that yet" rather than "use the website," which
+   would send someone to a page that fails the same way.
+   Fixing it is not a copy of the Slack fix: the website has room to
+   actually *support* two pairs (a switcher), whereas Slack has no good
+   place to put one. Decide which we want before building — a guard that
+   degrades gracefully is an hour, real multi-pair support is not.
 3. **Suggested-content pickers elsewhere.** Topics now has one (see Done,
    2026-08-24). Goals/Achievements/Feedback have no suggestion mechanism
    on the website to mirror. Development does, but it's a different,

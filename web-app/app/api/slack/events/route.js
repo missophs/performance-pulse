@@ -7,7 +7,7 @@ import { createClient } from "@supabase/supabase-js";
 import { verifySlackSignature } from "@/lib/slack-verify";
 import { resolveSlackUser } from "@/lib/slack-user";
 import { slackApi } from "@/lib/slack-api";
-import { homeView, notLinkedHomeView } from "@/lib/slack-views";
+import { homeView, notLinkedHomeView, multiplePairsHomeView } from "@/lib/slack-views";
 import { loadHomeData } from "@/lib/slack-home-data";
 
 export async function POST(request) {
@@ -35,7 +35,11 @@ export async function POST(request) {
     const supabaseAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
     try {
       const ctx = await resolveSlackUser(supabaseAdmin, event.user);
-      const view = ctx ? homeView(ctx, await loadHomeData(supabaseAdmin, ctx.pairId)) : notLinkedHomeView();
+      const view = ctx?.ambiguous
+        ? multiplePairsHomeView()
+        : ctx
+          ? homeView(ctx, await loadHomeData(supabaseAdmin, ctx.pairId))
+          : notLinkedHomeView();
       await slackApi("views.publish", { user_id: event.user, view });
     } catch (err) {
       console.error("slack home publish failed:", err);
