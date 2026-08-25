@@ -186,16 +186,6 @@ Done:
 
 Still open, in priority order:
 
-1. **Cold starts can still time out the modal-*opening* path.** Distinct
-   from the submission fix above: `OPENERS` must build the modal and call
-   `views.open` within Slack's 3s window because `trigger_id` expires, so
-   the work can't move to `after()`. Observed live 2026-08-25 (first click
-   on "Topics" failed, retry worked). Fixes would target cold start /
-   query count itself — e.g. trimming `loadHomeData` to just the slice a
-   given modal needs (each opener uses one field of the 7-query load), or
-   keeping the function warm. Low user impact (retry works), but it's the
-   one remaining place a person sees a raw Slack error.
-
 1. **Save / pause / go-back across forms — Day 1, 2, and 3 all done.**
    Only the check-in wizard has a real draft-save + resume +
    back-navigation flow (plus a separate, simpler `review_drafts`
@@ -225,24 +215,33 @@ Still open, in priority order:
      a "Draft saved" confirmation. Reopening that form later — in
      Slack or on the website — comes back pre-filled. Live-verified
      end-to-end, see Done section above.
-2. **Rare crash:** `resolveSlackUser` (`lib/slack-user.js`) throws if a
+2. **Cold starts can still time out the modal-*opening* path.** Distinct
+   from the submission fix (see Done, 2026-08-25): `OPENERS` must build the
+   modal and call `views.open` within Slack's 3s window because
+   `trigger_id` expires, so the work can't move to `after()`. Observed live
+   2026-08-25 (first click on "Topics" failed, retry worked). Fixes would
+   target cold start / query count itself — e.g. trimming `loadHomeData` to
+   just the slice a given modal needs (each opener uses one field of the
+   7-query load), or keeping the function warm. Low user impact (retry
+   works), but it's the one remaining place a person sees a raw Slack error.
+3. **Rare crash:** `resolveSlackUser` (`lib/slack-user.js`) throws if a
    Slack account's email matches an `employee_email` on one pair and a
    `manager_email` on a different pair (a middle-manager org shape) —
    inherited from the same pattern in `getMyPair` (`lib/data.js`), not
    new here, but unguarded in the Slack route. Low priority, real edge
    case.
-3. **Migration file gap:** the `pg_net`-based Slack-ping trigger
+4. **Migration file gap:** the `pg_net`-based Slack-ping trigger
    (`notify_slack_on_notification()` + the `notifications_slack_notify`
    trigger) exists only as a live object in the Supabase database, not
    in `supabase/migrations/` — would need to be reconstructed by hand if
    the database were ever reset or a new environment stood up.
-4. **Suggested-content pickers elsewhere.** Topics now has one (see Done,
+5. **Suggested-content pickers elsewhere.** Topics now has one (see Done,
    2026-08-24). Goals/Achievements/Feedback have no suggestion mechanism
    on the website to mirror. Development does, but it's a different,
    keyword-matched "propose activities" flow (button-triggered, not a
    fixed per-category list) — would need its own design for Slack, not a
    copy of the topic pattern.
-5. **Goal/achievement adds never send a real Slack DM, on Slack or the
+6. **Goal/achievement adds never send a real Slack DM, on Slack or the
    website** (side discovery, 2026-08-24, while testing the delayed-ping
    work above): `SUBMISSIONS.add_goal`/`add_achievement`
    (`app/api/slack/interactivity/route.js`) and their website equivalents
