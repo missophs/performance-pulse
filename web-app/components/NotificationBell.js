@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { usePulse } from "@/components/PulseContext";
-import { listNotifications, markAllNotificationsRead, listActions, listGoals, listFeedbackRequests, getMyPair } from "@/lib/data";
+import { listNotifications, markAllNotificationsRead, groupNotifications, listActions, listGoals, listFeedbackRequests, getMyPair } from "@/lib/data";
 import { ago, today, daysBetween, staleGoal } from "@/lib/format";
 
 const TAB_HREF = {
@@ -72,8 +72,11 @@ export default function NotificationBell() {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
+  // The badge counts individual notifications, not groups — it answers "how
+  // much is new", which grouping shouldn't shrink.
   const unread = notifications.filter((n) => !n.read).length;
   const total = unread + reminders.length;
+  const grouped = groupNotifications(notifications);
 
   async function toggle() {
     if (!open) await load();
@@ -111,14 +114,24 @@ export default function NotificationBell() {
               <div className="card-note" style={{ margin: "4px 0 0" }}>{r.sub}</div>
             </div>
           ))}
-          {notifications.slice(0, 8).map((n) => (
+          {grouped.slice(0, 8).map((g) => (
             <div
-              key={n.id}
-              style={{ cursor: "pointer", opacity: n.read ? 0.6 : 1, padding: "8px 0", borderBottom: "1px solid var(--border)" }}
-              onClick={() => goTo(n.view)}
+              key={g.key}
+              style={{ cursor: "pointer", opacity: g.unread ? 1 : 0.6, padding: "8px 0", borderBottom: "1px solid var(--border)" }}
+              onClick={() => goTo(g.view)}
             >
-              <div style={{ fontSize: 13 }}>{n.text}</div>
-              <div className="card-note" style={{ margin: "2px 0 0" }}>{ago(n.created_at)}</div>
+              <div style={{ fontSize: 13 }}>
+                {g.count === 1 ? g.text : g.label}
+                {g.count > 1 && <span className="badge b-amber" style={{ marginLeft: 6 }}>{g.count}</span>}
+              </div>
+              {g.count > 1 && g.details.length > 0 && (
+                <ul style={{ margin: "4px 0 0", paddingLeft: 16, fontSize: 12, color: "var(--muted)" }}>
+                  {g.details.map((d, i) => (
+                    <li key={i}>{d}</li>
+                  ))}
+                </ul>
+              )}
+              <div className="card-note" style={{ margin: "2px 0 0" }}>{ago(g.createdAt)}</div>
             </div>
           ))}
           {!reminders.length && !notifications.length && <div className="card-note">Nothing new.</div>}

@@ -602,6 +602,42 @@ export async function listNotifications(supabase, pairId) {
   return data;
 }
 
+/**
+ * Collapses a run of near-identical notifications into one entry, for display
+ * only. The bell and the dashboard both show just the newest eight, so adding
+ * three goals in one sitting used to bury everything older. Rows group when
+ * they sit next to each other, come from the same person, and share the text
+ * before the colon ("Alex added a goal"); the part after it becomes a detail
+ * line, so nothing is hidden. Rows themselves are never touched.
+ */
+export function groupNotifications(notifications) {
+  const groups = [];
+  for (const n of notifications) {
+    const at = n.text ? n.text.indexOf(":") : -1;
+    const label = at === -1 ? n.text || "" : n.text.slice(0, at);
+    const detail = at === -1 ? "" : n.text.slice(at + 1).trim();
+    const open = groups[groups.length - 1];
+    if (open && open.label === label && open.createdByRole === n.created_by_role) {
+      open.items.push(n);
+      if (detail) open.details.push(detail);
+    } else {
+      groups.push({
+        key: n.id,
+        label,
+        text: n.text,
+        view: n.view,
+        createdByRole: n.created_by_role,
+        createdAt: n.created_at,
+        items: [n],
+        details: detail ? [detail] : [],
+      });
+    }
+  }
+  // A group is unread until every notification in it has been read, so a burst
+  // can't go quiet while part of it is still new.
+  return groups.map((g) => ({ ...g, count: g.items.length, unread: g.items.some((i) => !i.read) }));
+}
+
 export async function notify(supabase, pairId, text, role, toRole, view, kind) {
   const { error } = await supabase
     .from("notifications")

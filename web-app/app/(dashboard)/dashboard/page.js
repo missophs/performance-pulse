@@ -27,6 +27,7 @@ import {
   addHandbookLink,
   listNotifications,
   markAllNotificationsRead,
+  groupNotifications,
   updatePair,
   getMyPair,
 } from "@/lib/data";
@@ -108,6 +109,7 @@ export default function DashboardPage() {
   const activeDev = devPlans.filter(isActiveDev);
   const overdue = actions.filter((a) => isOverdue(a.due_date, a.status));
   const unread = notifications.filter((n) => !n.read);
+  const groupedNotifications = groupNotifications(notifications);
   const avgProgress = activeGoals.length ? Math.round(activeGoals.reduce((s, g) => s + (g.progress || 0), 0) / activeGoals.length) : 0;
 
   const soonActions = actions
@@ -398,13 +400,23 @@ export default function DashboardPage() {
         {notifications.length === 0 ? (
           <div className="empty"><div className="big">No updates</div>Nothing new from {partnerName}.</div>
         ) : (
-          notifications.slice(0, 8).map((n) => (
-            <div className={`notif${n.read ? "" : " unread"}`} key={n.id}>
+          groupedNotifications.slice(0, 8).map((g) => (
+            <div className={`notif${g.unread ? " unread" : ""}`} key={g.key}>
               <div style={{ display: "flex", gap: 8 }}>
-                {!n.read && <span className="udot" />}
+                {g.unread && <span className="udot" />}
                 <div>
-                  <div className="item-text">{n.text}</div>
-                  <div className="item-meta">{ago(n.created_at)}</div>
+                  <div className="item-text">
+                    {g.count === 1 ? g.text : g.label}
+                    {g.count > 1 && <span className="badge b-amber" style={{ marginLeft: 6 }}>{g.count}</span>}
+                  </div>
+                  {g.count > 1 && g.details.length > 0 && (
+                    <ul style={{ margin: "4px 0 0", paddingLeft: 16 }}>
+                      {g.details.map((d, i) => (
+                        <li key={i} className="item-meta">{d}</li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="item-meta">{ago(g.createdAt)}</div>
                 </div>
               </div>
             </div>
