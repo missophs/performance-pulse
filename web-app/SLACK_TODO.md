@@ -5,13 +5,12 @@ and full in-Slack interactivity (Home tab, add/view modals, quick actions —
 see `app/api/slack/events/`, `app/api/slack/interactivity/`, `lib/slack-*.js`)
 are both live in production.
 
-Updated 2026-08-27. Rate limit cleared overnight; Account C is onboarded
-and the middle-manager shape is now real and live (see item 2). **Next
-session starts at item 2's "Pick up here" list, step 3: the Slack-side
-half of the 2026-08-25 fix has still never been verified against a real
-account** — everything needed to test it (a live middle-manager account)
-now exists. Everything else in the open list is smaller or waiting on a
-decision. Run `npm test` before and after touching pair lookup.
+Updated 2026-08-27 (evening). The Slack-side half of the 2026-08-25 fix
+is now verified against a real account (see item 2's Done entry below).
+**Next session starts at item 2's "Pick up here" list, step 2: decide on
+the rate-limit fix (open item 3), then start the database/code refactor.**
+Everything else in the open list is smaller or waiting on a decision. Run
+`npm test` before and after touching pair lookup.
 
 Done:
 
@@ -695,18 +694,38 @@ Still open, in priority order:
    item 3 is a live, recurring cost to this work, not just a theoretical
    risk.
 
+   **Done, 2026-08-27 (evening): Slack-side verified against a real
+   account — step 1 above, using a different account than originally
+   planned.** The magic-link approach (`melissaw212+accountD@gmail.com`)
+   was dropped in favor of a simpler path once it was noticed
+   `resolveSlackUser` matches on the Slack profile's **email**, not a
+   Supabase profile — so the counterpart account never needs to sign up
+   for the web app at all, only exist in the Slack workspace. Used
+   `melissahr212@gmail.com` ("monty"), an existing real member of the
+   workspace, and inserted two `pairs` rows directly (SQL Editor —
+   `employee_id`/`manager_id` both null, matching how `create_pair` already
+   represents an invited-but-not-joined partner) making monty employee on
+   one pairing and manager on the other. Signed into Slack as monty and
+   opened the Performance Pulse Home tab: showed "This email address is on
+   more than one Performance Pulse pair, and the app doesn't handle that
+   yet... we're showing nothing — you'd have no way to tell whose numbers
+   you were looking at." — the exact `{ ambiguous: true }` guard from
+   2026-08-25, now confirmed on the real Slack Home tab rather than only
+   against a stubbed test. Cleanup confirmed done: the two monty rows plus
+   two earlier `dhwconsulting3@gmail.com` throwaway rows (from an earlier,
+   abandoned attempt at this same test) were deleted via the SQL Editor and
+   re-checked directly against the database afterward — all four gone.
+   The website-side half was already confirmed live on 2026-08-27 (see
+   above): Account A loads `/dashboard` cleanly with no indication a second
+   pairing exists. Both halves of the 2026-08-25 fix are now verified.
+
    Next session, in order:
-   1. Wait for the hourly window to clear, then send **one** magic link to
-      `melissaw212+accountD@gmail.com`, onboard as employee naming
-      `melissaw212@gmail.com` as manager, then check Slack's Home tab for
-      the "more than one pairing" notice on the real account. Delete the
-      throwaway pairing afterward either way.
-   2. Decide on the rate-limit fix (open item 3) — likely raising "Rate
+   1. Decide on the rate-limit fix (open item 3) — likely raising "Rate
       limit for sending emails" in Supabase's dashboard and/or configuring
       a custom SMTP provider, which typically isn't bound by this default
       at all. Worth doing before more testing, not after — it's now cost
       time twice.
-   3. **Only after 1 is done**, start the database/code refactor below
+   2. **Only after 1 is done**, start the database/code refactor below
       (`getMyPair` → `listMyPairs`, drop the two unique indexes, add the
       switcher — landing-page and label-format decisions above are
       settled, nothing else is blocking it). Reasoning, unchanged from
