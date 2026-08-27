@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
@@ -8,6 +8,17 @@ export default function LoginPage() {
   const [sent, setSent] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // This page is statically prerendered, so the server never sees the query
+  // string — reading it during render (a lazy useState initializer) would
+  // desync from the static HTML and fail hydration. Reading it post-mount
+  // instead avoids that, at the cost of the error flashing in a tick late.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("error") === "auth") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setError("That sign-in link didn't work — request a new one below.");
+    }
+  }, []);
 
   async function sendLink(e) {
     e.preventDefault();
