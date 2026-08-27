@@ -1,14 +1,17 @@
 # Slack integration — status and what's left
 
-Updated 2026-08-25. DM pings (see `lib/block-kit.js` / `lib/slack-send.js`)
+Updated 2026-08-26. DM pings (see `lib/block-kit.js` / `lib/slack-send.js`)
 and full in-Slack interactivity (Home tab, add/view modals, quick actions —
 see `app/api/slack/events/`, `app/api/slack/interactivity/`, `lib/slack-*.js`)
 are both live in production.
 
-**Next session (2026-08-26): start at open item 2, multi-pair support.** It
-has its own "Pick up here" list. Everything else in the open list is smaller
-or waiting on a decision. Run `npm test` before and after touching pair
-lookup.
+Updated 2026-08-27. Rate limit cleared overnight; Account C is onboarded
+and the middle-manager shape is now real and live (see item 2). **Next
+session starts at item 2's "Pick up here" list, step 3: the Slack-side
+half of the 2026-08-25 fix has still never been verified against a real
+account** — everything needed to test it (a live middle-manager account)
+now exists. Everything else in the open list is smaller or waiting on a
+decision. Run `npm test` before and after touching pair lookup.
 
 Done:
 
@@ -451,6 +454,28 @@ Done:
   four deleted on 2026-08-25) — a stray copy of a migration is worse than a
   stray copy of a component, since it reads as a fifth migration to run.
 
+- **`/login` no longer fails silently on a bad sign-in link — done,
+  2026-08-27.** Found live while testing item 2: `app/auth/callback/route.js`
+  already redirected to `/login?error=auth` on a failed PKCE code exchange
+  (the common case being a magic link clicked in a different browser/session
+  than the one that requested it, which loses the code verifier), but
+  `app/login/page.js` never read that param — the retry form just looked
+  like nothing had happened, no error, no explanation.
+  Fix reads `window.location.search` in a `useEffect` on mount and shows
+  "That sign-in link didn't work — request a new one below." A lazy
+  `useState` initializer was tried first and rejected: `/login` is
+  statically prerendered (confirmed via `next build`'s route summary), so
+  computing the message during render desyncs from the static HTML and
+  throws a hydration error — confirmed live in a local `next dev` session.
+  The `useEffect` version doesn't have that problem since server and client
+  agree on the first render; the one `react-hooks/set-state-in-effect` lint
+  warning it trips is suppressed inline with a comment explaining why.
+  Verified: `npm run lint` and `npm test` clean (one pre-existing,
+  unrelated `react/no-unescaped-entities` error on a different line,
+  confirmed present on the pre-change file too); `npm run build` succeeds;
+  live-verified on production at `/login?error=auth` after deploy.
+  Committed `a4f5eaf`, deployed via `vercel --prod`.
+
 Still open, in priority order:
 
 1. **Save / pause / go-back across forms — Day 1, 2, and 3 all done.**
@@ -564,16 +589,107 @@ Still open, in priority order:
    roles ("You & Dana" reads the same whether you're the manager or the
    employee in it).
 
-   **Pick up here (2026-08-26).** In order:
-   1. Melissa creates the two test accounts above and signs in as one.
-      Expect: the website errors (open item 2's root cause, `getMyPair`),
-      and the Slack Home tab shows the "more than one pairing" notice
-      rather than a blank screen — that second half is the only part of
-      the 2026-08-25 fix never verified against a real account.
+   **Pick up here (2026-08-26, updated same day after live testing).**
+
+   The planned repro above (two fresh signups) turned out not to be
+   needed — melissaw212@gmail.com already has a real `employee_id` row,
+   confirmed live when a throwaway manager account
+   (`melissaw212+testboss@gmail.com`, onboarded as manager naming
+   melissaw212 as employee) got rejected with
+   `duplicate key value violates unique constraint "pairs_employee_id_key"`.
+   No test row was written (the duplicate check fails before insert), so
+   this cost nothing to try.
+
+   **Tested live, same day: nobody is actually in the broken state.**
+   `melissaw212@gmail.com` → `/dashboard` loaded cleanly as **employee** —
+   real topics, real activity, no crash. `dhwconsulting3@gmail.com` →
+   landed on a completely blank `/onboarding` form — it has **no pairing
+   at all**, not a `manager_id` row pointing at melissaw212 as an earlier
+   note here wrongly assumed. So the "middle manager already live in
+   production" theory is **closed out as false**: melissaw212 holds one
+   pairing (employee), dhwconsulting3 holds zero. The bug itself is still
+   real and still worth fixing — it just isn't an active incident. Testing
+   it now needs the deliberate two-signup recipe above (a fresh pair of
+   throwaway accounts), same as originally planned.
+
+   **Repro gotcha found today, worth keeping:** the `/login` page
+   silently bounces back to `/onboarding` if the browser still has a
+   *different* account's session active — it does not show the login
+   form. Fix: sign out first using the app's own **Sign out** button (top
+   right of any dashboard page) before requesting a new magic link for a
+   different account. Also hit Supabase's default email rate limit after
+   ~3-4 magic-link sends in a short window (check **Supabase dashboard →
+   Authentication → Rate Limits** for the exact number/reset window if it
+   happens again). Neither is a bug worth fixing — just notes so this
+   doesn't cost another hour next time.
+
+   **Rate limit checked directly, 2026-08-26 evening — it's 2 emails/hour,
+   project-wide.** Read straight from the Supabase dashboard (Auth → Rate
+   Limits): "Rate limit for sending emails" is set to **2 emails/h**, and
+   it's a single shared bucket for the whole project, not per-address —
+   Supabase's default for a project with no custom SMTP provider
+   configured. Auth logs confirmed the mechanics: two sends land, a third
+   in the same rolling hour gets a 429, and the next success only shows up
+   once the window has aged out (12:02pm and 12:20pm succeeded, 12:28pm
+   429'd; 1:16pm succeeded, 1:19pm 429'd; then nothing until 8:09pm).
+
+   **Account A finished, verified end-to-end via logs (not just clicking
+   through) 2026-08-26 ~8:22pm:** `/otp` 200 at 20:19:01 for
+   `melissaw212+accountA@gmail.com` → `/verify` `user_signedup` 303 at
+   20:19:35 → `POST /rest/v1/rpc/create_pair` 200 at 20:22:44. Onboarded as
+   employee naming `boss@test.com` as manager, exactly per the recipe —
+   pairing 1 exists with `manager_id` null.
+
+   **Currently blocked again, same evening: rate limit hit before Account
+   C could be created.** The main account's own sign-in (8:09pm) plus
+   Account A's signup (8:19pm) already used both of this hour's 2 sends,
+   so the send for `melissaw212+accountC@gmail.com` came back rate-limited
+   before it could go out at all. Purely a clock question again — wait for
+   the hour to roll over, then send once (not twice) to avoid re-tripping
+   it.
+
+   **New finding, raised by Melissa while blocked: the 2/hour cap is a
+   product risk, not just a testing nuisance.** Her words: "people can't
+   get locked out automatically if they make a mistake." She's right —
+   this limit is project-wide in production right now, not a test-only
+   setting. A real employee or manager who mistypes their email, or whose
+   first magic link lands in spam, gets at most one more attempt before a
+   full hour of lockout, and support has no fast path to clear it (raising
+   the limit is a dashboard change, not something the app can do for
+   someone mid-lockout). Worth fixing on its own, independent of the
+   multi-pair work — see new open item 3 below. Not yet fixed; only
+   observed and written down so it doesn't get lost.
+
+   **Done, 2026-08-27: steps 1-2 complete, step 3's website half confirmed
+   live.** Rate limit had cleared (17+ hours since the last 429). Sent one
+   magic link to `melissaw212+accountC@gmail.com`, onboarded as **employee**
+   naming Account A's real address as manager — `create_pair` succeeded,
+   confirming Account A is now a real middle manager (employee on pairing 1
+   with `boss@test.com`, manager on pairing 2 with Account C).
+   Signed in as Account A (same-tab magic-link flow, to avoid the PKCE
+   code-verifier gotcha that prompted the `/login` fix above): landed on
+   `/dashboard` as **employee**, no crash, no error — and no indication
+   anywhere on screen that a second pairing (as Account C's manager) exists.
+   This is the "label problem" the risks section below calls the highest
+   risk in the app, now confirmed against a real account rather than
+   reasoned about.
+
+   Next session, in order:
+   1. **Slack half of step 3, still unverified against a real account.**
+      Confirm the Home tab's "more than one pairing" notice actually
+      appears for Account A in Slack — needs Account A's email to be a
+      member of the workspace the Performance Pulse Slack app is installed
+      in; check that first, since it's the only unmet precondition.
    2. Answer the landing-page question, then the role-labelling question.
-   3. Only then start the database step. Nothing above it is reversible
-      by itself: dropping `pairs_manager_id_key` is what makes broken
-      states creatable, so the app should be ready to handle them first.
+   3. Decide on the rate-limit fix (new open item 3) — likely raising
+      "Rate limit for sending emails" in Supabase's dashboard and/or
+      configuring a custom SMTP provider, which typically isn't bound by
+      this default at all.
+   4. **Only after 1-2 are done**, start the database/code refactor below
+      (`getMyPair` → `listMyPairs`, drop the two unique indexes, add the
+      switcher). Reasoning, unchanged from before: dropping
+      `pairs_manager_id_key` is what makes broken states creatable, so
+      the app should be ready to handle them first.
 
    **The work, in order.**
 
@@ -639,13 +755,30 @@ Still open, in priority order:
      (keyed `pair_id, role`) — drafts are already per-pairing. Verified
      2026-08-25 by reading the schema.
    - **Unaudited:** wrap-up/delete flows that assume "your pair" singular.
-3. **Suggested-content pickers elsewhere.** Topics now has one (see Done,
+3. **Magic-link email rate limit can lock a real user out for an hour.**
+   Found 2026-08-26 while testing multi-pair (see item 2's log). Supabase
+   Auth → Rate Limits has "Rate limit for sending emails" set to **2/hour,
+   project-wide** — the default for a project with no custom SMTP
+   provider. Melissa's framing: "people can't get locked out automatically
+   if they make a mistake." Concretely: a typo'd email, a link that lands
+   in spam, or two people signing in around the same time can burn both
+   slots, and the next real attempt — from anyone in the workspace, not
+   just the person who tripped it — gets a silent lockout with no
+   in-app messaging and no fast fix (this is a Supabase dashboard setting,
+   not something the app can clear for someone mid-lockout).
+   Not fixed yet. Options to weigh: raise the number in the dashboard
+   (quick, but still a shared bucket that scales badly as the workspace
+   grows); configure a custom SMTP provider (Supabase's docs suggest this
+   removes the default cap entirely, un-verified); or add in-app messaging
+   so a rate-limited sign-in at least explains itself instead of failing
+   silently. Needs a decision, not necessarily code, to start.
+4. **Suggested-content pickers elsewhere.** Topics now has one (see Done,
    2026-08-24). Goals/Achievements/Feedback have no suggestion mechanism
    on the website to mirror. Development does, but it's a different,
    keyword-matched "propose activities" flow (button-triggered, not a
    fixed per-category list) — would need its own design for Slack, not a
    copy of the topic pattern.
-4. **Submissions can still exceed Slack's 3s window on a cold start.**
+5. **Submissions can still exceed Slack's 3s window on a cold start.**
    Measured 2026-08-25 against production with a signed synthetic
    `add_goal` submission: **5.2s cold, 1.76s warm** (both include the
    round trip from a laptop, so the server-side figures are a little
@@ -663,7 +796,7 @@ Still open, in priority order:
    never return `response_action: "errors"` (`add_goal` doesn't;
    `add_topic` does). Needs a decision before it's worth building.
 
-5. **You can't tell your own topics apart in Slack's list modals.**
+6. **You can't tell your own topics apart in Slack's list modals.**
    Found by Melissa 2026-08-25: the "Open topics" modal showed two rows
    both reading `Where things stand`, one "added yesterday" and one
    "added just now", and she read it as a duplication bug. It isn't — the
