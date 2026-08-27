@@ -583,11 +583,14 @@ Still open, in priority order:
    one screen, and the editable display name (`editNameModal`) is what
    makes pairings tell apart in the switcher.
 
-   **Still to decide (2026-08-26):** what a manager lands on — straight
-   into the last pairing they viewed, or a list page first; and what the
-   switcher shows for a middle manager whose two pairings have different
-   roles ("You & Dana" reads the same whether you're the manager or the
-   employee in it).
+   **Decided 2026-08-27 (Melissa):** a manager with multiple pairings
+   lands on whichever pairing they last viewed, not a list/switcher page
+   first — fewer clicks for the common case of mostly working with one
+   person. And the switcher label stays just the other person's name
+   ("You & Dana") regardless of your role in that pairing — no "(as
+   manager)"/"(as employee)" suffix. Both of the "still to decide" items
+   from 2026-08-26 are now settled; nothing left blocking the database
+   step on a decision.
 
    **Pick up here (2026-08-26, updated same day after live testing).**
 
@@ -674,22 +677,41 @@ Still open, in priority order:
    risk in the app, now confirmed against a real account rather than
    reasoned about.
 
+   **New finding, 2026-08-27: the Account A/B/C test scheme can't test the
+   Slack side at all.** `resolveSlackUser` matches by the email on the
+   *Slack* profile of whoever opened the app, and Melissa's real Slack
+   identity is `melissaw212@gmail.com` — the plus-addressed test accounts
+   have no corresponding Slack member, so they can never trigger the
+   ambiguous-pairing path no matter how their web pairings are arranged.
+   Testing the Slack half needs the middle-manager shape on the real
+   account instead: a new throwaway account signs up as employee naming
+   `melissaw212@gmail.com` as manager, which (per the same index logic as
+   Account A) succeeds without disturbing her existing employee pairing —
+   then delete that throwaway pairing once the Home tab is checked.
+   **Attempted, blocked by the rate limit again:** sent one magic link to
+   a new throwaway (`melissaw212+accountD@gmail.com`) to start this: the
+   *third* send in the rolling hour (after Account C and Account A
+   earlier), and it came back "email rate limit exceeded" — confirms open
+   item 3 is a live, recurring cost to this work, not just a theoretical
+   risk.
+
    Next session, in order:
-   1. **Slack half of step 3, still unverified against a real account.**
-      Confirm the Home tab's "more than one pairing" notice actually
-      appears for Account A in Slack — needs Account A's email to be a
-      member of the workspace the Performance Pulse Slack app is installed
-      in; check that first, since it's the only unmet precondition.
-   2. Answer the landing-page question, then the role-labelling question.
-   3. Decide on the rate-limit fix (new open item 3) — likely raising
-      "Rate limit for sending emails" in Supabase's dashboard and/or
-      configuring a custom SMTP provider, which typically isn't bound by
-      this default at all.
-   4. **Only after 1-2 are done**, start the database/code refactor below
+   1. Wait for the hourly window to clear, then send **one** magic link to
+      `melissaw212+accountD@gmail.com`, onboard as employee naming
+      `melissaw212@gmail.com` as manager, then check Slack's Home tab for
+      the "more than one pairing" notice on the real account. Delete the
+      throwaway pairing afterward either way.
+   2. Decide on the rate-limit fix (open item 3) — likely raising "Rate
+      limit for sending emails" in Supabase's dashboard and/or configuring
+      a custom SMTP provider, which typically isn't bound by this default
+      at all. Worth doing before more testing, not after — it's now cost
+      time twice.
+   3. **Only after 1 is done**, start the database/code refactor below
       (`getMyPair` → `listMyPairs`, drop the two unique indexes, add the
-      switcher). Reasoning, unchanged from before: dropping
-      `pairs_manager_id_key` is what makes broken states creatable, so
-      the app should be ready to handle them first.
+      switcher — landing-page and label-format decisions above are
+      settled, nothing else is blocking it). Reasoning, unchanged from
+      before: dropping `pairs_manager_id_key` is what makes broken states
+      creatable, so the app should be ready to handle them first.
 
    **The work, in order.**
 
