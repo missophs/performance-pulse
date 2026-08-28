@@ -337,10 +337,10 @@ begin
   values (new.id, new.email, coalesce(new.raw_user_meta_data ->> 'full_name', ''));
 
   update pairs set employee_id = new.id
-  where employee_email = new.email and employee_id is null;
+  where lower(employee_email) = lower(new.email) and employee_id is null;
 
   update pairs set manager_id = new.id
-  where manager_email = new.email and manager_id is null;
+  where lower(manager_email) = lower(new.email) and manager_id is null;
 
   return new;
 end;
@@ -373,7 +373,13 @@ begin
     raise exception 'no profile for current user';
   end if;
 
-  select id into partner_id from profiles where email = partner_email;
+  -- Emails are matched and stored case-insensitively (lower()) so a partner
+  -- typed as "Name@Example.com" still links to an account signed up as
+  -- "name@example.com" instead of silently leaving manager_id/employee_id null.
+  my_email := lower(my_email);
+  partner_email := lower(partner_email);
+
+  select id into partner_id from profiles where lower(email) = partner_email;
 
   if my_role = 'employee' then
     insert into pairs (employee_id, manager_id, employee_email, manager_email)

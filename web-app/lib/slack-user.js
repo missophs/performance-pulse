@@ -19,7 +19,10 @@ import { slackApi } from "@/lib/slack-api";
  */
 export async function resolveSlackUser(supabaseAdmin, slackUserId) {
   const info = await slackApi("users.info", { user: slackUserId });
-  const email = info.user?.profile?.email;
+  // Lowercased to match how create_pair/handle_new_user now store and look up
+  // employee_email/manager_email — Slack preserves whatever case the user's
+  // email was entered with, which won't always match.
+  const email = info.user?.profile?.email?.toLowerCase();
   if (!email) return null;
 
   // PostgREST .or() parses this as a filter expression, not a literal — a
