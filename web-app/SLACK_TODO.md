@@ -5,12 +5,16 @@ and full in-Slack interactivity (Home tab, add/view modals, quick actions —
 see `app/api/slack/events/`, `app/api/slack/interactivity/`, `lib/slack-*.js`)
 are both live in production.
 
-Updated 2026-08-27 (evening). The Slack-side half of the 2026-08-25 fix
-is now verified against a real account (see item 2's Done entry below).
-**Next session starts at item 2's "Pick up here" list, step 2: decide on
-the rate-limit fix (open item 3), then start the database/code refactor.**
-Everything else in the open list is smaller or waiting on a decision. Run
-`npm test` before and after touching pair lookup.
+Updated 2026-08-27 (late evening). The Slack-side half of the 2026-08-25
+fix is verified against a real account. The *website*-side "Account A
+verified as a live middle manager" claim below is **retracted** — it was
+wrong, caused by a newly-found and now-fixed case-sensitive email bug (see
+item 2's Done entries). **Next session starts at item 2's new "Pick up
+here" list: clean up the two orphaned test rows, redo the middle-manager
+repro correctly, then actually test `getMyPair`/`/dashboard` against it —
+that question is still genuinely open.** Everything else in the open list
+is smaller or waiting on a decision. Run `npm test` before and after
+touching pair lookup.
 
 Done:
 
@@ -676,6 +680,57 @@ Still open, in priority order:
    risk in the app, now confirmed against a real account rather than
    reasoned about.
 
+   **Retracted, 2026-08-27 (late evening): Account A was never actually a
+   middle manager, and the "no crash" observation above is not evidence of
+   anything.** Root cause found while trying to verify the discrepancy a
+   code-review gut-check flagged (`getMyPair` uses the same
+   `.maybeSingle()` pattern the Slack fix removed, so it should crash on a
+   real middle manager — but the paragraph above says it didn't).
+   `create_pair` (`schema.sql:376`) looked up the partner's profile with a
+   plain case-sensitive `where email = partner_email`. Account C had typed
+   Account A's address as `melissaw212+accountA@gmail.com` (capital A);
+   Supabase Auth stores the real account as
+   `melissaw212+accounta@gmail.com` (lowercase, confirmed live). Capital-A
+   never matched lowercase-a, so pairing 2's `manager_id` silently stayed
+   `null` — confirmed directly against the database:
+   ```
+   {"id":"29d4b909-...","employee_id":"18e7c6b2-...","manager_id":null,
+    "employee_email":"melissaw212+accountc@gmail.com",
+    "manager_email":"melissaw212+accountA@gmail.com", ...}
+   ```
+   `getMyPair`'s query (`employee_id.eq.<A> or manager_id.eq.<A>`) only
+   ever matched Account A's *one* genuinely-linked pairing (as employee),
+   never two — which is the entire reason `/dashboard` loaded without a
+   crash. Not because the app handles the middle-manager case; because the
+   test never built the middle-manager case in the first place.
+   **Net effect: the `getMyPair` crash risk is unpatched at the code level
+   (confirmed via direct `@supabase/postgrest-js` source read —
+   `.maybeSingle()` on 2 rows produces a thrown `PGRST116` error, same
+   mechanism the Slack fix removed) and still completely unverified against
+   real data.** Nobody has actually triggered it yet.
+
+   **Fixed same session, live in production:** `create_pair` and
+   `handle_new_user` (`schema.sql`) now lowercase both sides of every email
+   comparison and lowercase what gets stored, so this can't recur for any
+   *new* pairing; `resolveSlackUser` (`lib/slack-user.js`) now lowercases
+   the Slack-side email it compares against `employee_email`/
+   `manager_email` for the same reason. Committed `8f6e8b8`. The database
+   functions were verified live (not just read from the file) by pasting
+   the replacement SQL into the Supabase SQL Editor, running it ("Success.
+   No rows returned"), then reading `create_pair` back out with
+   `select pg_get_functiondef('create_pair'::regproc)` and confirming the
+   `lower(...)` calls are actually in the live function. **This fix does
+   not retroactively repair the two orphaned rows below** — those still
+   have `manager_id: null` and need to be dealt with by hand.
+
+   **Two orphaned rows still in the database, not yet cleaned up:**
+   - `29d4b909-a7a6-4a95-bda4-1da2446519e7` — Account C as employee,
+     `manager_id null`, `manager_email` = Account A's address typed with
+     capital A.
+   - `2a0e4b7b-41a9-42e8-88f4-d00eac08c136` — Account A's real pairing
+     (employee, `boss@test.com` as manager) — not orphaned itself, just
+     listed here since it's the other half of the same test setup.
+
    **New finding, 2026-08-27: the Account A/B/C test scheme can't test the
    Slack side at all.** `resolveSlackUser` matches by the email on the
    *Slack* profile of whoever opened the app, and Melissa's real Slack
@@ -720,12 +775,24 @@ Still open, in priority order:
    pairing exists. Both halves of the 2026-08-25 fix are now verified.
 
    Next session, in order:
-   1. Decide on the rate-limit fix (open item 3) — likely raising "Rate
+   1. Deal with the two orphaned rows above — either delete both and have
+      Account C redo onboarding (now safe: `create_pair`'s lookup is
+      case-insensitive as of `8f6e8b8`, so even a re-typed capital A would
+      link correctly), or hand-run an `update pairs set manager_id = ...`
+      against the orphaned row to link it without redoing onboarding.
+   2. With a genuine middle-manager account in hand, sign in as Account A
+      and actually load `/dashboard` — this is the real test the
+      2026-08-27 entries above never performed. Expect a crash
+      (`.maybeSingle()` → thrown `PGRST116`, per the code-level finding
+      above); confirm what the user actually sees (Next's default error
+      page, or something else — `app/(dashboard)/layout.js` has no
+      `error.js` boundary, confirmed by its absence anywhere under `app/`).
+   3. Decide on the rate-limit fix (open item 3) — likely raising "Rate
       limit for sending emails" in Supabase's dashboard and/or configuring
       a custom SMTP provider, which typically isn't bound by this default
       at all. Worth doing before more testing, not after — it's now cost
       time twice.
-   2. **Only after 1 is done**, start the database/code refactor below
+   4. **Only after 1-3 are done**, start the database/code refactor below
       (`getMyPair` → `listMyPairs`, drop the two unique indexes, add the
       switcher — landing-page and label-format decisions above are
       settled, nothing else is blocking it). Reasoning, unchanged from
