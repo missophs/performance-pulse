@@ -1193,35 +1193,12 @@ Still open, in priority order:
     only to the auto-generated `AGENTS.md`, which states no checkable
     coding rule).
 
-1. **Save / pause / go-back across forms — Day 1, 2, and 3 all done.**
-   Only the check-in wizard has a real draft-save + resume +
-   back-navigation flow (plus a separate, simpler `review_drafts`
-   table/pattern used by the review flow — `getReviewDraft`/
-   `saveReviewDraft` in `lib/data.js`, one draft per pair+role, upserted)
-   and now Topics, Goals, Development, Achievements, and Feedback (give
-   mode) all have autosave/restore/discard on their "add new" forms (see
-   Done, 2026-08-24). Melissa asked for this explicitly on 2026-08-24
-   ("a way to go back... if someone wants to change something before
-   they submit") — this is the third and last item from that request;
-   the other two (suggested topics, delayed Slack pings) are done, see
-   Done section above.
-
-   Agreed plan (2026-08-24), broken over a few days at Melissa's request:
-   - **Day 1 (done, 2026-08-24):** `form_drafts` table +
-     `getFormDraft`/`saveFormDraft`/`clearFormDraft`, wired into the
-     topic-add form as proof of concept. See Done section above.
-   - **Day 2 (done, 2026-08-24):** rolled the same pattern to the other
-     4 website forms (Goals, Development, Achievements, Feedback — give
-     mode). See Done section above.
-   - **Day 3 (done, 2026-08-24):** Slack side. Slack can't autosave on
-     Cancel/X — `view_closed` drops free-text field values, a platform
-     limit, not a bug (see Done section above). Shipped an explicit
-     "Save draft" button in each of the 5 add-modals instead: click it
-     anytime while filling the form (including the paragraph fields),
-     it saves to the same `form_drafts` row the website uses, and shows
-     a "Draft saved" confirmation. Reopening that form later — in
-     Slack or on the website — comes back pre-filled. Live-verified
-     end-to-end, see Done section above.
+1. ~~Save / pause / go-back across forms.~~ **Done — Day 1, 2, and 3 all
+   shipped 2026-08-24, full detail in the Done section above.** Kept as a
+   one-line stub (not deleted) only so items 2-5 below don't have to be
+   renumbered — several Done entries above cite them by number ("see open
+   item 2/3"), and renumbering would make those citations point at the
+   wrong thing. Nothing left to do here.
 2. **Multi-pair support: one account, several 1:1 relationships.** This is
    now the biggest open item, and it is not the "rare edge case" the old
    item 2 called it.
@@ -1705,19 +1682,13 @@ Still open, in priority order:
    never return `response_action: "errors"` (`add_goal` doesn't;
    `add_topic` does). Needs a decision before it's worth building.
 
-6. ~~You can't tell your own topics apart in Slack's list modals.~~ **Fixed
-   as a side effect of 2026-08-28's edit-topic work, see Done.** Found by
-   Melissa 2026-08-25: the "Open topics" modal showed two rows both reading
-   `Where things stand`, one "added yesterday" and one "added just now",
-   read as a duplication bug — it wasn't, topic text was deliberately
-   redacted there (Slack treated as a wider trust boundary than the app).
-   That tradeoff was revisited and reversed 2026-08-28 at Melissa's request
-   (see Done): `listTopicsModal` now shows the real topic text, which
-   removes this ambiguity as a direct consequence — every row is now
-   distinguished by its actual words, not just category + relative date.
-   Still true for every *other* redacted list modal (goals, achievements,
-   feedback) — this item only ever covered topics, and those weren't
-   revisited.
+6. ~~You can't tell your own topics apart in Slack's list modals.~~ **Done
+   — fixed as a side effect of 2026-08-28's edit-topic work, full detail in
+   the Done section above.** Kept as a one-line stub for the same reason
+   as item 1. The one thing still worth knowing: this item only ever
+   covered Topics — the identical redaction still applies to every other
+   kind (goals, achievements, feedback) and is tracked under item 0b
+   above, not here.
 
 Not built, deliberately out of scope so far: the `"upcoming"` (1:1
 reminder) ping — nothing triggers it yet; it needs a scheduled job, not
