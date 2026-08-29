@@ -81,6 +81,16 @@ full detail for each is in "Still open" below, this is just the map:**
   concerns tracker, documents, handbook links, custom suggestions, the
   quick-notes tool). Found on today's audit; no decision made on whether
   any of them should ever reach Slack.
+- **0h — the Slack integration's own plumbing has real, undocumented gaps
+  that a feature-comparison lens can't see**, since there's no website
+  equivalent to compare against: no Slack env vars documented anywhere,
+  no visible signal if the bot token ever expires (the app would look
+  fully healthy from the website while every Slack DM silently stops), no
+  rate-limit handling, and no install/OAuth flow at all — this only works
+  as one hardcoded workspace, which matters if the Slack Marketplace
+  listing goal ever gets picked up. Found on a second, independent audit
+  today specifically checking for this blind spot, after Melissa asked
+  "does it reflect Slack also? Not just the app."
 
 **Below this section:** a long chronological log (oldest fixes moved into
 Done, open work in "Still open, in priority order") kept for detail and
@@ -952,6 +962,70 @@ Still open, in priority order:
     (concerns, career conversations) may be intentionally website-only by
     nature of what they're for.
 
+0h. **NEW, found on a second, independent 2026-08-29 audit specifically
+    checking whether this file covers Slack-as-infrastructure, not just
+    website-vs-Slack feature parity.** Melissa asked directly: "does it
+    reflect Slack also? Not just the app." It didn't, on these points —
+    every item 0-0g above is about *feature* parity; none of them are
+    about the integration's own plumbing, which has real, undocumented
+    exposure:
+    - **No Slack env vars are documented anywhere.** `.env.local.example`
+      lists only the two Supabase vars — `SLACK_BOT_TOKEN`,
+      `SLACK_SIGNING_SECRET`, `SLACK_NOTIFY_WEBHOOK_SECRET`
+      (`app/api/slack/notify/route.js`), and `SUPABASE_SERVICE_ROLE_KEY`
+      are required by the code but named nowhere for anyone setting up a
+      second environment or redeploying from scratch. The migration file
+      `supabase/migrations/0005_slack_notify_trigger.sql` already warns,
+      in its own comment, that a reset/new-environment scenario makes
+      Slack DMs "stop silently" — this is the missing other half of that
+      same warning.
+    - **A dead Slack integration would look completely healthy from the
+      website.** Every Slack API failure (`lib/slack-send.js`,
+      `lib/slack-api.js`) fails soft into a `console.error` and nothing
+      else — if `SLACK_BOT_TOKEN` expires or a scope gets revoked in
+      Slack's admin panel, every DM silently stops while the in-app
+      notification bell keeps working fine, so nothing on-screen would
+      ever tell anyone the integration died. The database trigger side is
+      the same: `net.http_post` in migration 0005 is fire-and-forget, and
+      nothing reads back its response for failures.
+    - **No rate-limit handling.** `slackApi()` (`lib/slack-api.js`) throws
+      on any non-ok response, including a 429 — no backoff, no reading
+      `Retry-After`. Low risk at today's single-tiny-workspace scale, but
+      `resolveSlackUser` calls Slack's `users.info` on every single click,
+      so volume isn't zero.
+    - **This only works as one hardcoded workspace — there's no
+      install/OAuth flow.** One global bot token and signing secret, no
+      `team_id`/`enterprise_id` anywhere in the schema, no
+      `oauth.v2.access` call, no Slack app manifest in the repo. Not a bug
+      against how it's used today, but a real, unaddressed gap against
+      wanting a Slack Marketplace listing eventually (per Melissa's own
+      stated longer-term goal) — a Marketplace app fundamentally needs a
+      per-workspace install flow, which doesn't exist in any form yet.
+    - **`app/api/slack/events/route.js` only ever handles
+      `app_home_opened`** (its own header comment says so) — nothing
+      handles `app_uninstalled`/`tokens_revoked`, so an uninstall in
+      Slack wouldn't be noticed by this app at all.
+    - **No idempotency protection**, worth writing down as a known
+      assumption rather than a bug: nothing dedups a `view_submission` or
+      checks Slack's retry header. Low practical exposure today —
+      confirmed Slack does not auto-retry interactivity payloads the way
+      it retries Events API deliveries, and the one event type actually
+      handled (`app_home_opened`) is naturally safe to replay — but this
+      is an assumption the code relies on without stating it anywhere.
+    - **What's already solid, confirmed by this second pass, not just
+      claimed:** request signature verification (`lib/slack-verify.js`)
+      is a proper HMAC-SHA256 timing-safe comparison with a 5-minute
+      clock-skew check — genuinely fine as-is, no action needed there.
+
+    None of this is a "drop everything" fix at today's scale (one small
+    workspace, low volume) — the two worth prioritizing if any of this
+    gets picked up are the env-var documentation (cheap, prevents a real
+    future outage) and the silent-failure-on-token-expiry risk (a
+    "Slack integration health" indicator somewhere a human would actually
+    see, even something as simple as logging a distinctive string worth
+    grepping for). The OAuth/multi-workspace gap only matters if the
+    Marketplace-listing goal gets picked up.
+
 1. **Save / pause / go-back across forms — Day 1, 2, and 3 all done.**
    Only the check-in wizard has a real draft-save + resume +
    back-navigation flow (plus a separate, simpler `review_drafts`
@@ -1313,18 +1387,19 @@ Still open, in priority order:
    yet" notice (same wording as the Slack guard) instead of rendering the
    dashboard.
 
-   **Caveat found on a 2026-08-29 audit, not yet a live bug but fragile:**
-   `components/NotificationBell.js:32` calls `getMyPair` a *second* time,
-   independently of the one `layout.js` already computed, and later reads
-   `pair.next_1on1_date` off the result (line 51) with no `ambiguous`
-   check. Not reachable today only because `layout.js`'s early return
-   replaces the whole dashboard tree (NotificationBell included) with the
-   notice before NotificationBell ever mounts — but if NotificationBell is
-   ever rendered somewhere that early return doesn't guard (a future
-   refactor, a different layout), this breaks silently (`next_1on1_date`
-   undefined → an invalid date fed into day-counting logic). Worth making
-   NotificationBell defensive on its own rather than relying on
-   `layout.js` being the only thing standing in front of it.
+   **Caveat found on a 2026-08-29 audit, corrected by a second pass the
+   same day — real but milder than first written.** `components/
+   NotificationBell.js:32` calls `getMyPair` a *second* time, independently
+   of the one `layout.js` already computed. **The first pass overstated
+   what happens next:** line 50 guards with `if (pair?.next_1on1_date)`
+   before ever reaching the day-counting logic on line 51, so an
+   `{ambiguous: true}` result (which has no `next_1on1_date`) just makes
+   that `if` false — the reminder silently doesn't show, there's no
+   invalid date, no crash. The redundant second `getMyPair` call is still
+   real and still worth cleaning up (one wasted query, and one more place
+   that would need updating if the ambiguous-pair shape ever changes), but
+   it's a tidiness issue, not a fragility risk the way this entry
+   originally described it.
 
    Verified: `npm run build`, `npm run lint`, `npm test` all clean before
    deploy. Deployed via `vercel --prod`. **Live-verified end to end:**
