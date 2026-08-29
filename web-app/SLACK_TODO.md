@@ -11,7 +11,9 @@ in the repo root is an old, never-installed prototype — "the app" always
 means `web-app/`.
 
 **Committed and pushed to GitHub (`performance-pulse/main`) as of this
-session** — two commits, `cbba37e` and `e38d06f`:
+session** — five commits, `cbba37e` through `cd8e7d9` (`git log` for the
+full list — don't hardcode a commit list here again, it'll go stale the
+same way this line just did):
 - Case-insensitive email matching (citext) for invite/pairing lookups, and
   a guard + website notice for accounts on more than one pair (middle
   managers, multi-report managers) instead of the app silently guessing.
@@ -29,29 +31,81 @@ session** — two commits, `cbba37e` and `e38d06f`:
   writeup in the Done section below if picking this pattern up again.
 - Home tab: "Add a topic" is now the highlighted button instead of "Wrap
   up a 1:1."
+- SLACK_TODO.md itself rewritten with this summary, and then audited
+  end-to-end against the actual codebase (every `lib/*.js`, every
+  `app/(dashboard)/*` page, the full `supabase/schema.sql`) so nothing
+  real is missing from it — see the new items 0c through 0g below,
+  none of which existed anywhere in this file before today.
 
-**Top open item, not started — see item 0b below for full detail:**
-Goals (and likely Actions/Development/Achievements/Feedback — same
-pattern, not yet checked) only show a count summary in Slack
-("3 goals · 2 In Progress") with a "Open goals in the app for the full
-text" link — same redaction Topics had until 2026-08-28, when Melissa
-asked for real text to show in Slack instead. She's now asked for the same
-for Goals: "making sure when you're in Slack, the goals, it doesn't make
-you open the app." Requires checking each kind's list modal individually
-before changing — don't assume they're all identical.
+**A note on the lint-error count** appearing throughout this file at
+different numbers (1, 16, 34 depending on the date) — that's real growth
+over time, not a contradiction between entries: each entry recorded the
+actual count *at that time*, and more `react-hooks/set-state-in-effect`
+violations accumulated in untouched code as the app grew. **Current
+baseline, confirmed by actually running `npm run lint` on 2026-08-29: 34
+errors, all pre-existing, none introduced by anything in this file's Done
+section.** Trust a fresh lint run over any number written down here.
 
-**Second open item, not started, needs a design decision before coding —
-see item 0 below:** adding/editing shouldn't ping the other person
-immediately; only an explicit "Submit" action should. Melissa asked for
-this on 2026-08-28, corrected a wrong first read of it twice, and it's
-been sitting since — don't build this from a guess at scope/mechanism,
-confirm with her first (the "not yet designed" list in item 1 is still
-accurate).
+**A note on "verified" claims below that describe test cases** ("9
+grouping cases pass," "10 notification cases pass," etc.) — confirmed on
+today's audit by actually running `npm test`: the only thing that command
+executes is `test/slack-user.test.mjs`, 5 tests, all pinning
+`resolveSlackUser`'s branches (that part of every "tests 5/5" claim in
+this file checks out exactly). The batching/grouping/category-mismatch
+verifications described elsewhere were real, one-off manual checks at the
+time, not regression tests — nothing enforces they still pass today. Read
+those as "confirmed once," not "covered by the test suite."
+
+**Open items, not started, in the order they'd probably matter most —
+full detail for each is in "Still open" below, this is just the map:**
+- **0 — decouple "submit" from add/edit.** Needs a design decision before
+  coding (scope, mechanism, UI — see item 0's "not yet designed" list).
+  Melissa asked for this 2026-08-28, corrected a wrong first read of it
+  twice.
+- **0b — Goals, and every kind except Topics, redact real content in
+  Slack's list views**, down to exactly which fields are shown vs. hidden
+  per kind (Goals/Dev plans/Achievements/Feedback/Actions/Last meeting).
+  Melissa: "making sure when you're in Slack, the goals, it doesn't make
+  you open the app."
+- **0c — Slack has no delete, for any kind, ever.** Not previously
+  flagged; found on today's audit.
+- **0d — Slack has no edit for Goals/Dev plans/Actions**, only Topics.
+  Found on today's audit.
+- **0e — feedback requests can't actually be fulfilled from Slack** — a
+  real, already-broken flow (not just a gap), found on today's audit.
+- **0f — every Slack add-form is missing fields** the website version has
+  (owner on Goals, measure on Dev plans, notes on Actions, most of
+  wrap-up, topic notes). Found on today's audit.
+- **0g — several whole website features have zero Slack presence** and
+  were never mentioned in this file before today (career conversations,
+  concerns tracker, documents, handbook links, custom suggestions, the
+  quick-notes tool). Found on today's audit; no decision made on whether
+  any of them should ever reach Slack.
 
 **Below this section:** a long chronological log (oldest fixes moved into
 Done, open work in "Still open, in priority order") kept for detail and
 citations — this new section is the one to read first, the log below is
 for when you need the specifics of something already summarized above.
+
+**Full file/table inventory, for completeness — not action items, just so
+nothing in the codebase is unaccounted for in this document.** These exist,
+work, are fine as-is, and just hadn't been named anywhere in this file
+before today's audit:
+- `lib/development-content.js` (dev-plan types/ideas/keyword-matching
+  rules), `lib/export-builders.js` (all Export-tab document/spreadsheet
+  generation), `lib/badges.js` (status→badge-color mappings),
+  `lib/one-on-one-content.js` (source of `SUGGESTIONS`/`TOPIC_CATEGORIES`,
+  referenced conceptually elsewhere but never by filename),
+  `lib/slack-home-data.js` (the shared `loadHomeData` helper every Slack
+  view reads from).
+- `pairs.hr_email`, `pairs.assist_enabled`, `pairs.how_to_hidden`
+  (`supabase/schema.sql`) — an HR-export contact address, a coaching-nudge
+  toggle, and a dismissible how-to banner flag. No open question attached
+  to any of the three, just noting they exist.
+- `meetings.meeting_time`, `revisit`, `start_line`/`stop_line`/
+  `keep_line`, `checkin90_date`, `topics_snapshot` — the fuller wrap-up
+  fields item 0f above already covers as a Slack-parity gap; listed here
+  too since the audit that found them was reading the schema directly.
 
 Done:
 
@@ -762,8 +816,13 @@ Still open, in priority order:
     - **Goals** (`listGoalsModal`) — count + status breakdown only:
       `"3 goals on record\n2 In Progress · 1 Complete"`, then "Open goals
       in the app for the full text." No goal text, target date, or
-      measure ever shown. `addGoalModal` already lets you create a goal
-      fully in Slack — this is a view-side gap only.
+      measure ever shown. **Correction to what this entry said earlier
+      today:** `addGoalModal` does NOT let you create a full goal in
+      Slack — it's missing owner, progress, obstacles, and support, all
+      of which the website form has (`app/(dashboard)/goals/page.js`).
+      This is a view-side gap AND an add-side gap, not view-only. See the
+      new item 0c below for the full add-side field-parity picture across
+      every kind.
     - **Development plans** (`listDevPlansModal`) — identical shape to
       Goals: count + status breakdown, "Open plans in the app for the
       full text." No area, activity, or target date shown.
@@ -810,6 +869,88 @@ Still open, in priority order:
     trust boundary than the app — workspace admins can export message/view
     history), not an oversight, so extending it to any other kind is also
     a real decision, not just a copy-paste.
+
+0c. **NEW, found on a 2026-08-29 full-codebase audit — delete doesn't exist
+    in Slack at all, for any kind.** Melissa asked "make sure ... all the
+    other pieces are fixed" and this audit was run specifically to find
+    everything not yet on this list, not just Goals. The website has
+    delete for topics (`deleteTopics`, `lib/data.js`), goals
+    (`deleteGoal`), development plans (`deleteDevelopmentPlan`), actions
+    (`deleteAction`), and achievements (`deleteAchievement`) — Slack has
+    no delete affordance anywhere, for anything. Not previously flagged.
+    Needs a decision on whether Slack should get delete at all (it's a
+    destructive action, arguably fine to require the website for it on
+    purpose) before building anything — don't assume parity is the goal
+    here the way it is for viewing/editing.
+
+0d. **NEW, found on the same audit — edit exists on the website for Goals,
+    Development plans, and Actions, with no Slack equivalent; Topics is
+    the only kind Slack can edit.** Website `saveGoal`, `saveDevelopmentPlan`,
+    and `saveAction` (`lib/data.js`) are id-based upserts, so the website
+    already supports add-or-edit for these three — Slack's `OPENERS`/
+    `SUBMISSIONS` (`app/api/slack/interactivity/route.js`) have no
+    `edit_goal`/`edit_devplan`/`edit_action` anywhere, only `edit_topic`
+    (2026-08-28). If the plan is eventually "every kind works like Topics
+    now does," this is the edit-side half of that — item 0b above is the
+    view-side half. Not started.
+
+0e. **NEW, found on the same audit — feedback requests can't actually be
+    fulfilled from Slack; the two buttons that look like they do it both
+    fall short.** Website: answering a request writes a real feedback
+    entry *and* closes the request in one atomic step
+    (`app/(dashboard)/performance/page.js`). Slack has two separate,
+    disconnected paths instead:
+    - "Mark answered" (`feedback_request_answered`,
+      `app/api/slack/interactivity/route.js`) closes the request but
+      captures **no feedback content at all** — it's just a status flip.
+    - The digest DM's "Answer it" button (`lib/block-kit.js`, request
+      kind) opens the generic "Give feedback" modal (`open_add_feedback`)
+      with **no request id threaded through it** — submitting it creates
+      a feedback entry, but never closes the request it was meant to
+      answer.
+    Net effect: there is currently no way to genuinely fulfill a feedback
+    request from Slack — both buttons do half the job. Needs a real fix
+    (thread the request id through "Answer it" into a modal that both
+    saves the entry and closes the request), not just documentation.
+
+0f. **NEW, found on the same audit — every Slack add-form is missing
+    fields the website form has,** beyond the redaction gaps in 0b:
+    - **Goals** (`addGoalModal`): missing owner (hardcoded to whoever
+      submits it — no way to assign a goal to your partner from Slack),
+      progress, obstacles, support.
+    - **Development plans** (`addDevPlanModal`): missing why, support,
+      measure.
+    - **Actions** (`addActionModal`): missing related, notes.
+    - **Wrap-up** (`wrapUpModal`): captures only date/discussed/agreed/
+      topics-covered — website's `saveWrapUp` also captures meeting time,
+      revisit, start/stop/keep, and a 90-day check-in date, none of which
+      are reachable from Slack.
+    - **Topics**: the website's free-text `notes` field (per-topic,
+      separate from `why`) has no Slack equivalent in either
+      `listTopicsModal` or `editTopicModal`.
+    Not started, not scoped — decide per-field whether it's worth adding
+    to a Slack modal (some, like a 90-day check-in date picker, might
+    reasonably stay website-only) rather than blindly matching every
+    field 1:1.
+
+0g. **NEW, found on the same audit — whole website features with no Slack
+    presence at all, never previously mentioned in this file:** the
+    check-in wizard's actual Slack absence (the wizard itself is
+    referenced once above for its *website* draft-save flow, but never
+    flagged as having zero Slack surface), Career conversations
+    (`career_answers` table, `app/(dashboard)/career/page.js`,
+    `lib/career-content.js`), the manager-only concerns/"Updates" tracker
+    (`concerns` table, `app/(dashboard)/performance/page.js`), custom
+    suggestions save/delete (`custom_suggestions` table), Documents
+    (upload/link/delete, `documents` table + Storage bucket), Handbook
+    links (`handbook_links` table), and the quick-notes "Hard
+    Conversation" tool (`messages` table, `addFromHardConvo`,
+    `one-on-one/page.js` — previously named only once, as a bug-fix
+    target, never explained as a feature). No decision made on any of
+    these — before building Slack support for any of them, ask whether
+    Melissa even wants that kind reachable from Slack; some of these
+    (concerns, career conversations) may be intentionally website-only by
+    nature of what they're for.
 
 1. **Save / pause / go-back across forms — Day 1, 2, and 3 all done.**
    Only the check-in wizard has a real draft-save + resume +
@@ -1167,10 +1308,23 @@ Still open, in priority order:
    (`lib/data.js`) now uses `.limit(2)` and returns `{ ambiguous: true }`
    on two rows instead of throwing. `app/(dashboard)/layout.js` — the one
    shared shell every dashboard route renders through, so fixing it here
-   covers all nine `getMyPair` call sites without touching each page —
+   covers every `getMyPair` call site without touching each page —
    branches on `pair.ambiguous` and shows a "Multiple pairs not supported
    yet" notice (same wording as the Slack guard) instead of rendering the
    dashboard.
+
+   **Caveat found on a 2026-08-29 audit, not yet a live bug but fragile:**
+   `components/NotificationBell.js:32` calls `getMyPair` a *second* time,
+   independently of the one `layout.js` already computed, and later reads
+   `pair.next_1on1_date` off the result (line 51) with no `ambiguous`
+   check. Not reachable today only because `layout.js`'s early return
+   replaces the whole dashboard tree (NotificationBell included) with the
+   notice before NotificationBell ever mounts — but if NotificationBell is
+   ever rendered somewhere that early return doesn't guard (a future
+   refactor, a different layout), this breaks silently (`next_1on1_date`
+   undefined → an invalid date fed into day-counting logic). Worth making
+   NotificationBell defensive on its own rather than relying on
+   `layout.js` being the only thing standing in front of it.
 
    Verified: `npm run build`, `npm run lint`, `npm test` all clean before
    deploy. Deployed via `vercel --prod`. **Live-verified end to end:**
@@ -1216,11 +1370,15 @@ Still open, in priority order:
    - Existing rows are unaffected — this only widens what's allowed.
 
    *Website*
-   - `getMyPair` (`lib/data.js`) becomes `listMyPairs`. Nine call sites:
-     `app/(dashboard)/layout.js`, `dashboard`, `development`,
-     `performance`, `one-on-one`, `export`, `slack`, `app/onboarding`, and
-     `lib/data.js` itself. They all sit under one shared shell, which is
-     the good news.
+   - `getMyPair` (`lib/data.js`) becomes `listMyPairs`. **Correction,
+     found on a 2026-08-29 audit: this list was missing a caller** — it's
+     ten call sites, not nine: `app/(dashboard)/layout.js`, `dashboard`,
+     `development`, `performance`, `one-on-one`, `export`, `slack`,
+     `app/onboarding`, `lib/data.js` itself, and
+     `components/NotificationBell.js` — which calls `getMyPair`
+     independently rather than reading it from the context `layout.js`
+     already computes. Re-grep `getMyPair(` before touching this, don't
+     trust this list as final either.
    - "Current pairing" needs somewhere to live. A cookie is less work; a
      URL segment (`/p/<pairId>/dashboard`) costs more but makes it
      impossible for two tabs to disagree about who you're looking at. See
