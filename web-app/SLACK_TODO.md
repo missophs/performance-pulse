@@ -91,6 +91,27 @@ full detail for each is in "Still open" below, this is just the map:**
   listing goal ever gets picked up. Found on a second, independent audit
   today specifically checking for this blind spot, after Melissa asked
   "does it reflect Slack also? Not just the app."
+- **0i — three tables (`concerns`, `review_drafts`, `form_drafts`) rely on
+  the UI to hide data that the database itself doesn't actually protect.**
+  RLS only enforces "is a pair member," not "is the *correct* pair
+  member" — an employee can read manager-only concerns about themselves,
+  or the partner's not-yet-submitted draft, via their own browser
+  console. Found on a security audit, not yet fixed, needs a real
+  decision on write-access scope for `concerns` before it's built.
+- **0j — a full `/code-review` of today's session found and fixed two
+  more real bugs** (a dropped validation that could create a blank
+  topic; a bug that silently erased typed text when switching topic
+  suggestions), and documented one bigger unfixed issue: the same
+  "field looks right, saves empty" bug fixed for Topics today also
+  threatens Goals/Dev plans/Achievements/Feedback's "Save draft" button.
+
+**Also fixed this session, in `Done` below:** two IDOR (broken
+authorization) bugs that let a Slack action touch a *different pair's*
+topic data entirely — not a privacy-model tradeoff, a real bug, since
+those two handlers ran on the database's admin client, which bypasses the
+"is a pair member" protection completely. A permanent rule is now in
+`web-app/CLAUDE.md` so this can't quietly repeat when Goals/Dev
+plans/Actions get edit or delete added later.
 
 **Below this section:** a long chronological log (oldest fixes moved into
 Done, open work in "Still open, in priority order") kept for detail and
@@ -143,7 +164,9 @@ Done:
   editing (opened Edit on a real topic, saved, no regression). Full
   finding-by-finding detail, including what was found but deliberately
   NOT fixed live (the same views.update field-refresh bug affecting four
-  other modals' save-draft flows), is in item 0i of the open list below.
+  other modals' save-draft flows), is in item 0j of the open list below.
+  The RLS/permissions gap found in the same security audit but not fixed
+  (concerns/review_drafts/form_drafts) is its own item, 0i, below.
 
 - **Slack's "Add a topic" modal has a genuinely required field now,
   2026-08-29 midday.** Melissa: "we need to make one or both of the fields
@@ -1052,7 +1075,55 @@ Still open, in priority order:
     grepping for). The OAuth/multi-workspace gap only matters if the
     Marketplace-listing goal gets picked up.
 
-0i. **Code review of today's full session diff, 2026-08-29 — two real
+0i. **NEW, security/privacy audit, 2026-08-29 — RLS enforces "is a pair
+    member" everywhere, not "is the *correct* pair member," and three
+    tables need the second kind.** Found in the same audit that caught
+    the two IDOR bugs fixed below (item "Two real IDOR security bugs
+    fixed" in Done) — this part is the one that's NOT fixed yet. Melissa
+    asked "does it reflect Slack also, not just the app" and then "is
+    there anything missing" — this is real and was missing until now.
+
+    Every pair-scoped table in `supabase/schema.sql` uses one shared
+    policy: `is_pair_member(pair_id)`, which checks
+    `employee_id = auth.uid() or manager_id = auth.uid()`. That's correct
+    for tables both partners are equally meant to see — but three tables
+    are explicitly meant to be **one-sided within the pair**, and this
+    policy shape has no way to express that:
+    - **`concerns`** — the manager-only notes tracker. `app/(dashboard)/
+      performance/page.js` marks its tab `mgrOnly: true` and forcibly
+      switches an employee off it in the UI, but the RLS policy grants
+      the **employee** full select/insert/update/delete on rows their own
+      manager wrote about them. Any employee who opens their browser's
+      console and calls the same Supabase client the page already loaded
+      (`supabase.from('concerns').select('*').eq('pair_id', pairId)`) can
+      read every concern logged about them — the tab restriction is a UI
+      convention only, not an actual permission.
+    - **`review_drafts`** (keyed `pair_id, role`) — per-person,
+      not-yet-shared review draft text. The website only ever reads the
+      caller's own role's row, but nothing in the database stops the
+      partner from querying the row keyed to the *other* role directly.
+    - **`form_drafts`** (same shape) — arguably the highest-stakes of the
+      three: this is exactly the in-progress, un-submitted content behind
+      item 0's "don't ping until Submit" request. If a partner can already
+      read the other side's draft before it's ever submitted, that
+      defeats the entire privacy point of that still-unbuilt feature
+      before it's even built.
+
+    This is a design-level gap, not a typo in one policy — `is_pair_member`
+    structurally cannot know which pair member a given table's `role`
+    column is trying to restrict to. Any future "X-only" field added the
+    same way (reusing the existing `pair_scoped_tables` policy loop) will
+    silently inherit the same hole unless it gets a bespoke policy.
+
+    **Fix shape, not yet built:** each of these three tables needs its own
+    policy checking the specific role column against `auth.uid()` via the
+    `pairs` row — e.g. for `concerns`, only the pair's `manager_id` should
+    pass `USING`/`WITH CHECK`, not `is_pair_member`'s either-side check.
+    Confirm with Melissa whether `concerns` should also stay fully
+    write-protected from the employee side (currently they could also
+    insert/update/delete, not just read) before writing the policy.
+
+0j. **Code review of today's full session diff, 2026-08-29 — two real
     security bugs found and fixed immediately, not just documented, plus
     a governance rule added so the class of bug doesn't recur.** Melissa
     asked for a full `/code-review` after the security audit above landed.
