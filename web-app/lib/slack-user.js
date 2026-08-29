@@ -19,9 +19,10 @@ import { slackApi } from "@/lib/slack-api";
  */
 export async function resolveSlackUser(supabaseAdmin, slackUserId) {
   const info = await slackApi("users.info", { user: slackUserId });
-  // Lowercased to match how create_pair/handle_new_user now store and look up
-  // employee_email/manager_email — Slack preserves whatever case the user's
-  // email was entered with, which won't always match.
+  // employee_email/manager_email are citext, so the .eq() filter below already
+  // matches case-insensitively. Still lowercased here because the JS-side
+  // isMgr comparison below is a plain string ===, and pair.manager_email
+  // comes back from the DB in whatever case was originally stored.
   const email = info.user?.profile?.email?.toLowerCase();
   if (!email) return null;
 
@@ -48,7 +49,7 @@ export async function resolveSlackUser(supabaseAdmin, slackUserId) {
 
   const pair = pairs[0];
 
-  const isMgr = pair.manager_email === email;
+  const isMgr = pair.manager_email?.toLowerCase() === email;
   const role = isMgr ? "manager" : "employee";
   const otherRole = isMgr ? "employee" : "manager";
 

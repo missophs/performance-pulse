@@ -3,13 +3,19 @@
 -- Safe to re-run on a fresh project. Not idempotent against a partially-applied version — if you
 -- need to re-run after an error, drop the created objects first or start a new project.
 
+create extension if not exists citext;
+
 -- ============================================================================
 -- profiles — one row per auth user, keeps a copy of email for invite matching
 -- ============================================================================
 
 create table profiles (
   id uuid primary key references auth.users (id) on delete cascade,
-  email text not null,
+  -- citext, not text: every comparison against this column is
+  -- case-insensitive by construction, so a partner typed as "Name@Co.com"
+  -- always matches an account signed up as "name@co.com" without every
+  -- caller having to remember to call lower() itself.
+  email citext not null,
   full_name text not null default '',
   created_at timestamptz not null default now()
 );
@@ -26,8 +32,8 @@ create table pairs (
   id uuid primary key default gen_random_uuid(),
   employee_id uuid references profiles (id) on delete cascade,
   manager_id uuid references profiles (id) on delete cascade,
-  employee_email text not null,
-  manager_email text not null,
+  employee_email citext not null,
+  manager_email citext not null,
   next_1on1_date date,
   next_1on1_time time,
   next_1on1_focus text not null default '',
@@ -336,11 +342,27 @@ begin
   insert into profiles (id, email, full_name)
   values (new.id, new.email, coalesce(new.raw_user_meta_data ->> 'full_name', ''));
 
+  -- Narrowed to the single oldest matching invite (not a bare WHERE) because
+  -- employee_email/manager_email are citext now: two pre-existing pending
+  -- invites for the same address that only differ by case (impossible to
+  -- create going forward, but reachable from rows written before citext)
+  -- would otherwise both match in one UPDATE and collide on
+  -- pairs_employee_id_key/pairs_manager_id_key, aborting this whole signup.
   update pairs set employee_id = new.id
-  where lower(employee_email) = lower(new.email) and employee_id is null;
+  where id = (
+    select id from pairs
+    where employee_email = new.email and employee_id is null
+    order by created_at asc
+    limit 1
+  );
 
   update pairs set manager_id = new.id
-  where lower(manager_email) = lower(new.email) and manager_id is null;
+  where id = (
+    select id from pairs
+    where manager_email = new.email and manager_id is null
+    order by created_at asc
+    limit 1
+  );
 
   return new;
 end;
@@ -373,13 +395,16 @@ begin
     raise exception 'no profile for current user';
   end if;
 
-  -- Emails are matched and stored case-insensitively (lower()) so a partner
-  -- typed as "Name@Example.com" still links to an account signed up as
-  -- "name@example.com" instead of silently leaving manager_id/employee_id null.
-  my_email := lower(my_email);
-  partner_email := lower(partner_email);
-
-  select id into partner_id from profiles where lower(email) = partner_email;
+  -- employee_email/manager_email/profiles.email are citext, so this match is
+  -- already case-insensitive — a partner typed as "Name@Example.com" still
+  -- links to an account signed up as "name@example.com" with no lower() here.
+  -- `limit 1` is defensive: profiles.email has no uniqueness constraint, so if
+  -- two profile rows were ever case-variants of the same address this picks
+  -- one deterministically instead of an unspecified row.
+  select id into partner_id from profiles
+  where email = partner_email
+  order by id
+  limit 1;
 
   if my_role = 'employee' then
     insert into pairs (employee_id, manager_id, employee_email, manager_email)

@@ -11,14 +11,21 @@ const NOTIFICATION_CAP = 80;
 
 // ---------------------------------------------------------------- pair -----
 
+// Returns `{ ambiguous: true }` if the account is on more than one pair (a
+// middle manager, or a manager with 2+ reports) — the app assumes one pair
+// per person throughout, so rather than guess which one this request meant,
+// callers should show a "not supported yet" notice. Check `pair?.ambiguous`
+// before reading pair fields. Mirrors resolveSlackUser's same guard.
 export async function getMyPair(supabase, userId) {
   const { data, error } = await supabase
     .from("pairs")
     .select("*")
     .or(`employee_id.eq.${userId},manager_id.eq.${userId}`)
-    .maybeSingle();
+    .limit(2);
   if (error) throw error;
-  return data;
+  if (!data?.length) return null;
+  if (data.length > 1) return { ambiguous: true };
+  return data[0];
 }
 
 export async function createPair(supabase, myRole, partnerEmail) {

@@ -14,6 +14,25 @@ export default async function DashboardLayout({ children }) {
 
   const pair = await getMyPair(supabase, user.id);
   if (!pair) redirect("/onboarding");
+  if (pair.ambiguous) {
+    return (
+      <div className="auth-shell">
+        <div className="card auth-card">
+          <div className="auth-logo">
+            <div className="logo">PP</div>
+            <div>
+              <strong>Multiple pairs not supported yet</strong>
+            </div>
+          </div>
+          <p>
+            This account is on more than one Performance Pulse pair, and the app doesn&apos;t handle that yet.
+            Rather than guess which pair to show you here, we&apos;re showing nothing — you&apos;d have no way to
+            tell whose numbers you were looking at.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const role = pair.employee_id === user.id ? "employee" : "manager";
   const partnerId = role === "employee" ? pair.manager_id : pair.employee_id;
