@@ -1,118 +1,57 @@
 # Slack integration — status and what's left
 
-Updated 2026-08-29 (midday, later). Small styling fix: on the Slack Home
-tab, "Wrap up a 1:1" was the only highlighted (green/primary) button among
-"Add a topic / Topics / Add an action / Actions / Wrap up a 1:1" — Melissa:
-"it should land on add a topic" (her eye went to the green button first,
-not the leftmost one). Swapped which button carries `style: "primary"` in
-`homeView`, `lib/slack-views.js` — "Add a topic" is now green, "Wrap up a
-1:1" is plain. Order unchanged (Add a topic was already leftmost). Verified
-build/test clean, deployed, confirmed live in Slack via screenshot.
+## Where things stand (2026-08-29, afternoon)
 
-Updated 2026-08-29 (midday). Slack's "Add a topic" modal required-field
-gap is now actually fixed, not just relabeled — supersedes this morning's
-entry below. Melissa: "we need to make one or both of the fields required
-instead, IT can't have optional an then you get an error."
+**App/website, big picture:** one Next.js app (`web-app/`) serves both the
+website (`app/(dashboard)/*`) and the Slack integration (`app/api/slack/*`,
+`lib/slack-*.js`) — same Supabase tables, no separate sync needed. Real
+Slack DM pings and full in-Slack interactivity (Home tab, add/view modals,
+quick actions) have been live in production since 2026-08-26. `slack-app/`
+in the repo root is an old, never-installed prototype — "the app" always
+means `web-app/`.
 
-**What shipped:** "What do you want to discuss" is now a genuinely
-required field — Slack blocks submission client-side with its own "Please
-complete this required field," no custom server error needed. "Pick a
-suggestion" stays optional and, when picked, fills in the required text
-field (and category) for you via a `block_actions` round-trip, instead of
-being a second independently-submittable source of the topic (the old,
-now-removed behavior this morning's entry describes as a "possible
-follow-up" — it's done).
+**Committed and pushed to GitHub (`performance-pulse/main`) as of this
+session** — two commits, `cbba37e` and `e38d06f`:
+- Case-insensitive email matching (citext) for invite/pairing lookups, and
+  a guard + website notice for accounts on more than one pair (middle
+  managers, multi-report managers) instead of the app silently guessing.
+- Topic editing after adding, creator-only, on both website and Slack.
+- Slack's "Add a topic" text field is now genuinely required (Slack's own
+  client blocks empty submission) instead of erroring after the fact, and
+  picking a suggestion correctly fills in the required fields — this took
+  three separate real Slack Block Kit platform bugs to track down (a
+  select inside an "input" block never fires `block_actions` at all; and
+  twice more, `views.update` on an already-open modal doesn't reliably
+  register a new value under an unchanged block_id for either a
+  `static_select` or a `plain_text_input` — the text case is the scary
+  one: it visibly showed the right text while silently submitting empty,
+  only caught by checking the database, not the screen). Full technical
+  writeup in the Done section below if picking this pattern up again.
+- Home tab: "Add a topic" is now the highlighted button instead of "Wrap
+  up a 1:1."
 
-**Three real, separate platform bugs found building this, each confirmed
-live against the database or server logs, not from how the modal looked:**
-1. A `static_select` inside an **input** block never dispatches
-   `block_actions` on selection at all — no request, no error, nothing.
-   Only elements in a **section**/actions block do. The picker
-   (`suggested_pick`, `lib/slack-views.js`) had to move out of an input
-   block into a section+accessory to be clickable at all. Cost: its value
-   no longer appears in `view.state.values` at submission — fine here,
-   since it only ever flows into "text"/"category" via the prefill.
-2. Once that worked, `views.update` on an already-open modal doesn't
-   reliably push a picked suggestion's category into an existing
-   `static_select`'s block_id — confirmed live: modal kept showing "Wins"
-   after picking a suggestion clearly grouped under "Where things stand,"
-   even though the server-computed value logged correctly. Fix: give the
-   field a different block_id ("category_v2") whenever it's being
-   pre-filled via views.update, forcing Slack to treat it as new.
-3. The same is true of `plain_text_input`, and worse: it **visibly showed
-   the right text** ("Is what's expected of you actually clear?" rendered
-   correctly in the field) while **silently submitting empty** — a real
-   topic got saved with `text: ""` and the right category, caught only by
-   querying the database after Save, not from anything visible in Slack.
-   Same block_id-swap fix applied to "text" and "why" too
-   (`lib/slack-views.js`, `addTopicModal`'s `v2` flag; read on the
-   server via the new `fieldValV2` helper and `normalizeTopicDraft`,
-   `app/api/slack/interactivity/route.js`).
+**Top open item, not started — see item 0b below for full detail:**
+Goals (and likely Actions/Development/Achievements/Feedback — same
+pattern, not yet checked) only show a count summary in Slack
+("3 goals · 2 In Progress") with a "Open goals in the app for the full
+text" link — same redaction Topics had until 2026-08-28, when Melissa
+asked for real text to show in Slack instead. She's now asked for the same
+for Goals: "making sure when you're in Slack, the goals, it doesn't make
+you open the app." Requires checking each kind's list modal individually
+before changing — don't assume they're all identical.
 
-Verified `npm run build`/`lint`/`test` clean after each of the four
-deploys this took (lint 34 pre-existing, unchanged; tests 5/5). Live
-end-to-end, checking the actual database after Save each time, not just
-the modal: picked a suggestion, confirmed text and category both saved
-correctly, deleted the test row after (`00761548-3f28-42fa-bbe1-f0d77178ac21`).
-Also confirmed the empty-field case: tried to Save with nothing entered,
-got Slack's native required-field block, no server round-trip at all.
+**Second open item, not started, needs a design decision before coding —
+see item 0 below:** adding/editing shouldn't ping the other person
+immediately; only an explicit "Submit" action should. Melissa asked for
+this on 2026-08-28, corrected a wrong first read of it twice, and it's
+been sitting since — don't build this from a guess at scope/mechanism,
+confirm with her first (the "not yet designed" list in item 1 is still
+accurate).
 
-Updated 2026-08-29 (morning). Small fix: Slack's "Add a topic" modal
-(`addTopicModal`, `lib/slack-views.js`) showed **"Pick a suggestion
-(optional) (optional)"** — a literal double label. Cause: the label text
-had "(optional)" typed into it manually, and Slack *also* auto-appends
-"(optional)" to any input block marked `optional: true`. Fixed by removing
-the manual text from that label, and reworded "Or write your own" to "Or
-write your own — required if no suggestion picked," since Melissa correctly
-flagged that both fields showing "optional" is misleading when the server
-actually requires one or the other (`add_topic` handler,
-`app/api/slack/interactivity/route.js` line ~192, errors with "Pick a
-suggestion above, or write your own topic." if both are empty). Superseded
-by the entry above — this rewording was a real improvement but the
-underlying gap it describes as a "possible follow-up" is now closed.
-
-Updated 2026-08-28 (even later night). Topic add/edit was live-verified end
-to end tonight — it works, on both surfaces. What looked broken during
-testing was three unrelated things, not the code: (1) Melissa was clicking
-Slack's own sidebar "Home" icon, not the Performance Pulse app's "Home" tab
-— same label, different element, same screen; (2) five duplicate Slack tabs
-had accumulated in her Chrome from repeated testing, so a fix confirmed in
-one tab didn't show in the one she was looking at; (3) Slack's own Block
-Kit buttons genuinely do drop clicks intermittently — confirmed directly by
-clicking "Edit"/"Save changes" myself and watching zero requests reach
-`/api/slack/interactivity` on the failed clicks (Vercel logs). None of the
-three needed a code change. **New requirement from tonight, top priority
-for next session — see the new item at the top of the open list below:**
-adding or editing a topic must **not** trigger a Slack notification.
-Notification only on an explicit, separate "Submit" action. Her words,
-twice, because the first explanation got it wrong: "Saving changes should
-not be submitting... Editing or adding a topic is not the submit either."
-
-Updated 2026-08-28 (late night). Topics can now be **edited after adding**,
-on both the website and Slack — was open only as "add" before, at Melissa's
-explicit request ("people don't remember what they typed in... they need to
-be able to change that, and they need to be able to see what is written").
-See item 6's Done entry (moved to the top of the open list previously, now
-closed) for the full writeup, including two real bugs this surfaced and
-fixed along the way (a category-list mismatch that could silently
-mis-save a topic's category, and Slack's stricter modal validation
-catching it where the website's plain dropdown silently didn't).
-
-Updated 2026-08-26. DM pings (see `lib/block-kit.js` / `lib/slack-send.js`)
-and full in-Slack interactivity (Home tab, add/view modals, quick actions —
-see `app/api/slack/events/`, `app/api/slack/interactivity/`, `lib/slack-*.js`)
-are both live in production.
-
-Updated 2026-08-27 (late evening). The Slack-side half of the 2026-08-25
-fix is verified against a real account. The *website*-side "Account A
-verified as a live middle manager" claim below is **retracted** — it was
-wrong, caused by a newly-found and now-fixed case-sensitive email bug (see
-item 2's Done entries). **Next session starts at item 2's new "Pick up
-here" list: clean up the two orphaned test rows, redo the middle-manager
-repro correctly, then actually test `getMyPair`/`/dashboard` against it —
-that question is still genuinely open.** Everything else in the open list
-is smaller or waiting on a decision. Run `npm test` before and after
-touching pair lookup.
+**Below this section:** a long chronological log (oldest fixes moved into
+Done, open work in "Still open, in priority order") kept for detail and
+citations — this new section is the one to read first, the log below is
+for when you need the specifics of something already summarized above.
 
 Done:
 
@@ -688,6 +627,38 @@ Still open, in priority order:
    (see `manager-employee-privacy-is-the-product` — pings already carry
    counts, never content, on purpose). Confirm scope + mechanism with
    Melissa before writing code.
+
+0b. **NEW, 2026-08-29 — Goals (and likely other kinds) shouldn't force a
+    trip to the website just to see what's actually in them.** Melissa:
+    "making sure when you're in Slack, the goals, it doesn't make you open
+    the app." Same shape as the topic-redaction removal from 2026-08-28
+    (Done section, item "Topics can be edited after adding"), just for a
+    different kind, and not yet started.
+
+    **Current state, confirmed by reading the code, not run live:**
+    `listGoalsModal` (`lib/slack-views.js`) shows only a count summary —
+    `"3 goals on record\n2 In Progress · 1 Complete"` — then a single
+    "Open goals in the app for the full text" button. No goal text,
+    target date, or measure is ever shown in Slack. `addGoalModal` already
+    lets you create a goal fully in Slack, so this is a view-side gap, not
+    add-side.
+
+    **Not yet checked — do this first, don't assume:** whether
+    `listActionsModal`/`listDevPlansModal`/`listAchievementsModal`/
+    `listFeedbackModal` have the identical count-only pattern. If so,
+    decide whether Melissa wants all of them changed the same way or just
+    Goals — ask, don't guess, given how today went when a similar
+    assumption (category defaults) went unverified.
+
+    **Shape of the fix, once scope is confirmed:** mirror
+    `listTopicsModal`'s 2026-08-28 change exactly — show real text/status/
+    target inline per goal instead of a redacted count, keep the "Open in
+    app" link for anyone who still wants the full website view. Re-read
+    the privacy tradeoff note above `listTopicsModal` before changing
+    anything here; it's a deliberate decision (Slack is a wider trust
+    boundary than the app — workspace admins can export message/view
+    history), not an oversight, so extending it to goals is also a real
+    decision, not just a copy-paste.
 
 1. **Save / pause / go-back across forms — Day 1, 2, and 3 all done.**
    Only the check-in wizard has a real draft-save + resume +
