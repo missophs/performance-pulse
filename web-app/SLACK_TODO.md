@@ -745,37 +745,71 @@ Still open, in priority order:
    counts, never content, on purpose). Confirm scope + mechanism with
    Melissa before writing code.
 
-0b. **NEW, 2026-08-29 — Goals (and likely other kinds) shouldn't force a
-    trip to the website just to see what's actually in them.** Melissa:
-    "making sure when you're in Slack, the goals, it doesn't make you open
-    the app." Same shape as the topic-redaction removal from 2026-08-28
-    (Done section, item "Topics can be edited after adding"), just for a
-    different kind, and not yet started.
+0b. **NEW, 2026-08-29 — Goals, and every other kind except Topics, still
+    force a trip to the website just to see what's actually in them.**
+    Melissa: "making sure when you're in Slack, the goals, it doesn't make
+    you open the app." Same shape as the topic-redaction removal from
+    2026-08-28 (Done section, item "Topics can be edited after adding"),
+    for every other kind — not started, but now fully mapped, not just
+    Goals: read every `list*Modal` function in `lib/slack-views.js` to
+    confirm exactly what's redacted in each one before writing any code.
 
-    **Current state, confirmed by reading the code, not run live:**
-    `listGoalsModal` (`lib/slack-views.js`) shows only a count summary —
-    `"3 goals on record\n2 In Progress · 1 Complete"` — then a single
-    "Open goals in the app for the full text" button. No goal text,
-    target date, or measure is ever shown in Slack. `addGoalModal` already
-    lets you create a goal fully in Slack, so this is a view-side gap, not
-    add-side.
+    **Confirmed live in the code, one by one — only Topics shows real
+    content today:**
+    - **Topics** (`listTopicsModal`) — fixed 2026-08-28. Shows the real
+      topic text and category inline, creator-gated Edit button. The
+      model every other kind below should be measured against.
+    - **Goals** (`listGoalsModal`) — count + status breakdown only:
+      `"3 goals on record\n2 In Progress · 1 Complete"`, then "Open goals
+      in the app for the full text." No goal text, target date, or
+      measure ever shown. `addGoalModal` already lets you create a goal
+      fully in Slack — this is a view-side gap only.
+    - **Development plans** (`listDevPlansModal`) — identical shape to
+      Goals: count + status breakdown, "Open plans in the app for the
+      full text." No area, activity, or target date shown.
+    - **Achievements** (`listAchievementsModal`) — count + category
+      breakdown, "Open achievements in the app for the full text." No
+      title, impact, or date shown.
+    - **Feedback** (`listFeedbackModal`) — count + type breakdown for
+      feedback already given; open feedback *requests* show only
+      "Requested {time} ago" with a "Mark answered" button — the actual
+      "what about"/"why now" text behind a request is never shown either.
+      "Open feedback in the app for the full text."
+    - **Actions** (`listActionsModal`) — a different, partial redaction,
+      not the count-summary pattern: each open action gets its own row,
+      "*Action 1* — {owner} · due {date}", with a "Mark done" button — so
+      owner and due date are real and per-row, but the action's own text
+      (what it actually says to do) is never shown, only "Action 1",
+      "Action 2", etc.
+    - **Last 1:1 summary** (`lastMeetingModal`) — the most redacted of
+      all: just "1:1 on {date}\nRead what you discussed and agreed on in
+      the app," no content of any kind, not even a count.
 
-    **Not yet checked — do this first, don't assume:** whether
-    `listActionsModal`/`listDevPlansModal`/`listAchievementsModal`/
-    `listFeedbackModal` have the identical count-only pattern. If so,
-    decide whether Melissa wants all of them changed the same way or just
-    Goals — ask, don't guess, given how today went when a similar
-    assumption (category defaults) went unverified.
+    **Ask Melissa which of these six she actually wants changed before
+    building anything** — she named Goals specifically, but given how
+    today went on an unverified assumption (the category-default bug),
+    don't extend that to "all of them" without confirming. It's plausible
+    she wants all six matched to Topics' behavior, or just Goals, or Goals
+    plus Actions since Actions is the next most-used after Topics — ask
+    rather than guess.
 
-    **Shape of the fix, once scope is confirmed:** mirror
-    `listTopicsModal`'s 2026-08-28 change exactly — show real text/status/
-    target inline per goal instead of a redacted count, keep the "Open in
-    app" link for anyone who still wants the full website view. Re-read
-    the privacy tradeoff note above `listTopicsModal` before changing
-    anything here; it's a deliberate decision (Slack is a wider trust
-    boundary than the app — workspace admins can export message/view
-    history), not an oversight, so extending it to goals is also a real
-    decision, not just a copy-paste.
+    **Shape of the fix, once scope is confirmed, per kind:**
+    - Goals/Dev plans/Achievements: mirror `listTopicsModal` exactly —
+      replace the count summary with one row per item showing its real
+      text/status/date fields, keep the "Open in app" link.
+    - Feedback: same for feedback entries; for open requests, also show
+      the request's "about"/"why now" text instead of just a timestamp.
+    - Actions: smaller change — add the action's own text into the
+      existing per-row line instead of "Action 1"/"Action 2".
+    - Last meeting: biggest change of the six — currently shows nothing
+      at all, would need deciding how much of a wrap-up summary
+      (discussed/agreed/start-stop-keep) is safe to surface in Slack.
+
+    Re-read the privacy tradeoff note above `listTopicsModal` before
+    changing any of these — it's a deliberate decision (Slack is a wider
+    trust boundary than the app — workspace admins can export message/view
+    history), not an oversight, so extending it to any other kind is also
+    a real decision, not just a copy-paste.
 
 1. **Save / pause / go-back across forms — Day 1, 2, and 3 all done.**
    Only the check-in wizard has a real draft-save + resume +
