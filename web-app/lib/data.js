@@ -67,7 +67,15 @@ export async function listTopics(supabase, pairId) {
   return data;
 }
 
-export async function addTopic(supabase, pairId, { text, why, category, role, name }) {
+// `submitted`: set true only for a topic whose creation path is deliberately
+// Slack-silent by design (see addFromHardConvo, app/(dashboard)/one-on-one/
+// page.js) — it stamps submitted_at at insert time, the same "already
+// submitted" backfill used in migration 0009_topic_submit_flag.sql for
+// pre-existing rows, so the topic never shows a Submit button and a later
+// click can never fire the real Slack DM submitTopic()/topic_submit sends.
+// Every other caller leaves this false/omitted and gets the normal
+// null-until-explicitly-submitted row.
+export async function addTopic(supabase, pairId, { text, why, category, role, name, submitted = false }) {
   const { data, error } = await supabase
     .from("topics")
     .insert({
@@ -77,6 +85,7 @@ export async function addTopic(supabase, pairId, { text, why, category, role, na
       category,
       created_by_role: role,
       created_by_name: name,
+      submitted_at: submitted ? new Date().toISOString() : null,
     })
     .select()
     .single();
@@ -159,32 +168,55 @@ export async function deleteTopics(supabase, ids) {
  * already submitted, so a caller can safely skip its own notify() call in
  * that case instead of re-pinging.
  *
+ * The "already submitted" check and the write are one atomic
+ * update().eq("id", id).is("submitted_at", null) — not a separate SELECT
+ * followed by an unconditional update. Two near-simultaneous calls (a
+ * client retry, a double-click) can both pass a check-then-act read before
+ * either write lands; Postgres can't do that to two UPDATEs racing on the
+ * same row, so at most one of them actually sets submitted_at and gets a
+ * row back to notify() over — the other gets null here, the same "no-op"
+ * result as if the topic had already been submitted, and skips its ping.
+ *
  * Ownership: this only takes a topic id, same as setTopicStatus/updateTopic
  * above — it relies on the caller to have verified the row belongs to the
- * right pair first. The website's browser-scoped client gets that for free
+ * right pair first (and, on the Slack side, that the caller is the topic's
+ * creator — see topic_submit in route.js; this function deliberately
+ * doesn't re-check created_by_role itself, see that handler's comment for
+ * why). The website's browser-scoped client gets the pair check for free
  * from RLS; a Slack handler on the admin (service-role) client, which
  * bypasses RLS, MUST check pair_id itself before calling this — see the
  * governance note in CLAUDE.md and how the Slack interactivity route's
  * topic_edit/edit_topic handlers already do this for the same reason.
+ *
+ * created_by_role is intentionally NOT checked in here either — the
+ * website's submitTopicRow (app/(dashboard)/one-on-one/page.js) relies on
+ * the UI hiding the Submit button from the non-creator, same pre-existing
+ * gap updateTopic has and is already accepted for. Centralizing the role
+ * check here was considered (both callers already pass ctx.actorRole),
+ * but left alone in this pass to keep this fix scoped to the race
+ * condition it was asked to close, and to match topic_submit's Slack-side
+ * check staying an external pre-fetch rather than moving in here.
  */
 export async function submitTopic(supabase, id, ctx = {}) {
-  const { data: before } = await supabase.from("topics").select("pair_id, text, submitted_at").eq("id", id).maybeSingle();
-  if (!before || before.submitted_at) return null;
-  const { error } = await supabase
+  const { data: submitted, error } = await supabase
     .from("topics")
     .update({ submitted_at: new Date().toISOString() })
-    .eq("id", id);
+    .eq("id", id)
+    .is("submitted_at", null)
+    .select("pair_id, text")
+    .maybeSingle();
   if (error) throw error;
-  await logActivity(supabase, before.pair_id, {
+  if (!submitted) return null; // missing, or already submitted (by this call or a concurrent one)
+  await logActivity(supabase, submitted.pair_id, {
     entity: "topic",
     entityId: id,
-    label: before.text,
+    label: submitted.text,
     field: "submitted",
     oldValue: null,
     newValue: "submitted",
     ...ctx,
   });
-  return before;
+  return submitted;
 }
 
 // ------------------------------------------------------------- checkins ----
@@ -401,16 +433,30 @@ export async function addFeedbackRequest(supabase, pairId, { fromRole, fromName,
   return data;
 }
 
-// ctx as in setTopicStatus.
+// ctx as in setTopicStatus. The update is conditioned on the row not
+// already being at `status` (.neq("status", status)) instead of a plain
+// .eq("id", id) — a duplicate/retried call (e.g. a feedback submission
+// racing a separate "Close without answering" click, or Slack retrying a
+// slow interaction) can't double-write the same transition and log it
+// twice. before is read first only to get the *old* status for the
+// activity log, not as a check-then-act guard — the update's own .neq is
+// what makes this safe against a race, since a no-op update naturally
+// affects zero rows.
 export async function setFeedbackRequestStatus(supabase, id, status, ctx = {}) {
   const { data: before } = await supabase
     .from("feedback_requests")
     .select("pair_id, about, status, from_name")
     .eq("id", id)
     .maybeSingle();
-  const { error } = await supabase.from("feedback_requests").update({ status }).eq("id", id);
+  const { data: updated, error } = await supabase
+    .from("feedback_requests")
+    .update({ status })
+    .eq("id", id)
+    .neq("status", status)
+    .select("pair_id")
+    .maybeSingle();
   if (error) throw error;
-  if (before) {
+  if (before && updated) {
     await logActivity(supabase, before.pair_id, {
       entity: "feedback_request",
       entityId: id,

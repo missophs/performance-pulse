@@ -206,7 +206,14 @@ export default function OneOnOnePage() {
   }
 
   async function addFromHardConvo(outcome, body) {
-    await addTopic(supabase, pairId, { text: outcome, why: body, category: "Other", role, name: myName });
+    // submitted: true — this path is deliberately Slack-silent (the notify()
+    // right below has no "topic" kind, in-app only), but a normal
+    // submitted_at: null topic still shows a Submit button that fires a
+    // real Slack DM later (submitTopicRow -> notify(..., "topic")). Creating
+    // it already-submitted, the same backfill used for pre-existing topics
+    // in migration 0009_topic_submit_flag.sql, closes that gap completely
+    // instead of just at creation time.
+    await addTopic(supabase, pairId, { text: outcome, why: body, category: "Other", role, name: myName, submitted: true });
     // No "topic" kind here on purpose — an in-app-only notification, not a
     // real Slack DM, same exemption this path had before topic-add batching
     // (and now submit-gating, see submitTopicRow) existed for the "topic"

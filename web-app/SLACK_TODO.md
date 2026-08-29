@@ -57,53 +57,61 @@ time, not regression tests — nothing enforces they still pass today. Read
 those as "confirmed once," not "covered by the test suite."
 
 **Open items, not started, in the order they'd probably matter most —
-full detail for each is in "Still open" below, this is just the map:**
-- **0 — decouple "submit" from add/edit.** Needs a design decision before
-  coding (scope, mechanism, UI — see item 0's "not yet designed" list).
-  Melissa asked for this 2026-08-28, corrected a wrong first read of it
-  twice.
+full detail for each is in "Still open" below, this is just the map. Three
+background agents did real, committed work in a later 2026-08-29 session
+(commit `f2a7d41`) closing items 0, 0e, and 0i, and partially closing 0h —
+see the Done section for full detail; the map below reflects that:**
+- **0 — DONE.** Topic submit/ping decoupling, scoped to Topics only per
+  Melissa's decision. See Done section.
 - **0b — Goals, and every kind except Topics, redact real content in
   Slack's list views**, down to exactly which fields are shown vs. hidden
   per kind (Goals/Dev plans/Achievements/Feedback/Actions/Last meeting).
   Melissa: "making sure when you're in Slack, the goals, it doesn't make
-  you open the app."
+  you open the app." **Decided:** Goals + Actions get matched to Topics'
+  behavior (not all six, not just Goals). Not yet built.
 - **0c — Slack has no delete, for any kind, ever.** Not previously
-  flagged; found on today's audit.
+  flagged; found on today's audit. **Decided:** yes, add delete, for the
+  same kinds the website supports it for (topics, goals, dev plans,
+  actions, achievements). Not yet built.
 - **0d — Slack has no edit for Goals/Dev plans/Actions**, only Topics.
-  Found on today's audit.
-- **0e — feedback requests can't actually be fulfilled from Slack** — a
-  real, already-broken flow (not just a gap), found on today's audit.
+  Found on today's audit. Now unblocked by 0b's decision — should follow
+  the same two kinds (Goals + Actions) unless Melissa says otherwise. Not
+  yet built.
+- **0e — DONE.** Feedback requests can now be fulfilled from Slack
+  end-to-end (answer + close, atomically). See Done section.
 - **0f — every Slack add-form is missing fields** the website version has
   (owner on Goals, measure on Dev plans, notes on Actions, most of
-  wrap-up, topic notes). Found on today's audit.
+  wrap-up, topic notes). Found on today's audit. Not yet built.
 - **0g — several whole website features have zero Slack presence** and
   were never mentioned in this file before today (career conversations,
   concerns tracker, documents, handbook links, custom suggestions, the
-  quick-notes tool). Found on today's audit; no decision made on whether
-  any of them should ever reach Slack.
-- **0h — the Slack integration's own plumbing has real, undocumented gaps
-  that a feature-comparison lens can't see**, since there's no website
-  equivalent to compare against: no Slack env vars documented anywhere,
-  no visible signal if the bot token ever expires (the app would look
-  fully healthy from the website while every Slack DM silently stops), no
-  rate-limit handling, and no install/OAuth flow at all — this only works
-  as one hardcoded workspace, which matters if the Slack Marketplace
-  listing goal ever gets picked up. Found on a second, independent audit
-  today specifically checking for this blind spot, after Melissa asked
-  "does it reflect Slack also? Not just the app."
-- **0i — three tables (`concerns`, `review_drafts`, `form_drafts`) rely on
-  the UI to hide data that the database itself doesn't actually protect.**
-  RLS only enforces "is a pair member," not "is the *correct* pair
-  member" — an employee can read manager-only concerns about themselves,
-  or the partner's not-yet-submitted draft, via their own browser
-  console. Found on a security audit, not yet fixed, needs a real
-  decision on write-access scope for `concerns` before it's built.
+  quick-notes tool). **Decided:** all six get some Slack presence (see
+  item 0g for the per-feature shape); documents' view-vs-upload question
+  is still an open sub-question. Not yet built.
+- **0h — PARTIALLY DONE.** The Slack integration's own plumbing had real,
+  undocumented gaps a feature-comparison lens can't see. The two
+  cheap/high-value sub-items — env vars now documented in
+  `.env.local.example`, and a greppable `[SLACK_INTEGRATION_DOWN]` log
+  marker on Slack API failures — are done (see Done section). Still open,
+  untouched: rate-limit handling, the OAuth/multi-workspace install flow,
+  `app_uninstalled`/`tokens_revoked` handling, and idempotency protection
+  on `view_submission`.
+- **0i — DONE.** RLS role-scoping fix for `concerns`/`review_drafts`/
+  `form_drafts`, closing both the IDOR-style gap and a live leak on
+  `/history`/`/dashboard`/`/export`. See Done section. **Caveat: not yet
+  confirmed applied to the live database** — the migration was handed to
+  Melissa to run by hand; confirm with her.
 - **0j — a full `/code-review` of today's session found and fixed two
   more real bugs** (a dropped validation that could create a blank
   topic; a bug that silently erased typed text when switching topic
-  suggestions), and documented one bigger unfixed issue: the same
-  "field looks right, saves empty" bug fixed for Topics today also
-  threatens Goals/Dev plans/Achievements/Feedback's "Save draft" button.
+  suggestions). Its biggest documented-but-unfixed issue — the same
+  "field looks right, saves empty" bug fixed for Topics also threatening
+  Goals/Dev plans/Achievements/Feedback's "Save draft" button — is now
+  **done** too (see Done section). New follow-up gaps found while doing
+  that work: **0k** (two more missing-pair_id-check instances,
+  `topic_mark_discussed`/`action_mark_done`), **0l** (website Prepare-tab
+  reader doesn't know the new shared `_v2` draft-key scheme), **0m** (a
+  naming-collision note, not a bug).
 
 **Also fixed this session, in `Done` below:** two IDOR (broken
 authorization) bugs that let a Slack action touch a *different pair's*
@@ -139,6 +147,220 @@ before today's audit:
   too since the audit that found them was reading the schema directly.
 
 Done:
+
+- **Full `/code-review` of the five fixes above (item 0/0e/0h/0i/0j-save-draft),
+  2026-08-29 later session — found and fixed 4 real bugs before any of it
+  shipped further, plus one accurate-scope correction.** Melissa asked to
+  make sure there were no bugs before continuing. 8 finder angles + 2
+  adversarial verify passes on the uncertain ones found:
+  1. **Requester could answer their own feedback request in Slack**
+     (`lib/slack-views.js`'s `listFeedbackModal` rendered "Answer" on every
+     open request with no role check — the website's `forMe` gate had no
+     Slack equivalent). Fixed: `listFeedbackModal` now takes `viewerRole`
+     and omits "Answer" when `r.from_role === viewerRole`; the same
+     `from_role !== ctx.role` check is now also a hard server-side guard
+     (not just a hidden button) in `open_answer_feedback_request`,
+     `feedback_request_answer`, and `SUBMISSIONS.add_feedback`.
+  2. **Hard-Conversation quick-notes topics could still trigger a delayed
+     real Slack DM** — `addFromHardConvo` was deliberately silent on
+     creation (no "topic" kind on its own `notify()` call) but the topic
+     still got `submitted_at = null` like any other, so it showed the new
+     Submit button and clicking it later fired a real DM anyway, defeating
+     the original silent-by-design intent. Fixed: `addTopic` gained an
+     optional `submitted` flag; `addFromHardConvo` now passes
+     `submitted: true` so it's fully exempt, not just at creation.
+  3. **`submitTopic` had a check-then-act double-submit race** (read
+     `submitted_at`, then unconditional update — two near-simultaneous
+     calls could both pass the check before either write landed, causing a
+     duplicate Slack DM). Fixed: now one atomic
+     `.update(...).eq("id", id).is("submitted_at", null).select(...)` —
+     no separate read, no race window.
+  4. **Feedback-answer flow was missing a status check and had no
+     idempotency guard** — `SUBMISSIONS.add_feedback` checked only
+     `pair_id`, not whether the request was still open, and
+     `setFeedbackRequestStatus` had no guard against re-closing an
+     already-closed request. Fixed: `add_feedback` now requires
+     `status === "open"` via the same ownership check; the status update
+     is now conditioned on `.neq("status", status)` so a retried/duplicate
+     submission can't double-write or double-log.
+
+  **Also extracted, not just patched:** a new shared
+  `verifyOwnedRow(admin, table, columns, id, ctx, extraCheck)` helper in
+  `app/api/slack/interactivity/route.js`, applied to the four handlers
+  touched above — the review found the pair_id-ownership check (the exact
+  pattern CLAUDE.md's governance rule targets) had been hand-copied into 7
+  separate places across today's earlier work. Pre-existing inline checks
+  (`feedback_request_answered`, `edit_topic`, `topic_edit`) were left as-is
+  — not re-touched, to keep this pass scoped to what needed fixing, not a
+  full refactor.
+
+  **Correction, not a bug:** the RLS fix's own migration comment
+  (`0007_role_scoped_rls.sql`) claimed "no employee-facing behavior
+  changes" for the `concerns` lockdown — true only for the Performance
+  page's `mgrOnly` tab. The review found `listConcerns()` is also called
+  unconditionally from `/dashboard`, `/history`, and `/export`, and
+  `buildHistory()` turned each concern into a real-text timeline entry
+  with no role gate — meaning an employee could already see a manager's
+  private concern text on those three surfaces before this fix, not just
+  via browser console. The RLS fix closes that too, as a side effect, with
+  no code change needed — but it's a bigger, previously-undocumented leak
+  than the migration comment states. Worth confirming with Melissa that
+  nothing relied on concerns appearing in the shared timeline/export
+  before treating this as fully understood.
+
+  **Flagged, not fixed (lower severity, real):** `submitTopic` still has
+  no server-side `created_by_role` check on the website path (Slack path
+  checks it externally in `topic_submit`; website relies on the button
+  being hidden) — same accepted-risk shape as `updateTopic`'s pre-existing,
+  documented gap, not a new regression. `is_pair_manager`/`is_own_role_row`
+  are defined identically in both `schema.sql` and the migration file with
+  no single source of truth. A few small efficiency/duplication nits
+  (an extra SELECT on `topic_submit`, a copy-pasted `fieldBlockId` closure
+  across all five add-modals) were also found and left as-is — cleanup,
+  not bugs.
+
+  **Verified:** lint 34/34 unchanged, tests 5/5 unchanged, `node --check`
+  clean on all changed files, `listFeedbackModal`'s actual rendered output
+  spot-checked for both an employee and manager viewer against mock
+  requests (Answer button present/absent exactly as intended) and both
+  resulting view JSON payloads validated via Slack's `blocks.validate`
+  API. **Not verified:** no live Supabase/Slack available — the atomic
+  update, the `.neq` idempotency guard, and all new role/status branching
+  were traced by hand against the schema and existing call sites, not
+  exercised against a real database or workspace.
+
+- **Topic submit/ping decoupling — item 0, closed, scoped to Topics only
+  (per Melissa's decision), 2026-08-29 later session.** New migration
+  `supabase/migrations/0009_topic_submit_flag.sql` adds `topics.submitted_at`
+  (nullable timestamptz), backfilled to `submitted_at = created_at` for
+  every pre-existing topic — a deliberate choice over leaving old topics
+  null, which was the other candidate, rejected as a confusing regression
+  for existing data.
+
+  **Real finding that changed the originally-guessed mechanism:** there was
+  never a DB trigger firing notifications on topic INSERT —
+  `notify_slack_on_notification()` (migration 0005) fires on inserts into
+  the `notifications` table itself, and every `notifications` row is an
+  explicit app-code call to `lib/data.js`'s `notify()` right after a
+  mutation. So the actual fix is gating that `notify()` call site (in
+  `add_topic`'s Slack handler and the website's add-topic flow), not
+  editing SQL trigger logic — no trigger function was changed.
+
+  New `submitTopic(supabase, id, ctx)` in `lib/data.js` is idempotent
+  (no-ops if already submitted). Website: `components/one-on-one/TopicList.js`
+  gained a creator-gated "Submit" button + "Not submitted" badge, mirroring
+  the existing Edit gate; the dead `queueTopicNotify`/`flushTopicNotify`
+  batching (whose whole job was the ping-on-add this removes) was deleted
+  from `app/(dashboard)/one-on-one/page.js`. Slack: `listTopicsModal` gained
+  a matching creator-gated Submit button; a new `topic_submit` quick action
+  in `app/api/slack/interactivity/route.js` checks `pair_id` +
+  `created_by_role` + not-already-submitted before calling `submitTopic`,
+  mirroring `topic_edit`'s ownership-check pattern.
+
+  Verified: lint 34/34 baseline unchanged, tests 5/5, confirmed by an
+  independent review pass after this phase. No live Supabase/Slack
+  available for this pass — the migration has not been applied to the live
+  database yet (see item 0i entry below on the same point) and the live
+  Slack DM/button behavior has not been re-verified against a real
+  workspace since this change.
+
+- **Feedback request fulfillment fixed end-to-end — item 0e, closed,
+  2026-08-29 later session.** New migration
+  `0008_notification_entity_id.sql` adds `notifications.entity_id`, letting
+  a Slack DM reference the specific record it's about. The digest DM's
+  "Answer it" button now threads the actual feedback-request id through
+  into `addFeedbackModal` (via `private_metadata`, same pattern as
+  `editTopicModal`) with a `requestId` mode that skips draft controls and,
+  on submit, re-verifies the request's `pair_id` against `ctx.pairId`
+  (defense-in-depth, same pattern as `edit_topic`) before atomically saving
+  the feedback entry AND closing the request — matching the website's
+  `saveFeedback` behavior exactly. The old `feedback_request_answered`
+  (status-flip-only, no content) was kept, not removed, as an explicit
+  "Close without answering" action distinct from "Answer" — the website
+  has the same two distinct actions ("Dismiss"/"Withdraw" vs "Answer").
+
+  **Bonus fix, not previously flagged anywhere in this file:**
+  `feedback_request_answered`'s handler had ZERO pair_id check before this
+  pass — a third IDOR bug in the same class as the two fixed earlier today,
+  found and fixed while touching this handler for the atomic-fulfillment
+  work.
+
+  Verified: lint 34/34 baseline unchanged, tests 5/5, confirmed by an
+  independent review pass after this phase. Not verified: no live
+  Supabase/Slack available, so the new atomic answer+close flow has not
+  been exercised against a real feedback request in Slack.
+
+- **Save-draft blank-field bug generalized across all five modals — item
+  0j's biggest deferred item, now closed, 2026-08-29 later session.** New
+  shared module `lib/slack-form-fields.js` (`fieldBlockId`, `withV2`,
+  `makeFieldValV2`, `normalizeDraft`) replaces the bespoke Topics-only
+  `_v2`/`fieldValV2`/`normalizeTopicDraft` hack — Topics itself was
+  refactored onto the shared helper too, so there's one code path instead
+  of five near-duplicates. `addGoalModal`, `addDevPlanModal`,
+  `addAchievementModal`, `addFeedbackModal` (`lib/slack-views.js`) and their
+  `SUBMISSIONS` handlers (`app/api/slack/interactivity/route.js`) now use
+  the dual-lookup reader, closing the exact "Save draft silently submits
+  blank fields" bug that was previously fixed for Topics only.
+
+  Verified: lint 34/34 baseline unchanged, tests 5/5, confirmed by an
+  independent review pass after this phase. Not verified: no live
+  Supabase/Slack available, so the fixed Save-draft behavior has not been
+  re-exercised live for Goals/Dev plans/Achievements/Feedback.
+
+- **RLS role-scoping fix — item 0i, closed, 2026-08-29 later session.** New
+  migration `supabase/migrations/0007_role_scoped_rls.sql` (applied to
+  `schema.sql` too). `concerns` is now fully manager-exclusive via a new
+  `is_pair_manager(pair_id)` policy function — the employee has zero
+  access (matches the UI's existing `mgrOnly` restriction, which never had
+  a DB-level backstop before). `review_drafts` and `form_drafts` are now
+  scoped via a new `is_own_role_row(pair_id, role)` function so each side
+  of a pair can only reach their own row.
+
+  **Side effect found during this fix, not separately scoped:**
+  `listConcerns()` is also called unconditionally on `/history`,
+  `/dashboard`, `/export` (`app/(dashboard)/history/page.js` etc.), and
+  `buildHistory()` (`lib/data.js`) turned each concern into a "Concern
+  documented" history entry with the real text and no role gate — meaning
+  an employee visiting `/history` could see their manager's private
+  concern notes about them, a live leak, not just a browser-console one.
+  Confirmed these pages use the RLS-enforced browser Supabase client (not
+  the admin client), so this migration closes that leak too, with no
+  separate code change needed.
+
+  **Not yet applied to the live database** — the migration SQL was handed
+  to Melissa to run by hand in the Supabase SQL editor (no `supabase` CLI
+  is linked in this repo), since running schema-altering DDL against
+  production via browser automation was correctly blocked by a safety
+  check. Confirm with Melissa whether she's run it yet before treating
+  this as live-fixed, not just committed.
+
+  Verified: lint 34/34 baseline unchanged, tests 5/5, confirmed by an
+  independent review pass after this phase. Not verified: the policy
+  itself, against a live database — no live Supabase available for this
+  pass, and the migration has not been run in production.
+
+- **Slack infra hardening — item 0h, partially closed (the two "worth
+  prioritizing" sub-items only), 2026-08-29 later session.**
+  `.env.local.example` now documents `SLACK_BOT_TOKEN`,
+  `SLACK_SIGNING_SECRET`, `SLACK_NOTIFY_WEBHOOK_SECRET`,
+  `SUPABASE_SERVICE_ROLE_KEY` with one-line comments on what each is for
+  and which file uses it. `lib/slack-api.js` now prefixes its thrown error
+  with `[SLACK_INTEGRATION_DOWN]` at the one choke point every Slack Web
+  API call funnels through, so a dead/revoked bot token becomes a
+  greppable log signal instead of invisible — every downstream
+  `console.error` in the three Slack route handlers picks this up
+  automatically without relabeling unrelated (e.g. Supabase) errors.
+
+  **Still open, not touched:** rate-limit/backoff handling, the
+  OAuth/multi-workspace install flow, `app_uninstalled`/`tokens_revoked`
+  handling, and idempotency protection on `view_submission` — these remain
+  exactly as item 0h originally described, only the two cheap/high-value
+  sub-items were done.
+
+  Verified: lint 34/34 baseline unchanged, tests 5/5, confirmed by an
+  independent review pass after this phase. Not verified: no live Slack
+  available to confirm the `[SLACK_INTEGRATION_DOWN]` marker actually
+  appears in logs against a real revoked token.
 
 - **Two real IDOR security bugs fixed, plus a governance rule added,
   2026-08-29.** Melissa asked for a full security audit ("Is there
@@ -816,47 +1038,13 @@ Done:
 
 Still open, in priority order:
 
-0. **NEW, top priority — decouple "submit" from add/edit; stop pinging on
-   every save.** From tonight's session (2026-08-28), after the topic-edit
-   feature above was verified working. Melissa's exact words: "they have to
-   submit it to the employee, the manager, so they know that it's done. I
-   don't wanna ping right away." Then, correcting my first (wrong) read of
-   that: "Saving changes should not be submitting. I've said that to you.
-   Editing or adding a topic is not the submit either."
-
-   **Current behavior (why this is a real change, not a tweak):** every
-   `BK_KINDS` insert already sends an immediate Slack DM via the
-   `notify_slack_on_notification()` Supabase trigger (see Done section,
-   "Real Slack DM pings for every `BK_KINDS` kind") — adding a topic pings
-   right away today. Topic-add pings are already *batched* into one DM per
-   Prepare session (see Done, 2026-08-24) but batching still fires
-   automatically, with no explicit user action gating it. What's being
-   asked for is different: no ping at all until the user deliberately says
-   "this is done," however many times they've added or edited something
-   before that.
-
-   **Not yet designed — needs a decision next session, not just code:**
-   - Scope: topics only (what tonight's conversation was actually about),
-     or every kind that currently pings (goals, actions, achievements,
-     feedback, dev plans)? Leaning topics-only to start, matching how the
-     edit feature itself was scoped, but confirm with Melissa first.
-   - Mechanism: a `submitted_at`/status flag on the row so the DB trigger
-     only fires on that transition instead of on insert, vs. a separate
-     explicit endpoint the new "Submit" button calls directly (bypassing
-     the trigger for these rows). The trigger-flag approach keeps one
-     notification path; the explicit-endpoint approach is a bigger
-     divergence from how every other kind currently notifies.
-   - UI: one "Submit" button per topic, or a batch "Submit all"/"Let them
-     know" action from the Prepare tab and Slack Home tab alike (mirrors
-     how "Wrap up a 1:1" already batches multiple things into one action)?
-   - Website needs the same behavior as Slack — this was asked for on both
-     surfaces the same way the edit feature was, so it isn't Slack-only.
-
-   Do not build this by guessing the above — it changes when the other
-   person gets notified, which is the one thing this app is careful about
-   (see `manager-employee-privacy-is-the-product` — pings already carry
-   counts, never content, on purpose). Confirm scope + mechanism with
-   Melissa before writing code.
+0. ~~Decouple "submit" from add/edit; stop pinging on every save.~~ **Done —
+   closed 2026-08-29 later session, scoped to Topics only, full detail in
+   the Done section above.** Kept as a one-line stub (not deleted) only so
+   items 2-5 and the lettered items below don't have to be renumbered —
+   several Done entries cite them by number/letter. The same "submit"
+   gating has not been extended to goals/actions/achievements/
+   feedback/dev plans — nobody has asked for that yet.
 
 0b. **NEW, 2026-08-29 — Goals, and every other kind except Topics, still
     force a trip to the website just to see what's actually in them.**
@@ -903,13 +1091,9 @@ Still open, in priority order:
       all: just "1:1 on {date}\nRead what you discussed and agreed on in
       the app," no content of any kind, not even a count.
 
-    **Ask Melissa which of these six she actually wants changed before
-    building anything** — she named Goals specifically, but given how
-    today went on an unverified assumption (the category-default bug),
-    don't extend that to "all of them" without confirming. It's plausible
-    she wants all six matched to Topics' behavior, or just Goals, or Goals
-    plus Actions since Actions is the next most-used after Topics — ask
-    rather than guess.
+    **Decided 2026-08-29 (later session, Melissa):** **Goals + Actions**
+    get matched to Topics' real-content behavior — not all six, not just
+    Goals, not none. Not yet built.
 
     **Shape of the fix, once scope is confirmed, per kind:**
     - Goals/Dev plans/Achievements: mirror `listTopicsModal` exactly —
@@ -937,10 +1121,9 @@ Still open, in priority order:
     (`deleteGoal`), development plans (`deleteDevelopmentPlan`), actions
     (`deleteAction`), and achievements (`deleteAchievement`) — Slack has
     no delete affordance anywhere, for anything. Not previously flagged.
-    Needs a decision on whether Slack should get delete at all (it's a
-    destructive action, arguably fine to require the website for it on
-    purpose) before building anything — don't assume parity is the goal
-    here the way it is for viewing/editing.
+    **Decided 2026-08-29 (later session, Melissa):** yes, add delete to
+    Slack, for the same kinds the website already supports it for (topics,
+    goals, development plans, actions, achievements). Not yet built.
 
 0d. **NEW, found on the same audit — edit exists on the website for Goals,
     Development plans, and Actions, with no Slack equivalent; Topics is
@@ -951,26 +1134,15 @@ Still open, in priority order:
     `edit_goal`/`edit_devplan`/`edit_action` anywhere, only `edit_topic`
     (2026-08-28). If the plan is eventually "every kind works like Topics
     now does," this is the edit-side half of that — item 0b above is the
-    view-side half. Not started.
+    view-side half. This item was originally left as "coupled to 0b" —
+    since 0b's scope decision (Goals + Actions) is now made (2026-08-29),
+    this is unblocked and should logically follow the same two kinds
+    (Goals + Actions), matching 0b's scope, unless Melissa says otherwise.
+    Not started.
 
-0e. **NEW, found on the same audit — feedback requests can't actually be
-    fulfilled from Slack; the two buttons that look like they do it both
-    fall short.** Website: answering a request writes a real feedback
-    entry *and* closes the request in one atomic step
-    (`app/(dashboard)/performance/page.js`). Slack has two separate,
-    disconnected paths instead:
-    - "Mark answered" (`feedback_request_answered`,
-      `app/api/slack/interactivity/route.js`) closes the request but
-      captures **no feedback content at all** — it's just a status flip.
-    - The digest DM's "Answer it" button (`lib/block-kit.js`, request
-      kind) opens the generic "Give feedback" modal (`open_add_feedback`)
-      with **no request id threaded through it** — submitting it creates
-      a feedback entry, but never closes the request it was meant to
-      answer.
-    Net effect: there is currently no way to genuinely fulfill a feedback
-    request from Slack — both buttons do half the job. Needs a real fix
-    (thread the request id through "Answer it" into a modal that both
-    saves the entry and closes the request), not just documentation.
+0e. ~~Feedback requests can't actually be fulfilled from Slack.~~ **Done —
+    closed 2026-08-29 later session, full detail in the Done section
+    above.** Kept as a one-line stub for the same reason as items 1 and 6.
 
 0f. **NEW, found on the same audit — every Slack add-form is missing
     fields the website form has,** beyond the redaction gaps in 0b:
@@ -1005,21 +1177,35 @@ Still open, in priority order:
     links (`handbook_links` table), and the quick-notes "Hard
     Conversation" tool (`messages` table, `addFromHardConvo`,
     `one-on-one/page.js` — previously named only once, as a bug-fix
-    target, never explained as a feature). No decision made on any of
-    these — before building Slack support for any of them, ask whether
-    Melissa even wants that kind reachable from Slack; some of these
-    (concerns, career conversations) may be intentionally website-only by
-    nature of what they're for.
+    target, never explained as a feature).
 
-0h. **NEW, found on a second, independent 2026-08-29 audit specifically
+    **Decided 2026-08-29 (later session, Melissa):** all six get some
+    Slack presence: career conversations, the concerns tracker
+    (manager-only, read-only, matching its RLS/UI restriction), documents
+    (view + add-link, not necessarily raw file upload), handbook links
+    (view), custom suggestions (save/delete), and the quick-notes/Hard
+    Conversation tool (capture from Slack). Not yet built. Open
+    sub-question, not resolved: a Slack-side "documents" feature will need
+    to decide whether it does read-only viewing or actual upload, given
+    Slack's file-handling constraints.
+
+0h. **PARTIALLY DONE, 2026-08-29 later session — see Done section above.**
+    The two "worth prioritizing" sub-items below (env-var documentation and
+    the `[SLACK_INTEGRATION_DOWN]` log marker) are now closed. Everything
+    else below — rate-limit/backoff handling, the OAuth/multi-workspace
+    install flow, `app_uninstalled`/`tokens_revoked` handling, and
+    idempotency protection on `view_submission` — is still exactly as
+    originally found, untouched.
+
+    **NEW, found on a second, independent 2026-08-29 audit specifically
     checking whether this file covers Slack-as-infrastructure, not just
     website-vs-Slack feature parity.** Melissa asked directly: "does it
     reflect Slack also? Not just the app." It didn't, on these points —
     every item 0-0g above is about *feature* parity; none of them are
     about the integration's own plumbing, which has real, undocumented
     exposure:
-    - **No Slack env vars are documented anywhere.** `.env.local.example`
-      lists only the two Supabase vars — `SLACK_BOT_TOKEN`,
+    - ~~No Slack env vars are documented anywhere.~~ **Done** —
+      `.env.local.example` lists only the two Supabase vars — `SLACK_BOT_TOKEN`,
       `SLACK_SIGNING_SECRET`, `SLACK_NOTIFY_WEBHOOK_SECRET`
       (`app/api/slack/notify/route.js`), and `SUPABASE_SERVICE_ROLE_KEY`
       are required by the code but named nowhere for anyone setting up a
@@ -1028,8 +1214,10 @@ Still open, in priority order:
       in its own comment, that a reset/new-environment scenario makes
       Slack DMs "stop silently" — this is the missing other half of that
       same warning.
-    - **A dead Slack integration would look completely healthy from the
-      website.** Every Slack API failure (`lib/slack-send.js`,
+    - ~~A dead Slack integration would look completely healthy from the
+      website.~~ **Done (the greppable log signal half only — no live
+      "integration health" indicator was built)** — every Slack API
+      failure (`lib/slack-send.js`,
       `lib/slack-api.js`) fails soft into a `console.error` and nothing
       else — if `SLACK_BOT_TOKEN` expires or a scope gets revoked in
       Slack's admin panel, every DM silently stops while the in-app
@@ -1075,53 +1263,14 @@ Still open, in priority order:
     grepping for). The OAuth/multi-workspace gap only matters if the
     Marketplace-listing goal gets picked up.
 
-0i. **NEW, security/privacy audit, 2026-08-29 — RLS enforces "is a pair
-    member" everywhere, not "is the *correct* pair member," and three
-    tables need the second kind.** Found in the same audit that caught
-    the two IDOR bugs fixed below (item "Two real IDOR security bugs
-    fixed" in Done) — this part is the one that's NOT fixed yet. Melissa
-    asked "does it reflect Slack also, not just the app" and then "is
-    there anything missing" — this is real and was missing until now.
-
-    Every pair-scoped table in `supabase/schema.sql` uses one shared
-    policy: `is_pair_member(pair_id)`, which checks
-    `employee_id = auth.uid() or manager_id = auth.uid()`. That's correct
-    for tables both partners are equally meant to see — but three tables
-    are explicitly meant to be **one-sided within the pair**, and this
-    policy shape has no way to express that:
-    - **`concerns`** — the manager-only notes tracker. `app/(dashboard)/
-      performance/page.js` marks its tab `mgrOnly: true` and forcibly
-      switches an employee off it in the UI, but the RLS policy grants
-      the **employee** full select/insert/update/delete on rows their own
-      manager wrote about them. Any employee who opens their browser's
-      console and calls the same Supabase client the page already loaded
-      (`supabase.from('concerns').select('*').eq('pair_id', pairId)`) can
-      read every concern logged about them — the tab restriction is a UI
-      convention only, not an actual permission.
-    - **`review_drafts`** (keyed `pair_id, role`) — per-person,
-      not-yet-shared review draft text. The website only ever reads the
-      caller's own role's row, but nothing in the database stops the
-      partner from querying the row keyed to the *other* role directly.
-    - **`form_drafts`** (same shape) — arguably the highest-stakes of the
-      three: this is exactly the in-progress, un-submitted content behind
-      item 0's "don't ping until Submit" request. If a partner can already
-      read the other side's draft before it's ever submitted, that
-      defeats the entire privacy point of that still-unbuilt feature
-      before it's even built.
-
-    This is a design-level gap, not a typo in one policy — `is_pair_member`
-    structurally cannot know which pair member a given table's `role`
-    column is trying to restrict to. Any future "X-only" field added the
-    same way (reusing the existing `pair_scoped_tables` policy loop) will
-    silently inherit the same hole unless it gets a bespoke policy.
-
-    **Fix shape, not yet built:** each of these three tables needs its own
-    policy checking the specific role column against `auth.uid()` via the
-    `pairs` row — e.g. for `concerns`, only the pair's `manager_id` should
-    pass `USING`/`WITH CHECK`, not `is_pair_member`'s either-side check.
-    Confirm with Melissa whether `concerns` should also stay fully
-    write-protected from the employee side (currently they could also
-    insert/update/delete, not just read) before writing the policy.
+0i. ~~RLS enforces "is a pair member" everywhere, not "is the *correct*
+    pair member," and three tables need the second kind.~~ **Done — closed
+    2026-08-29 later session, full detail in the Done section above.**
+    Kept as a one-line stub for the same reason as items 1 and 6.
+    **Caveat carried over from the Done entry: committed, but not yet
+    confirmed applied to the live database** — the migration was handed to
+    Melissa to run by hand in the Supabase SQL editor; confirm with her
+    before treating the live database as fixed, not just the code.
 
 0j. **Code review of today's full session diff, 2026-08-29 — two real
     security bugs found and fixed immediately, not just documented, plus
@@ -1158,40 +1307,60 @@ Still open, in priority order:
 
     **Real, deliberately NOT fixed live — documented instead, because the
     fix is bigger than a same-session patch:**
-    - **The exact `views.update`-doesn't-refresh-a-field bug fixed for
-      Topics today (see item "Add a topic modal has a genuinely required
-      field" in Done) also affects Goals/Development plans/Achievements/
-      Feedback's "Save draft" flows** — `addGoalModal`, `addDevPlanModal`,
-      `addAchievementModal`, `addFeedbackModal` all patch an open view via
-      `views.update` the same way `addTopicModal` used to, and their
-      `SUBMISSIONS` handlers still read fields with plain `fieldVal`, not
-      a `fieldValV2`-style dual lookup. **This means any of those four
-      "Save draft" buttons can silently submit blank fields today,** the
-      identical failure mode that produced a real empty-text topic in the
-      database this session. Fix shape: don't copy the `v2` hack four more
-      times — generalize it. A single `TOPIC_FIELDS`-style list driving
-      block-id derivation, `normalizeTopicDraft`-style merging, and
-      `SAVE_DRAFT.fields` would fix this for all five forms (including
-      Topics) from one place instead of four independent copies, and
-      would make the class of miss that caused the "why"-field bug above
-      structurally impossible instead of something to remember per field.
-    - The website's Prepare-tab topic-draft reader doesn't know about the
-      `_v2` key scheme either — a draft saved from Slack while in v2 mode
-      shows up empty or stale on the website. Same root cause, same fix.
+    - ~~The exact `views.update`-doesn't-refresh-a-field bug fixed for
+      Topics today also affects Goals/Development plans/Achievements/
+      Feedback's "Save draft" flows.~~ **Done — closed 2026-08-29 later
+      session, full detail in the Done section above** ("Save-draft
+      blank-field bug generalized across all five modals"). Fixed via a
+      shared `lib/slack-form-fields.js` helper instead of copying the `v2`
+      hack four more times, as this entry originally proposed.
+    - The website's Prepare-tab topic-draft reader still doesn't know
+      about the `_v2` key scheme the new shared helper uses — still not
+      done, now tracked as its own item, 0l, below.
     - `updateTopic` (`lib/data.js`) does an avoidable SELECT before every
       UPDATE on both its call sites, worth trimming given one of them sits
-      inside Slack's 3-second interactivity deadline — low priority.
-    - Three small cleanup items (not bugs): `getMyPair` duplicates
-      `resolveSlackUser`'s ambiguity-check logic instead of sharing it;
-      the "merge an out-of-list category into the picker options" logic
-      is copy-pasted three times across two files; the `v2` block_id
-      scheme itself is hand-duplicated across four call sites with nothing
-      enforcing they stay in sync (the direct cause of the "why"-field bug
-      above, before that specific instance was fixed).
+      inside Slack's 3-second interactivity deadline — low priority, still
+      not done, unaffected by today's session.
+    - Two small cleanup items remain (not bugs; a third, the `v2` block_id
+      scheme's hand-duplication across call sites, is now resolved by the
+      shared helper above): `getMyPair` duplicates `resolveSlackUser`'s
+      ambiguity-check logic instead of sharing it; the "merge an
+      out-of-list category into the picker options" logic is copy-pasted
+      three times across two files.
 
     No CLAUDE.md convention violations found (the repo has one, pointing
     only to the auto-generated `AGENTS.md`, which states no checkable
     coding rule).
+
+0k. **NEW, found 2026-08-29 later session while fixing `feedback_request_answered`'s
+    missing pair_id check — the same bug exists in two more places, same
+    file, not yet fixed.** `topic_mark_discussed` and `action_mark_done`
+    (`app/api/slack/interactivity/route.js`, same `QUICK_ACTIONS` map as
+    the new `topic_submit`) have the identical missing-pair_id-check bug as
+    the one just fixed for `feedback_request_answered` and the two fixed
+    earlier today (`edit_topic`/`topic_edit`) — same bug class, same file,
+    not yet fixed. This is the fourth/fifth instance of the exact pattern
+    `CLAUDE.md`'s governance rule (added earlier today, see that file)
+    exists to prevent. Fix shape: identical to the other four — select
+    `pair_id` first and reject the action if it doesn't match `ctx.pairId`,
+    before running the mutation.
+
+0l. **NEW, found 2026-08-29 later session — the website's Prepare-tab
+    topic-draft reader doesn't know about the new shared `_v2` draft-key
+    scheme.** `app/(dashboard)/one-on-one/page.js` doesn't know about the
+    `_v2` draft-key scheme the new shared `lib/slack-form-fields.js` helper
+    uses — a draft saved from Slack while in v2 mode can show up empty or
+    stale on the website. Same root cause as the Save-draft bug just fixed
+    for all five Slack modals (see item 0j and the Done section above),
+    needs the website-side reader updated to match. Not yet fixed.
+
+0m. **Naming collision worth a look, found 2026-08-29 later session — not
+    a bug.** The website's pre-existing `submitTopicForm` (submits the
+    *add-topic form* itself) and the new `submitTopicRow` (submits an
+    already-added *topic row*, the new item-0 Submit feature) now mean
+    very different things despite similar names — flagged as a plausible
+    future source of confusion, not renamed since it's out of scope for a
+    same-session cleanup.
 
 1. ~~Save / pause / go-back across forms.~~ **Done — Day 1, 2, and 3 all
    shipped 2026-08-24, full detail in the Done section above.** Kept as a

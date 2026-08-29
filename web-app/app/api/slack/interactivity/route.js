@@ -91,6 +91,24 @@ async function draftFor(admin, ctx, kind) {
   return row?.draft;
 }
 
+// Shared "does this Slack-supplied id belong to my pair" check — the exact
+// pattern CLAUDE.md's governance rule requires at every handler that reads
+// or writes a row using an id Slack handed back to us (action.value,
+// view.private_metadata, a select's value). Fetches the row (selecting
+// `columns`, which must include pair_id) and returns it only when it
+// exists, belongs to ctx.pairId, and passes `extraCheck(row)` if given
+// (e.g. created_by_role, status, from_role) — null in every other case, on
+// purpose: a caller can't tell "wrong pair" from "right pair, failed an
+// extra check" from the return value alone, matching how a tampered or
+// replayed id should look no different from one that never existed.
+async function verifyOwnedRow(admin, table, columns, id, ctx, extraCheck) {
+  if (!id) return null;
+  const { data: row } = await admin.from(table).select(columns).eq("id", id).maybeSingle();
+  if (!row || row.pair_id !== ctx.pairId) return null;
+  if (extraCheck && !extraCheck(row)) return null;
+  return row;
+}
+
 // `title` is shown in the placeholder modal that opens instantly, so it should
 // match the title `build` returns — only the body swaps when the data lands.
 const OPENERS = {
@@ -116,18 +134,18 @@ const OPENERS = {
   // lib/block-kit.js) with the feedback request's id as the button value.
   // Slack-supplied id, so verify it belongs to this pair before threading it
   // into the modal's private_metadata — see the governance note in
-  // CLAUDE.md. A request that's missing, already closed, or belongs to
-  // another pair just falls back to a plain, unlinked feedback modal
-  // instead of erroring — the same UX this button gave before this fix
-  // existed. No draft prefill in "answer" mode — see addFeedbackModal.
+  // CLAUDE.md. A request that's missing, already closed, belongs to another
+  // pair, or was made *by* the current viewer (from_role === ctx.role — the
+  // requester can't answer their own request, matching the website's
+  // forMe-gated Answer button in app/(dashboard)/performance/page.js) just
+  // falls back to a plain, unlinked feedback modal instead of erroring — the
+  // same UX this button gave before this fix existed. No draft prefill in
+  // "answer" mode — see addFeedbackModal.
   open_answer_feedback_request: {
     title: "Give feedback",
     build: async (admin, ctx, id) => {
-      if (!id) return addFeedbackModal(ctx, normalizeDraft(FEEDBACK_FIELDS, await draftFor(admin, ctx, "feedback")));
-      const { data: request } = await admin.from("feedback_requests").select("id, pair_id, status").eq("id", id).maybeSingle();
-      if (!request || request.pair_id !== ctx.pairId || request.status !== "open") {
-        return addFeedbackModal(ctx, normalizeDraft(FEEDBACK_FIELDS, await draftFor(admin, ctx, "feedback")));
-      }
+      const request = await verifyOwnedRow(admin, "feedback_requests", "id, pair_id, from_role, status", id, ctx, (row) => row.status === "open" && row.from_role !== ctx.role);
+      if (!request) return addFeedbackModal(ctx, normalizeDraft(FEEDBACK_FIELDS, await draftFor(admin, ctx, "feedback")));
       return addFeedbackModal(ctx, undefined, false, request.id);
     },
   },
@@ -140,7 +158,7 @@ const OPENERS = {
     title: "Feedback",
     build: async (admin, ctx) => {
       const d = await loadHomeData(admin, ctx.pairId);
-      return listFeedbackModal(d.feedback, d.feedbackRequests);
+      return listFeedbackModal(d.feedback, d.feedbackRequests, ctx.role);
     },
   },
   open_last_meeting: { title: "Last 1:1", build: async (admin, ctx) => lastMeetingModal(await listMeetings(admin, ctx.pairId)) },
@@ -204,13 +222,18 @@ const QUICK_ACTIONS = {
   // entirely, so pair_id (and, since Submit is creator-gated the same way
   // Edit is — see listTopicsModal — created_by_role) are checked here
   // before submitting anything, same pattern as topic_edit below. See the
-  // governance note in CLAUDE.md.
+  // governance note in CLAUDE.md. submitTopic itself now does its own
+  // atomic "not already submitted" guard (see lib/data.js), so this only
+  // needs the one ownership/role fetch — no separate submitted_at
+  // pre-check, and no redundant re-fetch of the row submitTopic already
+  // touches.
   topic_submit: {
     run: async (admin, ctx, id) => {
-      const { data: topic } = await admin.from("topics").select("pair_id, text, submitted_at, created_by_role").eq("id", id).maybeSingle();
-      if (!topic || topic.pair_id !== ctx.pairId || topic.created_by_role !== ctx.role || topic.submitted_at) return;
-      await submitTopic(admin, id, fromSlack(ctx));
-      await notify(admin, ctx.pairId, `${ctx.myName} submitted a topic: ${topic.text}`, ctx.role, ctx.otherRole, "oneOnOne", "topic");
+      const topic = await verifyOwnedRow(admin, "topics", "pair_id, created_by_role", id, ctx, (row) => row.created_by_role === ctx.role);
+      if (!topic) return;
+      const submitted = await submitTopic(admin, id, fromSlack(ctx));
+      if (!submitted) return; // already submitted by a concurrent click/retry — no duplicate ping
+      await notify(admin, ctx.pairId, `${ctx.myName} submitted a topic: ${submitted.text}`, ctx.role, ctx.otherRole, "oneOnOne", "topic");
     },
     refreshList: (data, ctx) => listTopicsModal(data.topics, ctx.role),
   },
@@ -235,7 +258,7 @@ const QUICK_ACTIONS = {
       if (!request || request.pair_id !== ctx.pairId) return;
       await setFeedbackRequestStatus(admin, id, "closed", fromSlack(ctx));
     },
-    refreshList: (data) => listFeedbackModal(data.feedback, data.feedbackRequests),
+    refreshList: (data, ctx) => listFeedbackModal(data.feedback, data.feedbackRequests, ctx.role),
   },
 };
 
@@ -358,13 +381,18 @@ const SUBMISSIONS = {
     // already did when they pushed this modal: private_metadata is exactly
     // as replayable/tamperable as action.value or a select's option value,
     // so it gets the same re-check at the point it's actually used to write
-    // something. See the governance note in CLAUDE.md.
+    // something. See the governance note in CLAUDE.md. Also re-checks
+    // status === "open" (a request answered or withdrawn in the gap between
+    // opening this modal and submitting it must not get double-closed) and
+    // from_role !== ctx.role (a requester can't answer their own request —
+    // this hard guard exists because a hidden "Answer" button is not
+    // enough, matching this repo's own governance philosophy; see
+    // listFeedbackModal). Any failed check just treats this as a standalone
+    // "Give feedback" submission, same UX as before this fix existed.
     const requestId = view?.private_metadata || null;
-    let request = null;
-    if (requestId) {
-      const { data } = await admin.from("feedback_requests").select("id, pair_id").eq("id", requestId).maybeSingle();
-      if (data && data.pair_id === ctx.pairId) request = data;
-    }
+    const request = requestId
+      ? await verifyOwnedRow(admin, "feedback_requests", "id, pair_id, from_role, status", requestId, ctx, (row) => row.status === "open" && row.from_role !== ctx.role)
+      : null;
     // fieldValV2 — see add_goal above.
     await addFeedback(admin, ctx.pairId, {
       giverRole: ctx.role,
@@ -375,12 +403,17 @@ const SUBMISSIONS = {
       example: fieldValV2(v, "example"),
     });
     if (request) {
+      // Conditioned on status still being "open" (see setFeedbackRequestStatus,
+      // lib/data.js) so a duplicate/retried submission — or one racing another
+      // close — can't double-write the close.
       await setFeedbackRequestStatus(admin, request.id, "closed", fromSlack(ctx));
-    } else {
+    } else if (!requestId) {
       // "Answer" mode never saves a draft (see addFeedbackModal), so only
       // clear one here for the standalone "Give feedback" path — clearing
       // unconditionally would wipe an unrelated in-progress "Give feedback"
-      // draft the same person might separately have going.
+      // draft the same person might separately have going. A requestId that
+      // failed verification above stays out of this branch too: it's still
+      // "answer" mode as far as the modal that submitted it is concerned.
       await clearFormDraft(admin, ctx.pairId, ctx.role, "feedback").catch(() => {});
     }
     const msg = request ? `${ctx.myName} answered your feedback request` : `${ctx.myName} left you feedback`;
@@ -561,9 +594,13 @@ async function handleInteraction(admin, slackUserId, payload) {
       // interaction payload with no server-side ownership check otherwise —
       // this admin client bypasses RLS entirely, so pair_id is checked here
       // before threading the id into the modal's private_metadata, same
-      // pattern as topic_edit above. See the governance note in CLAUDE.md.
-      const { data: request } = await admin.from("feedback_requests").select("id, pair_id, status").eq("id", action.value).maybeSingle();
-      if (request && request.pair_id === ctx.pairId && request.status === "open") {
+      // pattern as topic_edit above. Also checked: status === "open", and
+      // from_role !== ctx.role — a requester can't answer their own
+      // request (listFeedbackModal already hides this button for them; this
+      // is the hard guard behind it, since a hidden button on its own isn't
+      // enough — see the governance note in CLAUDE.md).
+      const request = await verifyOwnedRow(admin, "feedback_requests", "id, pair_id, from_role, status", action.value, ctx, (row) => row.status === "open" && row.from_role !== ctx.role);
+      if (request) {
         await slackApi("views.push", { trigger_id: payload.trigger_id, view: addFeedbackModal(ctx, undefined, false, request.id) }).catch((e) =>
           console.error("answer feedback request push:", e)
         );

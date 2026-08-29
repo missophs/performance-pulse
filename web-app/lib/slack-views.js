@@ -489,7 +489,14 @@ export function addFeedbackRequestModal() {
   ]);
 }
 
-export function listFeedbackModal(feedback, requests) {
+// viewerRole gates the "Answer" button the same way the website does
+// (app/(dashboard)/performance/page.js's `forMe = r.from_role !== role`,
+// shown only when forMe): a feedback request is answered by the *other*
+// pair member, never by whoever asked for it, so a request the viewer
+// themselves created never renders "Answer" here. "Close without
+// answering" stays available regardless of who's viewing — it's the
+// website's Dismiss/Withdraw action, which either side can do.
+export function listFeedbackModal(feedback, requests, viewerRole) {
   const byType = {};
   feedback.forEach((f) => (byType[f.type] = (byType[f.type] || 0) + 1));
   const summary = Object.entries(byType)
@@ -512,7 +519,10 @@ export function listFeedbackModal(feedback, requests) {
     ...(reqBlocks.length ? [{ type: "divider" }, section("*Open requests*")] : []),
     ...reqBlocks.flatMap((r) => [
       section(`Requested ${ago(r.created_at)}`),
-      actions([button("Answer", "feedback_request_answer", r.id, "primary"), button("Close without answering", "feedback_request_answered", r.id)]),
+      actions([
+        ...(r.from_role === viewerRole ? [] : [button("Answer", "feedback_request_answer", r.id, "primary")]),
+        button("Close without answering", "feedback_request_answered", r.id),
+      ]),
     ]),
     { type: "divider" },
     actions([openInApp("Open feedback in the app for the full text")]),
