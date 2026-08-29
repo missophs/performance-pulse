@@ -110,6 +110,33 @@ export async function setTopicStatus(supabase, id, status, ctx = {}) {
   }
 }
 
+/**
+ * Changes a topic's own text/category/why after it's been added — separate
+ * from setTopicStatus (state, e.g. Discussed) and setTopicNotes (what came
+ * up in conversation). Added so someone who forgets what they originally
+ * typed can pull it back up and correct it instead of deleting and
+ * re-adding. Same ctx/logging shape as setTopicStatus so both surfaces
+ * (website, Slack) share one call site.
+ */
+export async function updateTopic(supabase, id, { text, why, category }, ctx = {}) {
+  const { data: before } = await supabase.from("topics").select("pair_id, text").eq("id", id).maybeSingle();
+  const { error } = await supabase
+    .from("topics")
+    .update({ text, why: why || "", category, updated_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw error;
+  if (before && before.text !== text) {
+    await logActivity(supabase, before.pair_id, {
+      entity: "topic",
+      entityId: id,
+      label: text,
+      oldValue: before.text,
+      newValue: text,
+      ...ctx,
+    });
+  }
+}
+
 export async function setTopicNotes(supabase, id, notes) {
   const { error } = await supabase
     .from("topics")

@@ -12,6 +12,7 @@ import {
   addTopic,
   setTopicStatus,
   setTopicNotes,
+  updateTopic,
   deleteTopics,
   getOpenCheckin,
   saveCheckin,
@@ -68,6 +69,10 @@ export default function OneOnOnePage() {
   const [ciCat, setCiCat] = useState("Support needed");
 
   const [noteTopic, setNoteTopic] = useState(null);
+  const [editTopic, setEditTopic] = useState(null);
+  const [editText, setEditText] = useState("");
+  const [editCat, setEditCat] = useState(TOPIC_CATEGORIES[0]);
+  const [editWhy, setEditWhy] = useState("");
   const [noteText, setNoteText] = useState("");
 
   const [actionModal, setActionModal] = useState(null); // { existing, seed } | null
@@ -255,6 +260,27 @@ export default function OneOnOnePage() {
     if (!noteTopic) return;
     await setTopicNotes(supabase, noteTopic.id, noteText);
     setNoteTopic(null);
+    loadAll();
+  }
+
+  function openEditModal(t) {
+    setEditTopic(t);
+    setEditText(t.text);
+    setEditCat(t.category);
+    setEditWhy(t.why || "");
+  }
+
+  async function saveEditTopic() {
+    if (!editTopic) return;
+    const text = editText.trim();
+    if (!text) return;
+    await updateTopic(
+      supabase,
+      editTopic.id,
+      { text, why: editWhy.trim(), category: editCat },
+      { actorName: myName, actorRole: role, source: "web" }
+    );
+    setEditTopic(null);
     loadAll();
   }
 
@@ -504,8 +530,10 @@ export default function OneOnOnePage() {
               items={talkTopics}
               emptyTitle="No topics yet"
               emptyBody="Add something in Prepare to get started."
+              viewerRole={role}
               onStatusChange={changeTopicStatus}
               onNote={openNoteModal}
+              onEdit={openEditModal}
               onAction={(t) => setActionModal({ existing: null, seed: { text: "", related: `Topic: ${t.text}` } })}
               onDelete={removeTopic}
             />
@@ -517,8 +545,10 @@ export default function OneOnOnePage() {
               items={parkingTopics}
               emptyTitle="Parking lot is empty"
               emptyBody="Anything you defer will land here."
+              viewerRole={role}
               onStatusChange={changeTopicStatus}
               onNote={openNoteModal}
+              onEdit={openEditModal}
               onAction={(t) => setActionModal({ existing: null, seed: { text: "", related: `Topic: ${t.text}` } })}
               onDelete={removeTopic}
             />
@@ -692,6 +722,44 @@ export default function OneOnOnePage() {
         <div className="field">
           <label htmlFor="tNote">What came up</label>
           <textarea id="tNote" value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="What did you actually say and decide?" />
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!editTopic}
+        title="Edit topic"
+        onClose={() => setEditTopic(null)}
+        onSave={saveEditTopic}
+        saveLabel="Save changes"
+        saveDisabled={!editText.trim()}
+      >
+        <div className="row">
+          <div className="field" style={{ flex: 2 }}>
+            <label htmlFor="editTopicText">I want to discuss…</label>
+            <input id="editTopicText" type="text" value={editText} onChange={(e) => setEditText(e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="editTopicCat">Category</label>
+            <select id="editTopicCat" value={editCat} onChange={(e) => setEditCat(e.target.value)}>
+              {/* A topic added from a suggestion can carry a category that isn't
+                  in this fixed list (e.g. "Where I stand" from the suggestion
+                  library) — without this, <select> can't match `value` to any
+                  <option> and silently falls back to showing (and then saving)
+                  the first one instead, changing the category as a side effect
+                  of an edit that never touched it. */}
+              {(TOPIC_CATEGORIES.includes(editCat) ? TOPIC_CATEGORIES : [...TOPIC_CATEGORIES, editCat]).map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="field">
+          <label htmlFor="editTopicWhy">
+            Why it matters <span style={{ fontWeight: 400, textTransform: "none" }}>(optional)</span>
+          </label>
+          <textarea id="editTopicWhy" value={editWhy} onChange={(e) => setEditWhy(e.target.value)} />
         </div>
       </Modal>
 

@@ -16,6 +16,7 @@ import {
   editNameModal,
   addTopicModal,
   listTopicsModal,
+  editTopicModal,
   addActionModal,
   listActionsModal,
   addGoalModal,
@@ -35,6 +36,7 @@ import {
 } from "@/lib/slack-views";
 import {
   setTopicStatus,
+  updateTopic,
   toggleActionDone,
   setFeedbackRequestStatus,
   addTopic,
@@ -82,11 +84,26 @@ async function draftFor(admin, ctx, kind) {
   return row?.draft;
 }
 
+// A saved topic draft may carry text/why/category under their "_v2"
+// block_id instead (see the block_id comment on addTopicModal,
+// lib/slack-views.js) if "Save draft" was clicked while the modal was
+// showing "_v2" fields. Collapse to the plain keys addTopicModal reads.
+function normalizeTopicDraft(draft) {
+  if (!draft) return draft;
+  const { text_v2, why_v2, category_v2, ...rest } = draft;
+  return {
+    ...rest,
+    ...(text_v2 !== undefined ? { text: text_v2 } : {}),
+    ...(why_v2 !== undefined ? { why: why_v2 } : {}),
+    ...(category_v2 !== undefined ? { category: category_v2 } : {}),
+  };
+}
+
 // `title` is shown in the placeholder modal that opens instantly, so it should
 // match the title `build` returns — only the body swaps when the data lands.
 const OPENERS = {
   open_edit_name: { title: "Your name", build: async (admin, ctx) => editNameModal(ctx) },
-  open_add_topic: { title: "Add a topic", build: async (admin, ctx) => addTopicModal(ctx, await draftFor(admin, ctx, "topic")) },
+  open_add_topic: { title: "Add a topic", build: async (admin, ctx) => addTopicModal(ctx, normalizeTopicDraft(await draftFor(admin, ctx, "topic"))) },
   open_add_action: { title: "Add an action", build: async (admin, ctx) => addActionModal(ctx) },
   open_wrap_up: { title: "Wrap up", build: async (admin, ctx) => wrapUpModal((await loadHomeData(admin, ctx.pairId)).topics) },
   open_add_goal: { title: "Add a goal", build: async (admin, ctx) => addGoalModal(await draftFor(admin, ctx, "goal")) },
@@ -94,7 +111,7 @@ const OPENERS = {
   open_add_achievement: { title: "Log an achievement", build: async (admin, ctx) => addAchievementModal(await draftFor(admin, ctx, "achievement")) },
   open_add_feedback: { title: "Give feedback", build: async (admin, ctx) => addFeedbackModal(ctx, await draftFor(admin, ctx, "feedback")) },
   open_add_feedback_request: { title: "Ask for feedback", build: async () => addFeedbackRequestModal() },
-  open_list_topics: { title: "Open topics", build: async (admin, ctx) => listTopicsModal((await loadHomeData(admin, ctx.pairId)).topics) },
+  open_list_topics: { title: "Open topics", build: async (admin, ctx) => listTopicsModal((await loadHomeData(admin, ctx.pairId)).topics, ctx.role) },
   open_list_actions: { title: "Open actions", build: async (admin, ctx) => listActionsModal((await loadHomeData(admin, ctx.pairId)).actions) },
   open_list_goals: { title: "Goals", build: async (admin, ctx) => listGoalsModal((await loadHomeData(admin, ctx.pairId)).goals) },
   open_list_devplans: { title: "Development plans", build: async (admin, ctx) => listDevPlansModal((await loadHomeData(admin, ctx.pairId)).devPlans) },
@@ -118,7 +135,11 @@ const OPENERS = {
 // draft" button instead. draftFor() above (used when the modal is opened)
 // is what shows the saved draft again later.
 const SAVE_DRAFT = {
-  save_draft_topic: { kind: "topic", fields: ["text", "why", "category"], build: (ctx, draft) => addTopicModal(ctx, draft, true) },
+  save_draft_topic: {
+    kind: "topic",
+    fields: ["text", "text_v2", "why", "why_v2", "category", "category_v2"],
+    build: (ctx, draft) => addTopicModal(ctx, normalizeTopicDraft(draft), true),
+  },
   save_draft_goal: { kind: "goal", fields: ["text", "why", "measure", "target", "status"], build: (ctx, draft) => addGoalModal(draft, true) },
   save_draft_devplan: { kind: "dev", fields: ["area", "type", "activity", "target"], build: (ctx, draft) => addDevPlanModal(draft, true) },
   save_draft_achievement: { kind: "achievement", fields: ["title", "category", "impact", "date"], build: (ctx, draft) => addAchievementModal(draft, true) },
@@ -140,7 +161,7 @@ const QUICK_ACTIONS = {
       await setTopicStatus(admin, id, "Discussed", fromSlack(ctx));
       await notify(admin, ctx.pairId, `Topic marked Discussed by ${ctx.myName}`, ctx.role, ctx.otherRole, "oneOnOne");
     },
-    refreshList: (data) => listTopicsModal(data.topics),
+    refreshList: (data, ctx) => listTopicsModal(data.topics, ctx.role),
   },
   action_mark_done: {
     run: async (admin, ctx, id) => {
@@ -168,6 +189,14 @@ function fieldVal(values, blockId) {
   return f.value;
 }
 
+// addTopicModal renders "text"/"why"/"category" under a "_v2" block_id
+// instead when pre-filled via views.update (see the comment there) — only
+// one of a base/"_v2" pair is ever actually present in a given view, so
+// try both.
+function fieldValV2(values, blockId) {
+  return fieldVal(values, `${blockId}_v2`) ?? fieldVal(values, blockId);
+}
+
 const SUBMISSIONS = {
   edit_name: async (admin, ctx, v) => {
     const name = (fieldVal(v, "name") || "").trim();
@@ -176,20 +205,20 @@ const SUBMISSIONS = {
     ctx.myName = name; // so the Home-tab refresh right after this shows the new name immediately
   },
   add_topic: async (admin, ctx, v) => {
-    const suggested = fieldVal(v, "suggested");
-    const manualText = (fieldVal(v, "text") || "").trim();
-    let text, category;
-    if (suggested) {
-      const sep = suggested.indexOf("::");
-      category = suggested.slice(0, sep);
-      text = suggested.slice(sep + 2);
-    } else if (manualText) {
-      text = manualText;
-      category = fieldVal(v, "category") || "Other";
-    } else {
-      return { error: { blockId: "text", message: "Pick a suggestion above, or write your own topic." } };
-    }
-    await addTopic(admin, ctx.pairId, { text, why: fieldVal(v, "why"), category, role: ctx.role, name: ctx.myName });
+    // "text" is a required field (see addTopicModal, lib/slack-views.js), so
+    // Slack itself blocks submission before this handler ever runs if it's
+    // empty. Picking a suggestion fills this in via a block_actions
+    // round-trip (see the "suggested_pick" branch above) rather than being a
+    // second, independently-submittable source of the topic text.
+    // fieldValV2 checks both the base and "_v2" block_id (see the block_id
+    // comment on addTopicModal, lib/slack-views.js) — required for all
+    // three fields, not just category: a views.update-prefilled
+    // plain_text_input can visibly show the right text while still
+    // submitting empty under its original block_id, confirmed live against
+    // the database, not just from what the modal displayed.
+    const text = (fieldValV2(v, "text") || "").trim();
+    const category = fieldValV2(v, "category") || "Other";
+    await addTopic(admin, ctx.pairId, { text, why: fieldValV2(v, "why"), category, role: ctx.role, name: ctx.myName });
     await clearFormDraft(admin, ctx.pairId, ctx.role, "topic").catch(() => {});
     delayedNotify(admin, ctx.pairId, `${ctx.myName} added a topic: ${text}`, ctx.role, ctx.otherRole, "oneOnOne", "topic");
   },
@@ -235,6 +264,23 @@ const SUBMISSIONS = {
   add_feedback_request: async (admin, ctx, v) => {
     await addFeedbackRequest(admin, ctx.pairId, { fromRole: ctx.role, fromName: ctx.myName, about: fieldVal(v, "about"), why: fieldVal(v, "why") });
     delayedNotify(admin, ctx.pairId, `${ctx.myName} asked you for feedback`, ctx.role, ctx.otherRole, "performance", "request");
+  },
+  edit_topic: async (admin, ctx, v, view) => {
+    const id = view?.private_metadata;
+    if (!id) return;
+    const text = (fieldVal(v, "text") || "").trim();
+    if (!text) return { error: { blockId: "text", message: "Topic can't be empty." } };
+    await updateTopic(admin, id, { text, why: fieldVal(v, "why"), category: fieldVal(v, "category") }, fromSlack(ctx));
+    // Pushed modals close back to the list beneath them on their own, but
+    // that list (payload.view.previous_view_id) still has the pre-edit text
+    // baked into its blocks — views.update it too, or the edit would look
+    // like it silently didn't take until the next open.
+    if (view.previous_view_id) {
+      const data = await loadHomeData(admin, ctx.pairId);
+      await slackApi("views.update", { view_id: view.previous_view_id, view: listTopicsModal(data.topics, ctx.role) }).catch((e) =>
+        console.error("edit topic list refresh:", e)
+      );
+    }
   },
   wrap_up: async (admin, ctx, v) => {
     const discussedTopicIds = fieldVal(v, "discussed_topics") || [];
@@ -358,9 +404,35 @@ async function handleInteraction(admin, slackUserId, payload) {
       // The list modal is the visible result of the click, so it stays on the
       // critical path; the Home tab behind it can catch up after the response.
       if (payload.view?.id) {
-        await slackApi("views.update", { view_id: payload.view.id, view: spec.refreshList(data) }).catch((e) => console.error("view update:", e));
+        await slackApi("views.update", { view_id: payload.view.id, view: spec.refreshList(data, ctx) }).catch((e) => console.error("view update:", e));
       }
       after(() => refreshHome(admin, ctx, data));
+    } else if (action.action_id === "topic_edit") {
+      // Pushed on top of the open topics-list modal (views.push, not
+      // views.open) so Cancel/Save both return to that list rather than the
+      // Home tab. A single-row lookup is cheap enough to stay inside
+      // Slack's 3s window without the loading-placeholder dance OPENERS uses.
+      const { data: topic } = await admin.from("topics").select("id, text, why, category, created_by_role").eq("id", action.value).maybeSingle();
+      if (topic && topic.created_by_role === ctx.role) {
+        await slackApi("views.push", { trigger_id: payload.trigger_id, view: editTopicModal(topic) }).catch((e) => console.error("edit topic push:", e));
+      }
+    } else if (action.action_id === "suggested_pick") {
+      // Lives in a section block (see addTopicModal, lib/slack-views.js),
+      // not an input block — only section/actions-block elements dispatch
+      // block_actions on selection; the same select inside an input block
+      // silently never fires at all. Fills in the real, required
+      // "text"/"category" fields below, since "suggested_pick" itself is
+      // only ever a picker, never saved.
+      const picked = action.selected_option?.value || "";
+      const sep = picked.indexOf("::");
+      const category = sep >= 0 ? picked.slice(0, sep) : undefined;
+      const text = sep >= 0 ? picked.slice(sep + 2) : picked;
+      const why = fieldVal(payload.view?.state?.values, "why");
+      if (payload.view?.id) {
+        await slackApi("views.update", { view_id: payload.view.id, view: addTopicModal(ctx, { text, why, category }) }).catch((e) =>
+          console.error("suggestion prefill view update:", e)
+        );
+      }
     }
     return Response.json({ ok: true });
   }
@@ -368,7 +440,7 @@ async function handleInteraction(admin, slackUserId, payload) {
   if (payload.type === "view_submission") {
     const handler = SUBMISSIONS[payload.view?.callback_id];
     if (handler) {
-      const result = await handler(admin, ctx, payload.view.state.values);
+      const result = await handler(admin, ctx, payload.view.state.values, payload.view);
       if (result?.error) {
         return Response.json({ response_action: "errors", errors: { [result.error.blockId]: result.error.message } });
       }

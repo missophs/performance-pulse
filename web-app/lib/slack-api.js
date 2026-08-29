@@ -20,6 +20,9 @@ export async function slackApi(method, body) {
     body: form,
   });
   const json = await res.json();
-  if (!json.ok) throw new Error(`Slack ${method} failed: ${json.error}`);
+  if (!json.ok) {
+    const detail = json.response_metadata?.messages ? ` (${json.response_metadata.messages.join("; ")})` : "";
+    throw new Error(`Slack ${method} failed: ${json.error}${detail}`);
+  }
   return json;
 }

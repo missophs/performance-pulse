@@ -8,7 +8,10 @@ import { TOPIC_STATES } from "@/lib/one-on-one-content";
 // Shared renderer for the Talk agenda and the Parking lot — reimplements
 // renderTopicList() from the prototype as a React component. Always shows
 // the 7-state status control, a Note button, an Action button, and Remove.
-export default function TopicList({ items, emptyTitle, emptyBody, onStatusChange, onNote, onAction, onDelete }) {
+// viewerRole gates the Edit button to whoever created the topic — status
+// changes, notes, and delete stay open to both partners (unchanged), but
+// rewriting someone else's words is creator-only.
+export default function TopicList({ items, emptyTitle, emptyBody, viewerRole, onStatusChange, onNote, onEdit, onAction, onDelete }) {
   if (!items.length) {
     return (
       <div className="empty">
@@ -59,6 +62,11 @@ export default function TopicList({ items, emptyTitle, emptyBody, onStatusChange
               <button className="btn ghost sm" onClick={() => onNote(t)}>
                 Note
               </button>
+              {t.created_by_role === viewerRole && (
+                <button className="btn ghost sm" onClick={() => onEdit(t)}>
+                  Edit
+                </button>
+              )}
               <button className="btn secondary sm" onClick={() => onAction(t)}>
                 Action
               </button>

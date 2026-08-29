@@ -1,5 +1,103 @@
 # Slack integration — status and what's left
 
+Updated 2026-08-29 (midday, later). Small styling fix: on the Slack Home
+tab, "Wrap up a 1:1" was the only highlighted (green/primary) button among
+"Add a topic / Topics / Add an action / Actions / Wrap up a 1:1" — Melissa:
+"it should land on add a topic" (her eye went to the green button first,
+not the leftmost one). Swapped which button carries `style: "primary"` in
+`homeView`, `lib/slack-views.js` — "Add a topic" is now green, "Wrap up a
+1:1" is plain. Order unchanged (Add a topic was already leftmost). Verified
+build/test clean, deployed, confirmed live in Slack via screenshot.
+
+Updated 2026-08-29 (midday). Slack's "Add a topic" modal required-field
+gap is now actually fixed, not just relabeled — supersedes this morning's
+entry below. Melissa: "we need to make one or both of the fields required
+instead, IT can't have optional an then you get an error."
+
+**What shipped:** "What do you want to discuss" is now a genuinely
+required field — Slack blocks submission client-side with its own "Please
+complete this required field," no custom server error needed. "Pick a
+suggestion" stays optional and, when picked, fills in the required text
+field (and category) for you via a `block_actions` round-trip, instead of
+being a second independently-submittable source of the topic (the old,
+now-removed behavior this morning's entry describes as a "possible
+follow-up" — it's done).
+
+**Three real, separate platform bugs found building this, each confirmed
+live against the database or server logs, not from how the modal looked:**
+1. A `static_select` inside an **input** block never dispatches
+   `block_actions` on selection at all — no request, no error, nothing.
+   Only elements in a **section**/actions block do. The picker
+   (`suggested_pick`, `lib/slack-views.js`) had to move out of an input
+   block into a section+accessory to be clickable at all. Cost: its value
+   no longer appears in `view.state.values` at submission — fine here,
+   since it only ever flows into "text"/"category" via the prefill.
+2. Once that worked, `views.update` on an already-open modal doesn't
+   reliably push a picked suggestion's category into an existing
+   `static_select`'s block_id — confirmed live: modal kept showing "Wins"
+   after picking a suggestion clearly grouped under "Where things stand,"
+   even though the server-computed value logged correctly. Fix: give the
+   field a different block_id ("category_v2") whenever it's being
+   pre-filled via views.update, forcing Slack to treat it as new.
+3. The same is true of `plain_text_input`, and worse: it **visibly showed
+   the right text** ("Is what's expected of you actually clear?" rendered
+   correctly in the field) while **silently submitting empty** — a real
+   topic got saved with `text: ""` and the right category, caught only by
+   querying the database after Save, not from anything visible in Slack.
+   Same block_id-swap fix applied to "text" and "why" too
+   (`lib/slack-views.js`, `addTopicModal`'s `v2` flag; read on the
+   server via the new `fieldValV2` helper and `normalizeTopicDraft`,
+   `app/api/slack/interactivity/route.js`).
+
+Verified `npm run build`/`lint`/`test` clean after each of the four
+deploys this took (lint 34 pre-existing, unchanged; tests 5/5). Live
+end-to-end, checking the actual database after Save each time, not just
+the modal: picked a suggestion, confirmed text and category both saved
+correctly, deleted the test row after (`00761548-3f28-42fa-bbe1-f0d77178ac21`).
+Also confirmed the empty-field case: tried to Save with nothing entered,
+got Slack's native required-field block, no server round-trip at all.
+
+Updated 2026-08-29 (morning). Small fix: Slack's "Add a topic" modal
+(`addTopicModal`, `lib/slack-views.js`) showed **"Pick a suggestion
+(optional) (optional)"** — a literal double label. Cause: the label text
+had "(optional)" typed into it manually, and Slack *also* auto-appends
+"(optional)" to any input block marked `optional: true`. Fixed by removing
+the manual text from that label, and reworded "Or write your own" to "Or
+write your own — required if no suggestion picked," since Melissa correctly
+flagged that both fields showing "optional" is misleading when the server
+actually requires one or the other (`add_topic` handler,
+`app/api/slack/interactivity/route.js` line ~192, errors with "Pick a
+suggestion above, or write your own topic." if both are empty). Superseded
+by the entry above — this rewording was a real improvement but the
+underlying gap it describes as a "possible follow-up" is now closed.
+
+Updated 2026-08-28 (even later night). Topic add/edit was live-verified end
+to end tonight — it works, on both surfaces. What looked broken during
+testing was three unrelated things, not the code: (1) Melissa was clicking
+Slack's own sidebar "Home" icon, not the Performance Pulse app's "Home" tab
+— same label, different element, same screen; (2) five duplicate Slack tabs
+had accumulated in her Chrome from repeated testing, so a fix confirmed in
+one tab didn't show in the one she was looking at; (3) Slack's own Block
+Kit buttons genuinely do drop clicks intermittently — confirmed directly by
+clicking "Edit"/"Save changes" myself and watching zero requests reach
+`/api/slack/interactivity` on the failed clicks (Vercel logs). None of the
+three needed a code change. **New requirement from tonight, top priority
+for next session — see the new item at the top of the open list below:**
+adding or editing a topic must **not** trigger a Slack notification.
+Notification only on an explicit, separate "Submit" action. Her words,
+twice, because the first explanation got it wrong: "Saving changes should
+not be submitting... Editing or adding a topic is not the submit either."
+
+Updated 2026-08-28 (late night). Topics can now be **edited after adding**,
+on both the website and Slack — was open only as "add" before, at Melissa's
+explicit request ("people don't remember what they typed in... they need to
+be able to change that, and they need to be able to see what is written").
+See item 6's Done entry (moved to the top of the open list previously, now
+closed) for the full writeup, including two real bugs this surfaced and
+fixed along the way (a category-list mismatch that could silently
+mis-save a topic's category, and Slack's stricter modal validation
+catching it where the website's plain dropdown silently didn't).
+
 Updated 2026-08-26. DM pings (see `lib/block-kit.js` / `lib/slack-send.js`)
 and full in-Slack interactivity (Home tab, add/view modals, quick actions —
 see `app/api/slack/events/`, `app/api/slack/interactivity/`, `lib/slack-*.js`)
@@ -17,6 +115,74 @@ is smaller or waiting on a decision. Run `npm test` before and after
 touching pair lookup.
 
 Done:
+
+- **Topics can be edited after adding — website and Slack, 2026-08-28
+  night.** Was open item 6 below (partly) plus a fresh explicit request from
+  Melissa mid-session: "people don't remember what they typed in, and will
+  wanna go back to their original. They need to be able to change that, and
+  they need to be able to see what is written." Also decided, in the same
+  conversation, to stop redacting topic text in Slack's list modal — see
+  the privacy tradeoff note in `lib/slack-views.js` above `listTopicsModal`.
+  Scoped to **topics only** (not goals/actions/etc.) and to **creator-only**
+  editing ("I just need the employee or manager to go in and edit their own
+  stuff") — status changes, notes, and delete stay open to both partners,
+  unchanged.
+
+  *Website* (`lib/data.js`, `components/one-on-one/TopicList.js`,
+  `app/(dashboard)/one-on-one/page.js`): new `updateTopic()`, same
+  upsert-with-activity-log shape as `setTopicStatus`. `TopicList` gained a
+  `viewerRole` prop gating a new "Edit" button to
+  `t.created_by_role === viewerRole`. Reuses the existing add-topic Modal
+  pattern, pre-filled.
+
+  *Slack* (`lib/slack-views.js`, `app/api/slack/interactivity/route.js`):
+  `listTopicsModal` now shows the real topic text (was category + relative
+  date only) plus a creator-gated "Edit" button; a new `editTopicModal`
+  is **pushed** on top of the list (`views.push`, not `views.open`) so
+  Cancel/Save both return to the list rather than the Home tab — the one
+  case in this codebase where a click needs a *second* modal on top of an
+  already-open one. `SUBMISSIONS.edit_topic` updates the row and then
+  explicitly `views.update`s the list modal underneath
+  (`payload.view.previous_view_id`), since a pushed modal closing on save
+  doesn't refresh what's behind it on its own.
+
+  **Two real bugs found and fixed while building this, not pre-existing
+  known issues:**
+  1. A topic added from the suggestion picker (see `suggestionOptionGroups`)
+     carries a category from the `SUGGESTIONS` library — a different list
+     than the fixed `TOPIC_CATEGORIES` used by every category dropdown
+     (e.g. "Where things stand" / "Where I stand" — not on the standard
+     list at all). The website's plain HTML `<select>` just silently fails
+     to preselect an unmatched value and falls back to showing (and would
+     have then saved) the *first* option instead — a real data-corruption
+     risk on any edit that didn't touch the category field, caught live
+     while testing, not in review. Slack's `static_select` is strict
+     enough to hard-reject an unmatched `initial_option`
+     (`invalid_arguments`), which is what actually surfaced this — the
+     Edit modal wouldn't open in Slack at all until fixed. Fix in both
+     places: build the dropdown's option list as `TOPIC_CATEGORIES` plus
+     the topic's real category if it isn't already one of them, so the
+     true value is always representable and never silently substituted.
+  2. `lib/slack-api.js`'s error path only surfaced Slack's top-level error
+     code (`invalid_arguments`), not which field failed — added
+     `response_metadata.messages` to the thrown error message (kept, not
+     reverted, since it's a strict improvement for any future Slack API
+     debugging).
+
+  Verified: `npm run build`/`lint`/`test` clean after every change (lint
+  34 pre-existing errors, unchanged; tests 5/5). **Live end-to-end on both
+  surfaces, not just read from code:** added a real topic as
+  `melissaw212@gmail.com` (employee on the real pair), confirmed no Edit
+  button shows on topics she didn't create (manager's), confirmed Edit
+  does show on her own, edited it, confirmed the category bug fix
+  (dropdown showed "Where I stand" correctly instead of falling back to
+  "Wins"), saved, reloaded. In Slack, as the real manager account
+  (`melissahr212@gmail.com`, "monty"), opened Topics, saw real text on
+  every row, edited one via the pushed modal, confirmed the list behind it
+  updated in place with the new text without closing. Both directions
+  confirmed to hit the same `topics` row (shared database, no separate
+  sync needed). Test topic and test edit both cleaned up afterward
+  (deleted / reverted directly against the database).
 
 - Real Slack DM pings for every `BK_KINDS` kind, sent via
   `app/api/slack/notify/route.js` (a Supabase Database trigger —
@@ -481,6 +647,48 @@ Done:
 
 Still open, in priority order:
 
+0. **NEW, top priority — decouple "submit" from add/edit; stop pinging on
+   every save.** From tonight's session (2026-08-28), after the topic-edit
+   feature above was verified working. Melissa's exact words: "they have to
+   submit it to the employee, the manager, so they know that it's done. I
+   don't wanna ping right away." Then, correcting my first (wrong) read of
+   that: "Saving changes should not be submitting. I've said that to you.
+   Editing or adding a topic is not the submit either."
+
+   **Current behavior (why this is a real change, not a tweak):** every
+   `BK_KINDS` insert already sends an immediate Slack DM via the
+   `notify_slack_on_notification()` Supabase trigger (see Done section,
+   "Real Slack DM pings for every `BK_KINDS` kind") — adding a topic pings
+   right away today. Topic-add pings are already *batched* into one DM per
+   Prepare session (see Done, 2026-08-24) but batching still fires
+   automatically, with no explicit user action gating it. What's being
+   asked for is different: no ping at all until the user deliberately says
+   "this is done," however many times they've added or edited something
+   before that.
+
+   **Not yet designed — needs a decision next session, not just code:**
+   - Scope: topics only (what tonight's conversation was actually about),
+     or every kind that currently pings (goals, actions, achievements,
+     feedback, dev plans)? Leaning topics-only to start, matching how the
+     edit feature itself was scoped, but confirm with Melissa first.
+   - Mechanism: a `submitted_at`/status flag on the row so the DB trigger
+     only fires on that transition instead of on insert, vs. a separate
+     explicit endpoint the new "Submit" button calls directly (bypassing
+     the trigger for these rows). The trigger-flag approach keeps one
+     notification path; the explicit-endpoint approach is a bigger
+     divergence from how every other kind currently notifies.
+   - UI: one "Submit" button per topic, or a batch "Submit all"/"Let them
+     know" action from the Prepare tab and Slack Home tab alike (mirrors
+     how "Wrap up a 1:1" already batches multiple things into one action)?
+   - Website needs the same behavior as Slack — this was asked for on both
+     surfaces the same way the edit feature was, so it isn't Slack-only.
+
+   Do not build this by guessing the above — it changes when the other
+   person gets notified, which is the one thing this app is careful about
+   (see `manager-employee-privacy-is-the-product` — pings already carry
+   counts, never content, on purpose). Confirm scope + mechanism with
+   Melissa before writing code.
+
 1. **Save / pause / go-back across forms — Day 1, 2, and 3 all done.**
    Only the check-in wizard has a real draft-save + resume +
    back-navigation flow (plus a separate, simpler `review_drafts`
@@ -774,25 +982,96 @@ Still open, in priority order:
    above): Account A loads `/dashboard` cleanly with no indication a second
    pairing exists. Both halves of the 2026-08-25 fix are now verified.
 
+   **Done, 2026-08-28: orphaned row linked, genuine middle-manager account
+   now exists.** Ran `update pairs set manager_id =
+   'd07773b0-53a5-4803-8ae1-c966ce56d9c3' where id =
+   '29d4b909-a7a6-4a95-bda4-1da2446519e7'` by hand in the Supabase SQL
+   Editor (chosen over redoing Account C's onboarding, to avoid tripping
+   the email rate limit again). Verified via the REST API afterward:
+   `29d4b909...` now has `manager_id: d07773b0-...` (Account A). Account A
+   is now employee on `2a0e4b7b...` (partner `boss@test.com`) and manager
+   on `29d4b909...` (partner Account C) — a real middle-manager pair, no
+   test data invented, ready for the `/dashboard` crash test in step 2
+   below.
+
+   **Done, 2026-08-28: code review of the 8f6e8b8/7758f41 case-sensitivity
+   fix found it was only half-fixed, and the gap was fixed for real.**
+   `resolveSlackUser`'s PostgREST filter (`lib/slack-user.js`) lowercased
+   the incoming Slack email but still did a case-sensitive `.eq()` against
+   `employee_email`/`manager_email` — so any pairs row written before the
+   fix (original typed case, never backfilled) stayed invisible to the
+   Slack lookup. Confirmed live against the orphaned row above:
+   `29d4b909...`'s `manager_email` is still stored as
+   `"melissaw212+accountA@gmail.com"` (capital A). Also found: the
+   `lower()`-widened match in `handle_new_user` had no row cap, so two
+   pre-existing case-variant rows for the same address could both match one
+   `UPDATE` and collide on `pairs_employee_id_key`/`pairs_manager_id_key`,
+   aborting the whole signup transaction — a regression the original fix
+   introduced, not a pre-existing bug.
+
+   Fixed via `supabase/migrations/0006_citext_emails.sql`, run by hand in
+   the SQL Editor: `profiles.email`/`pairs.employee_email`/
+   `pairs.manager_email` are now `citext` (case-insensitive text), so every
+   `=`/`.eq()` comparison is case-insensitive by construction — no backfill
+   of existing rows needed, and no more scattered `lower()` calls to keep in
+   sync across `schema.sql` and `lib/slack-user.js`. `handle_new_user`'s two
+   `UPDATE`s are narrowed to the single oldest matching row so a legacy
+   duplicate-case invite degrades gracefully instead of crashing signup;
+   `create_pair`'s partner lookup got the same `limit 1` insurance.
+   `lib/slack-user.js`'s `isMgr` comparison also needed a `.toLowerCase()`
+   on `pair.manager_email` — citext doesn't change what's returned to JS,
+   only how Postgres compares it, so the JS-side `===` still needed fixing
+   separately.
+
+   Verified: `npm test` (5/5 pass, same tests as before), `npm run build`
+   clean, `npm run lint` clean on both touched files. Verified live against
+   production data after running the migration: a single lowercase-email
+   REST query (`melissaw212+accounta@gmail.com`) now returns **both**
+   `2a0e4b7b...` and `29d4b909...`, even though the second row's
+   `manager_email` still has the capital A — proving `resolveSlackUser`
+   would now correctly return `{ ambiguous: true }` for Account A's real
+   Slack identity instead of silently seeing only one pairing.
+
+   **Done, 2026-08-28: the real `/dashboard` crash test, and the fix.**
+   Signed in as Account A (magic link) and loaded `/dashboard` live: it
+   crashed with a server error (digest `880917256@E394`) — confirmed to be
+   `getMyPair`'s `.maybeSingle()` throwing `PGRST116` on Account A's two
+   matching rows, exactly the code-level finding above, now proven against
+   real data instead of reasoned about. No `error.js` boundary anywhere
+   under `app/`, so the user saw Next's generic "Application error" page
+   with no explanation.
+
+   Fixed the same way the Slack side was fixed on 2026-08-25: `getMyPair`
+   (`lib/data.js`) now uses `.limit(2)` and returns `{ ambiguous: true }`
+   on two rows instead of throwing. `app/(dashboard)/layout.js` — the one
+   shared shell every dashboard route renders through, so fixing it here
+   covers all nine `getMyPair` call sites without touching each page —
+   branches on `pair.ambiguous` and shows a "Multiple pairs not supported
+   yet" notice (same wording as the Slack guard) instead of rendering the
+   dashboard.
+
+   Verified: `npm run build`, `npm run lint`, `npm test` all clean before
+   deploy. Deployed via `vercel --prod`. **Live-verified end to end:**
+   reloaded Account A's actually-crashed `/dashboard` tab after deploy —
+   it now shows "Multiple pairs not supported yet" instead of the error
+   page. Both halves of the middle-manager crash (Slack and website) are
+   now fixed and live-verified against the same real account.
+
+   **Not done as part of this fix, on purpose:** this only stops the
+   crash. It doesn't let a middle manager actually use either of their
+   pairings from the web app — that's the switcher/refactor work below
+   (`listMyPairs`, drop the unique indexes), still open.
+
    Next session, in order:
-   1. Deal with the two orphaned rows above — either delete both and have
-      Account C redo onboarding (now safe: `create_pair`'s lookup is
-      case-insensitive as of `8f6e8b8`, so even a re-typed capital A would
-      link correctly), or hand-run an `update pairs set manager_id = ...`
-      against the orphaned row to link it without redoing onboarding.
-   2. With a genuine middle-manager account in hand, sign in as Account A
-      and actually load `/dashboard` — this is the real test the
-      2026-08-27 entries above never performed. Expect a crash
-      (`.maybeSingle()` → thrown `PGRST116`, per the code-level finding
-      above); confirm what the user actually sees (Next's default error
-      page, or something else — `app/(dashboard)/layout.js` has no
-      `error.js` boundary, confirmed by its absence anywhere under `app/`).
+   1. ~~Deal with the two orphaned rows~~ — done above.
+   2. ~~Sign in as Account A and load `/dashboard`~~ — done above; crash
+      confirmed and fixed.
    3. Decide on the rate-limit fix (open item 3) — likely raising "Rate
       limit for sending emails" in Supabase's dashboard and/or configuring
       a custom SMTP provider, which typically isn't bound by this default
       at all. Worth doing before more testing, not after — it's now cost
       time twice.
-   4. **Only after 1-3 are done**, start the database/code refactor below
+   4. **Only after 3 is done**, start the database/code refactor below
       (`getMyPair` → `listMyPairs`, drop the two unique indexes, add the
       switcher — landing-page and label-format decisions above are
       settled, nothing else is blocking it). Reasoning, unchanged from
@@ -904,23 +1183,19 @@ Still open, in priority order:
    never return `response_action: "errors"` (`add_goal` doesn't;
    `add_topic` does). Needs a decision before it's worth building.
 
-6. **You can't tell your own topics apart in Slack's list modals.**
-   Found by Melissa 2026-08-25: the "Open topics" modal showed two rows
-   both reading `Where things stand`, one "added yesterday" and one
-   "added just now", and she read it as a duplication bug. It isn't — the
-   redaction is working as designed (Slack is a wider trust boundary than
-   the app, so topic text never goes there, see the privacy entry in
-   Done). But category + relative date is thin: two topics filed under
-   the same category are separated only by when they were added, so
-   picking which one to "Mark discussed" is close to guesswork.
-   Affects every redacted list modal, not just topics.
-   No fix chosen yet, and it's a genuine tension rather than an
-   oversight: anything that makes the rows distinguishable leaks
-   something about the topic. Options worth weighing — an exact date
-   instead of "yesterday"; the author's name; a stable per-topic
-   reference the app also shows; or accepting the ambiguity and pushing
-   "Mark discussed" toward the app, where the text is visible anyway.
-   Do not "fix" this by putting topic text in the modal.
+6. ~~You can't tell your own topics apart in Slack's list modals.~~ **Fixed
+   as a side effect of 2026-08-28's edit-topic work, see Done.** Found by
+   Melissa 2026-08-25: the "Open topics" modal showed two rows both reading
+   `Where things stand`, one "added yesterday" and one "added just now",
+   read as a duplication bug — it wasn't, topic text was deliberately
+   redacted there (Slack treated as a wider trust boundary than the app).
+   That tradeoff was revisited and reversed 2026-08-28 at Melissa's request
+   (see Done): `listTopicsModal` now shows the real topic text, which
+   removes this ambiguity as a direct consequence — every row is now
+   distinguished by its actual words, not just category + relative date.
+   Still true for every *other* redacted list modal (goals, achievements,
+   feedback) — this item only ever covered topics, and those weren't
+   revisited.
 
 Not built, deliberately out of scope so far: the `"upcoming"` (1:1
 reminder) ping — nothing triggers it yet; it needs a scheduled job, not

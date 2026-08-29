@@ -102,11 +102,11 @@ export function homeView(ctx, d) {
     { type: "divider" },
     section("*My 1:1*\nPrepare, talk, and wrap up — right here."),
     actions([
-      button("Add a topic", "open_add_topic"),
+      button("Add a topic", "open_add_topic", "", "primary"),
       button(`Topics (${openTopics.length})`, "open_list_topics"),
       button("Add an action", "open_add_action"),
       button(`Actions (${openActions.length})`, "open_list_actions"),
-      button("Wrap up a 1:1", "open_wrap_up", "", "primary"),
+      button("Wrap up a 1:1", "open_wrap_up"),
     ]),
     { type: "divider" },
     section(`*Goals* — ${d.goals.length} on record`),
@@ -187,36 +187,129 @@ function suggestionOptionGroups(role) {
   }));
 }
 
+// The "suggested" picker is a convenience only — picking one round-trips
+// through a block_actions event (see the "suggested_pick" branch in
+// app/api/slack/interactivity/route.js) that fills in "text"/"category"
+// below via views.update. "text" is the one true required field, so Slack
+// itself blocks submission when it's empty instead of a custom
+// after-the-fact server error for "neither field filled in".
+//
+// This picker MUST live in a section block, not an input block: elements
+// inside an "input" block never auto-dispatch block_actions on selection
+// (only plain_text_input can, via dispatch_action_config, which doesn't
+// apply to selects) — Slack silently drops the interaction, no error, no
+// request, nothing. Confirmed live: an input-block version of this picker
+// never sent a single request to the interactivity endpoint on selection,
+// with build/lint/deploy all green — this only breaks when actually
+// clicked in Slack. A section+accessory select dispatches immediately, at
+// the cost of not appearing in view.state.values on submit — fine here
+// since its value only ever flows into "text" via the prefill, never read
+// directly at submission.
 export function addTopicModal(ctx, draft, saved = false) {
   const groups = suggestionOptionGroups(ctx.role);
+  // Whenever this modal is rebuilt with a non-empty draft via views.update
+  // on an ALREADY-OPEN view (a suggestion pick, or the "Save draft"
+  // confirmation re-render) — as opposed to a brand-new views.open — every
+  // pre-filled field uses a "_v2" block_id instead of its normal one.
+  //
+  // Confirmed live, the hard way: views.update does NOT reliably push a new
+  // value into an existing block_id's actual submitted state, for EITHER
+  // plain_text_input or static_select, even though the plain_text_input
+  // case visibly LOOKS correct on screen — a real topic got saved with
+  // category correct but text silently empty, caught only by checking the
+  // database after, not from the UI. Slack only reliably re-registers a
+  // field's value at true first-render of that exact block_id, so re-using
+  // "text"/"category" across a views.update patch is unsafe for both
+  // display AND submission, not just display like the category case first
+  // suggested. Changing block_id sidesteps it. The read side (both
+  // SUBMISSIONS.add_topic and the open_add_topic/save_draft_topic openers
+  // in app/api/slack/interactivity/route.js) checks both id variants.
+  const v2 = Boolean(draft);
   return modal(
     "add_topic",
     "Add a topic",
     [
       ...draftControls("save_draft_topic", saved),
+      section(
+        "*Pick a suggestion (optional)*",
+        { type: "static_select", action_id: "suggested_pick", option_groups: groups, placeholder: { type: "plain_text", text: "Browse suggested topics" } }
+      ),
       inputBlock(
-        "suggested",
-        "Pick a suggestion (optional)",
-        { type: "static_select", action_id: "val", option_groups: groups, placeholder: { type: "plain_text", text: "Browse suggested topics" } },
+        v2 ? "text_v2" : "text",
+        "What do you want to discuss",
+        plainInput("val", { placeholder: "What do you want to talk about?", initial: draft?.text })
+      ),
+      inputBlock(v2 ? "why_v2" : "why", "Why it matters", plainInput("val", { multiline: true, initial: draft?.why }), true),
+      // A picked suggestion's category is a SUGGESTIONS group name (e.g.
+      // "Where things stand"), not necessarily one of TOPIC_CATEGORIES —
+      // same mismatch as editTopicModal below. Without merging it in here,
+      // views.update rejects the whole modal with invalid_arguments the
+      // instant a suggestion is picked (confirmed live, not just in theory).
+      inputBlock(
+        v2 ? "category_v2" : "category",
+        "Category",
+        staticSelect(
+          "val",
+          draft?.category && !TOPIC_CATEGORIES.includes(draft.category) ? [...TOPIC_CATEGORIES, draft.category] : TOPIC_CATEGORIES,
+          draft?.category || TOPIC_CATEGORIES[0]
+        ),
         true
       ),
-      inputBlock("text", "Or write your own", plainInput("val", { placeholder: "What do you want to talk about?", initial: draft?.text }), true),
-      inputBlock("why", "Why it matters", plainInput("val", { multiline: true, initial: draft?.why }), true),
-      inputBlock("category", "Category (for your own topic)", staticSelect("val", TOPIC_CATEGORIES, draft?.category || TOPIC_CATEGORIES[0]), true),
     ],
     "Save"
   );
 }
 
-export function listTopicsModal(topics) {
+// Shows the real topic text (changed at Melissa's request, 2026-08-28): the
+// redaction here used to be counts/categories only, same rule as goals/
+// achievements/feedback below, on the theory that Slack is a wider trust
+// boundary (workspace admins can export message/view history) than the
+// app's own database, which RLS limits to just the two people in the pair.
+// Decided this doesn't apply the same way to topics: unlike feedback or
+// achievements, a topic is just an agenda line either person already wrote
+// with the expectation their partner will read it aloud in the 1:1 — and
+// without seeing it, neither person could tell which topic a "Mark
+// discussed"/"Edit" button on this list actually refers to. Editing is
+// still creator-only (viewerRole gate below); marking discussed stays open
+// to both, unchanged.
+export function listTopicsModal(topics, viewerRole) {
   const open = topics.filter(isOpenTopic);
   const blocks = open.length
-    ? open.flatMap((t, i) => [
-        section(`*Topic ${i + 1}* — ${t.category} · added ${ago(t.created_at)}`, button("Mark discussed", "topic_mark_discussed", t.id, "primary")),
+    ? open.flatMap((t) => [
+        section(
+          `*${t.text}*\n${t.category} · added ${ago(t.created_at)}`,
+          button("Mark discussed", "topic_mark_discussed", t.id, "primary")
+        ),
+        ...(t.created_by_role === viewerRole ? [actions([button("Edit", "topic_edit", t.id)])] : []),
       ])
     : [section("No open topics. Add one from the Home tab.")];
   blocks.push({ type: "divider" }, actions([openInApp("Open topics in the app for full notes")]));
   return modal("view_topics", "Open topics", blocks, "Close");
+}
+
+// Pre-filled with the topic's current text/category/why — pushed on top of
+// listTopicsModal (views.push) rather than opened fresh, so Cancel returns
+// to the list instead of the Home tab. private_metadata carries the topic
+// id since view_submission payloads don't otherwise include it.
+export function editTopicModal(topic) {
+  // A topic added from a suggestion (see suggestionOptionGroups) carries a
+  // SUGGESTIONS category, a different list than TOPIC_CATEGORIES — the
+  // website's plain <select> just fails to preselect an unmatched value,
+  // but Slack's static_select hard-rejects an initial_option not present
+  // in options. Add the topic's real category if it's not already one of
+  // the standard ones, so opening Edit can't crash on a topic like that.
+  const categoryOptions = TOPIC_CATEGORIES.includes(topic.category) ? TOPIC_CATEGORIES : [...TOPIC_CATEGORIES, topic.category];
+  return modal(
+    "edit_topic",
+    "Edit topic",
+    [
+      inputBlock("text", "I want to discuss…", plainInput("val", { initial: topic.text })),
+      inputBlock("why", "Why it matters", plainInput("val", { multiline: true, initial: topic.why }), true),
+      inputBlock("category", "Category", staticSelect("val", categoryOptions, topic.category)),
+    ],
+    "Save changes",
+    topic.id
+  );
 }
 
 // -------------------------------------------------------------- actions ----
