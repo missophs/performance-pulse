@@ -119,6 +119,32 @@ before today's audit:
 
 Done:
 
+- **Two real IDOR security bugs fixed, plus a governance rule added,
+  2026-08-29.** Melissa asked for a full security audit ("Is there
+  anything missing? Double check it. And does it reflect Slack also?")
+  and then a full `/code-review`. Both `edit_topic` (view_submission) and
+  `topic_edit` (block_actions) in `app/api/slack/interactivity/route.js`
+  acted on a topic id taken straight from Slack with no check that it
+  belonged to the requesting user's own pair — both run on the admin
+  (service-role) Supabase client, which bypasses RLS entirely, so nothing
+  else was stopping a tampered/replayed id from reading or overwriting a
+  different pair's topic. Both now select `pair_id` first and reject the
+  action if it doesn't match `ctx.pairId`. Also fixed in the same pass:
+  `suggested_pick` was reading "why" via plain `fieldVal` instead of the
+  `fieldValV2` helper (silently dropped typed text on a second suggestion
+  pick), and `add_topic` had lost its whitespace-only validation when the
+  field became Slack-required (could create a blank-text topic). A
+  standing rule is now in `web-app/CLAUDE.md`: every Slack handler that
+  acts on an id from Slack must verify `pair_id` ownership first, no
+  exceptions — written there specifically so it survives independently of
+  this file and applies automatically to future work (e.g. the still-open
+  edit-for-Goals/DevPlans/Actions item). Verified: build/lint/test clean,
+  deployed, and live-confirmed the fix doesn't break normal same-pair
+  editing (opened Edit on a real topic, saved, no regression). Full
+  finding-by-finding detail, including what was found but deliberately
+  NOT fixed live (the same views.update field-refresh bug affecting four
+  other modals' save-draft flows), is in item 0i of the open list below.
+
 - **Slack's "Add a topic" modal has a genuinely required field now,
   2026-08-29 midday.** Melissa: "we need to make one or both of the fields
   required instead, IT can't have optional an then you get an error."
@@ -1025,6 +1051,76 @@ Still open, in priority order:
     see, even something as simple as logging a distinctive string worth
     grepping for). The OAuth/multi-workspace gap only matters if the
     Marketplace-listing goal gets picked up.
+
+0i. **Code review of today's full session diff, 2026-08-29 — two real
+    security bugs found and fixed immediately, not just documented, plus
+    a governance rule added so the class of bug doesn't recur.** Melissa
+    asked for a full `/code-review` after the security audit above landed.
+    8 finder passes + direct verification found 10 real issues; the two
+    most severe were fixed the same session:
+
+    **Fixed (governance rule for this pattern now lives in `CLAUDE.md`,
+    not just here):**
+    - `edit_topic` (view_submission, `route.js`) updated any topic by the
+      id in `view.private_metadata` with zero check that it belonged to
+      the submitter's own pair — an admin-client write with no
+      authorization check at all, confirmed exploitable, not theoretical.
+    - `topic_edit` (block_actions, `route.js`) fetched a topic by
+      `action.value` and only checked `created_by_role === ctx.role` — a
+      role match against the *entire database*, not this pair — before
+      pushing that topic's real text into an Edit modal. A cross-pair
+      content leak, same root cause as the item above.
+    - Both now select `pair_id` and reject the action outright if it
+      doesn't match `ctx.pairId`. Verified live afterward that normal,
+      same-pair editing still works (opened Edit, saved, confirmed no
+      regression) — this class of fix is exactly the kind that can
+      accidentally break the legitimate case while closing the hole.
+    - `suggested_pick` (`route.js`) read "why" via plain `fieldVal` instead
+      of `fieldValV2` — independently caught by three separate review
+      angles, the strongest possible signal it was real. Fixed to use
+      `fieldValV2`, matching every other field-read in the same handler.
+    - `add_topic` lost its whitespace-only validation when the field
+      became Slack-required (Slack's own check only verifies non-empty,
+      not non-blank) — could silently create a topic with `text: ""`.
+      Restored the check, now returning Slack's inline field error instead
+      of silently succeeding.
+
+    **Real, deliberately NOT fixed live — documented instead, because the
+    fix is bigger than a same-session patch:**
+    - **The exact `views.update`-doesn't-refresh-a-field bug fixed for
+      Topics today (see item "Add a topic modal has a genuinely required
+      field" in Done) also affects Goals/Development plans/Achievements/
+      Feedback's "Save draft" flows** — `addGoalModal`, `addDevPlanModal`,
+      `addAchievementModal`, `addFeedbackModal` all patch an open view via
+      `views.update` the same way `addTopicModal` used to, and their
+      `SUBMISSIONS` handlers still read fields with plain `fieldVal`, not
+      a `fieldValV2`-style dual lookup. **This means any of those four
+      "Save draft" buttons can silently submit blank fields today,** the
+      identical failure mode that produced a real empty-text topic in the
+      database this session. Fix shape: don't copy the `v2` hack four more
+      times — generalize it. A single `TOPIC_FIELDS`-style list driving
+      block-id derivation, `normalizeTopicDraft`-style merging, and
+      `SAVE_DRAFT.fields` would fix this for all five forms (including
+      Topics) from one place instead of four independent copies, and
+      would make the class of miss that caused the "why"-field bug above
+      structurally impossible instead of something to remember per field.
+    - The website's Prepare-tab topic-draft reader doesn't know about the
+      `_v2` key scheme either — a draft saved from Slack while in v2 mode
+      shows up empty or stale on the website. Same root cause, same fix.
+    - `updateTopic` (`lib/data.js`) does an avoidable SELECT before every
+      UPDATE on both its call sites, worth trimming given one of them sits
+      inside Slack's 3-second interactivity deadline — low priority.
+    - Three small cleanup items (not bugs): `getMyPair` duplicates
+      `resolveSlackUser`'s ambiguity-check logic instead of sharing it;
+      the "merge an out-of-list category into the picker options" logic
+      is copy-pasted three times across two files; the `v2` block_id
+      scheme itself is hand-duplicated across four call sites with nothing
+      enforcing they stay in sync (the direct cause of the "why"-field bug
+      above, before that specific instance was fixed).
+
+    No CLAUDE.md convention violations found (the repo has one, pointing
+    only to the auto-generated `AGENTS.md`, which states no checkable
+    coding rule).
 
 1. **Save / pause / go-back across forms — Day 1, 2, and 3 all done.**
    Only the check-in wizard has a real draft-save + resume +

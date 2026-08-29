@@ -217,6 +217,12 @@ const SUBMISSIONS = {
     // submitting empty under its original block_id, confirmed live against
     // the database, not just from what the modal displayed.
     const text = (fieldValV2(v, "text") || "").trim();
+    // Slack's required-field check only verifies the field is non-empty,
+    // not non-whitespace — a submission of only spaces passes Slack's check
+    // and trims to "" here, so this still needs its own guard. blockId must
+    // name whichever of "text"/"text_v2" is actually rendered right now, or
+    // Slack silently drops the error instead of attaching it to the field.
+    if (!text) return { error: { blockId: v?.text_v2 ? "text_v2" : "text", message: "Topic can't be empty." } };
     const category = fieldValV2(v, "category") || "Other";
     await addTopic(admin, ctx.pairId, { text, why: fieldValV2(v, "why"), category, role: ctx.role, name: ctx.myName });
     await clearFormDraft(admin, ctx.pairId, ctx.role, "topic").catch(() => {});
@@ -270,6 +276,12 @@ const SUBMISSIONS = {
     if (!id) return;
     const text = (fieldVal(v, "text") || "").trim();
     if (!text) return { error: { blockId: "text", message: "Topic can't be empty." } };
+    // Runs on the admin (service-role) client, which bypasses RLS entirely —
+    // this pair_id check is the only thing stopping a tampered/replayed
+    // private_metadata id from editing a different pair's topic. See the
+    // governance note in CLAUDE.md.
+    const { data: owned } = await admin.from("topics").select("pair_id").eq("id", id).maybeSingle();
+    if (!owned || owned.pair_id !== ctx.pairId) return;
     await updateTopic(admin, id, { text, why: fieldVal(v, "why"), category: fieldVal(v, "category") }, fromSlack(ctx));
     // Pushed modals close back to the list beneath them on their own, but
     // that list (payload.view.previous_view_id) still has the pre-edit text
@@ -412,8 +424,13 @@ async function handleInteraction(admin, slackUserId, payload) {
       // views.open) so Cancel/Save both return to that list rather than the
       // Home tab. A single-row lookup is cheap enough to stay inside
       // Slack's 3s window without the loading-placeholder dance OPENERS uses.
-      const { data: topic } = await admin.from("topics").select("id, text, why, category, created_by_role").eq("id", action.value).maybeSingle();
-      if (topic && topic.created_by_role === ctx.role) {
+      // pair_id is checked here, not just created_by_role: action.value is a
+      // plain string in the interaction payload with no server-side ownership
+      // check otherwise — this admin client bypasses RLS entirely, so without
+      // this check a tampered value could push another pair's real topic
+      // text into this modal. See the governance note in CLAUDE.md.
+      const { data: topic } = await admin.from("topics").select("id, pair_id, text, why, category, created_by_role").eq("id", action.value).maybeSingle();
+      if (topic && topic.pair_id === ctx.pairId && topic.created_by_role === ctx.role) {
         await slackApi("views.push", { trigger_id: payload.trigger_id, view: editTopicModal(topic) }).catch((e) => console.error("edit topic push:", e));
       }
     } else if (action.action_id === "suggested_pick") {
@@ -427,7 +444,11 @@ async function handleInteraction(admin, slackUserId, payload) {
       const sep = picked.indexOf("::");
       const category = sep >= 0 ? picked.slice(0, sep) : undefined;
       const text = sep >= 0 ? picked.slice(sep + 2) : picked;
-      const why = fieldVal(payload.view?.state?.values, "why");
+      // fieldValV2, not fieldVal — after a first suggestion pick the modal
+      // is already in v2 mode, so "why" may live under "why_v2". Confirmed
+      // live: picking a second suggestion after typing into "Why it
+      // matters" silently dropped that text when this used plain fieldVal.
+      const why = fieldValV2(payload.view?.state?.values, "why");
       if (payload.view?.id) {
         await slackApi("views.update", { view_id: payload.view.id, view: addTopicModal(ctx, { text, why, category }) }).catch((e) =>
           console.error("suggestion prefill view update:", e)
