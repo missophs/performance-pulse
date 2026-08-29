@@ -55,6 +55,123 @@ for when you need the specifics of something already summarized above.
 
 Done:
 
+- **Slack's "Add a topic" modal has a genuinely required field now,
+  2026-08-29 midday.** Melissa: "we need to make one or both of the fields
+  required instead, IT can't have optional an then you get an error."
+  "What do you want to discuss" (`lib/slack-views.js`, `addTopicModal`) is
+  now required — Slack's own client blocks empty submission with "Please
+  complete this required field," no custom server-side error needed for
+  that case anymore. "Pick a suggestion" stays optional; picking one fills
+  in the required text field (and category) for you via a `block_actions`
+  round-trip, instead of being a second, independently-submittable source
+  of the topic text the way it worked before.
+
+  **Three separate, real Slack Block Kit platform bugs found building
+  this, each confirmed live against the database or server logs, not from
+  how the modal looked on screen:**
+  1. A `static_select` placed inside an **input** block never dispatches a
+     `block_actions` event on selection at all — no request reaches the
+     server, no error, nothing. Only elements inside a **section** or
+     **actions** block do. The suggestion picker (`suggested_pick`) had to
+     move out of an input block into a section+accessory just to be
+     clickable. Cost: its value no longer appears in `view.state.values`
+     at submission — fine here, since it only ever flows into
+     "text"/"category" via the prefill, never read directly.
+  2. Once the picker could fire at all, `views.update` on an
+     already-open modal doesn't reliably push a new value into an
+     existing `static_select`'s displayed selection when its block_id is
+     unchanged — confirmed live: the Category dropdown kept showing
+     "Wins" after picking a suggestion clearly grouped under "Where
+     things stand," even though the server-computed category value was
+     correct in the logs. Fix: give the field a different block_id
+     ("category_v2") whenever it's being pre-filled via views.update,
+     forcing Slack to treat it as a brand-new element.
+  3. The same is true of `plain_text_input`, and it's worse: it **visibly
+     showed the right text** ("Is what's expected of you actually
+     clear?" rendered correctly in the field) while **silently submitting
+     empty** — a real topic got saved to the database with `text: ""` and
+     the right category, caught only by querying the database after
+     Save, not from anything visible in the Slack UI. Same block_id-swap
+     fix applied to "text" and "why" (`lib/slack-views.js`,
+     `addTopicModal`'s `v2` flag; read back on the server via the new
+     `fieldValV2` helper and `normalizeTopicDraft`,
+     `app/api/slack/interactivity/route.js` — both `SUBMISSIONS.add_topic`
+     and the `open_add_topic`/`save_draft_topic` openers check both the
+     base and "_v2" block_id for each field).
+
+  Verified `npm run build`/`lint`/`test` clean after each of the four
+  deploys this took (lint 34 pre-existing errors, unchanged; tests 5/5).
+  Live end-to-end, checking the actual database after Save each time, not
+  just the modal: picked a suggestion, confirmed text and category both
+  saved correctly, deleted the test row after
+  (`00761548-3f28-42fa-bbe1-f0d77178ac21`). Also confirmed the
+  empty-field case directly: tried to Save with nothing entered, got
+  Slack's native required-field block, no server round-trip at all.
+
+- **Slack's "Add a topic" modal double-labeled both fields "(optional)",
+  2026-08-29 morning.** Melissa spotted it live: "Pick a suggestion
+  (optional) (optional)" and "Or write your own (optional)" — a literal
+  double label on the first one, and both fields reading optional even
+  though the server actually required one or the other. Cause of the
+  double label: the label text had "(optional)" typed into it manually,
+  and Slack *also* auto-appends "(optional)" to any input block marked
+  `optional: true`. Fixed the label text and reworded "Or write your own"
+  to flag it was conditionally required. Superseded a few hours later by
+  the entry above, which made the field *actually* required instead of
+  just clearly labeled — kept here since the label bug itself, and
+  Melissa's catch of it, are real history worth keeping.
+
+- **Slack Home tab: "Add a topic" is the highlighted button now, not
+  "Wrap up a 1:1" — 2026-08-29 midday.** Among "Add a topic / Topics /
+  Add an action / Actions / Wrap up a 1:1," "Wrap up a 1:1" was the only
+  button styled `primary` (green) — Melissa's eye went straight to it
+  first: "it should land on add a topic" (clarifying an earlier "it
+  shouldn't land on wrap up, should land on topic"). Swapped which button
+  carries `style: "primary"` in the Home tab's block list
+  (`lib/slack-views.js`) — order unchanged, "Add a topic" was already
+  leftmost. Verified build/test clean, deployed, confirmed live in Slack
+  via screenshot.
+
+- **Topic add/edit live-verified end to end, root cause of "nothing works"
+  found, 2026-08-28 even later night.** After the edit feature (entry
+  below) shipped, Melissa reported repeated failures testing it in Slack.
+  It worked the whole time — what looked broken was three unrelated
+  things, not the code:
+  1. Melissa was clicking Slack's own sidebar "Home" icon (house icon,
+     far-left dark purple rail — goes to Slack's own unreads/threads view)
+     instead of the Performance Pulse app's "Home" tab (small text next to
+     "Messages"/"About", inside the app panel) — both labeled "Home" on
+     the same screen, only one instruction given at first ("click Home")
+     without saying which.
+  2. Five duplicate Slack tabs had accumulated in her Chrome from repeated
+     testing, so a fix confirmed live in one tab didn't show up in the
+     tab she was actually looking at.
+  3. Slack's own Block Kit buttons genuinely do drop clicks intermittently
+     — confirmed directly by clicking "Edit"/"Save changes" and watching
+     zero requests reach `/api/slack/interactivity` on the failed clicks
+     (Vercel logs), succeeding on a retry with no code change in between.
+
+  None of the three needed a code change. This is also where the
+  "decouple submit from add/edit" requirement (item 0 above) first came
+  from, right after this was confirmed working: Melissa, twice, because
+  the first explanation of the existing behavior got it wrong: "Saving
+  changes should not be submitting... Editing or adding a topic is not
+  the submit either."
+
+- **Retraction: the "Account A verified as a live middle manager" claim
+  below was wrong, 2026-08-27 late evening — since fully resolved.** Caused
+  by a case-sensitive email bug (partner email typed with different
+  casing than the signed-up account, so lookups silently missed) that made
+  it look like the middle-manager fix worked when it hadn't actually been
+  tested against a real ambiguous account. At the time this left two
+  orphaned test rows to clean up and the middle-manager repro genuinely
+  unresolved. **Now actually fixed, not just worked around:** citext on
+  `profiles.email`/`pairs.*_email` (2026-08-29 commit `cbba37e`) makes the
+  matching case-insensitive at the database level, and `getMyPair`/
+  `resolveSlackUser` now return an explicit "ambiguous" flag for any
+  account on more than one pair instead of silently picking one — see the
+  "Where things stand" summary at the top of this file.
+
 - **Topics can be edited after adding — website and Slack, 2026-08-28
   night.** Was open item 6 below (partly) plus a fresh explicit request from
   Melissa mid-session: "people don't remember what they typed in, and will
