@@ -12,6 +12,7 @@
 
 import { isOpenTopic, ago } from "@/lib/format";
 import { TOPIC_CATEGORIES, SUGGESTIONS } from "@/lib/one-on-one-content";
+import { fieldBlockId } from "@/lib/slack-form-fields";
 
 const APP_URL = "https://performance-pulse-lyart.vercel.app";
 const GOAL_STATES = ["Not Started", "In Progress", "At Risk", "Complete", "Deferred"];
@@ -205,26 +206,21 @@ function suggestionOptionGroups(role) {
 // the cost of not appearing in view.state.values on submit — fine here
 // since its value only ever flows into "text" via the prefill, never read
 // directly at submission.
+// This modal's field base names — drives the shared views.update-refresh
+// workaround (see lib/slack-form-fields.js) instead of a bespoke copy of it.
+export const TOPIC_FIELDS = ["text", "why", "category"];
+
 export function addTopicModal(ctx, draft, saved = false) {
   const groups = suggestionOptionGroups(ctx.role);
   // Whenever this modal is rebuilt with a non-empty draft via views.update
   // on an ALREADY-OPEN view (a suggestion pick, or the "Save draft"
   // confirmation re-render) — as opposed to a brand-new views.open — every
-  // pre-filled field uses a "_v2" block_id instead of its normal one.
-  //
-  // Confirmed live, the hard way: views.update does NOT reliably push a new
-  // value into an existing block_id's actual submitted state, for EITHER
-  // plain_text_input or static_select, even though the plain_text_input
-  // case visibly LOOKS correct on screen — a real topic got saved with
-  // category correct but text silently empty, caught only by checking the
-  // database after, not from the UI. Slack only reliably re-registers a
-  // field's value at true first-render of that exact block_id, so re-using
-  // "text"/"category" across a views.update patch is unsafe for both
-  // display AND submission, not just display like the category case first
-  // suggested. Changing block_id sidesteps it. The read side (both
+  // pre-filled field uses a "_v2" block_id instead of its normal one. See
+  // lib/slack-form-fields.js for why. The read side (both
   // SUBMISSIONS.add_topic and the open_add_topic/save_draft_topic openers
   // in app/api/slack/interactivity/route.js) checks both id variants.
   const v2 = Boolean(draft);
+  const id = (f) => fieldBlockId(f, v2);
   return modal(
     "add_topic",
     "Add a topic",
@@ -235,18 +231,18 @@ export function addTopicModal(ctx, draft, saved = false) {
         { type: "static_select", action_id: "suggested_pick", option_groups: groups, placeholder: { type: "plain_text", text: "Browse suggested topics" } }
       ),
       inputBlock(
-        v2 ? "text_v2" : "text",
+        id("text"),
         "What do you want to discuss",
         plainInput("val", { placeholder: "What do you want to talk about?", initial: draft?.text })
       ),
-      inputBlock(v2 ? "why_v2" : "why", "Why it matters", plainInput("val", { multiline: true, initial: draft?.why }), true),
+      inputBlock(id("why"), "Why it matters", plainInput("val", { multiline: true, initial: draft?.why }), true),
       // A picked suggestion's category is a SUGGESTIONS group name (e.g.
       // "Where things stand"), not necessarily one of TOPIC_CATEGORIES —
       // same mismatch as editTopicModal below. Without merging it in here,
       // views.update rejects the whole modal with invalid_arguments the
       // instant a suggestion is picked (confirmed live, not just in theory).
       inputBlock(
-        v2 ? "category_v2" : "category",
+        id("category"),
         "Category",
         staticSelect(
           "val",
@@ -277,10 +273,16 @@ export function listTopicsModal(topics, viewerRole) {
   const blocks = open.length
     ? open.flatMap((t) => [
         section(
-          `*${t.text}*\n${t.category} · added ${ago(t.created_at)}`,
+          `*${t.text}*\n${t.category} · added ${ago(t.created_at)}${t.submitted_at ? "" : " · _not yet submitted_"}`,
           button("Mark discussed", "topic_mark_discussed", t.id, "primary")
         ),
-        ...(t.created_by_role === viewerRole ? [actions([button("Edit", "topic_edit", t.id)])] : []),
+        // Submit is the explicit "let them know" action (SLACK_TODO.md item
+        // 0) — creator-gated, same as Edit right next to it, since it's
+        // finalizing your own entry, not something either pair member can
+        // do to the other's topic.
+        ...(t.created_by_role === viewerRole
+          ? [actions([...(t.submitted_at ? [] : [button("Submit", "topic_submit", t.id)]), button("Edit", "topic_edit", t.id)])]
+          : []),
       ])
     : [section("No open topics. Add one from the Home tab.")];
   blocks.push({ type: "divider" }, actions([openInApp("Open topics in the app for full notes")]));
@@ -335,17 +337,24 @@ export function listActionsModal(list) {
 
 // ---------------------------------------------------------------- goals ----
 
+export const GOAL_FIELDS = ["text", "why", "measure", "target", "status"];
+
 export function addGoalModal(draft, saved = false) {
+  // See lib/slack-form-fields.js: rebuilding this modal with a non-empty
+  // draft only ever happens while patching an already-open view, so every
+  // field renders under a "_v2" block_id then instead of its normal one.
+  const v2 = Boolean(draft);
+  const id = (f) => fieldBlockId(f, v2);
   return modal(
     "add_goal",
     "Add a goal",
     [
       ...draftControls("save_draft_goal", saved),
-      inputBlock("text", "Goal", plainInput("val", { initial: draft?.text })),
-      inputBlock("why", "Why it matters", plainInput("val", { multiline: true, initial: draft?.why }), true),
-      inputBlock("measure", "How you'll know it's met", plainInput("val", { initial: draft?.measure }), true),
-      inputBlock("target", "Target date", datePicker("val", draft?.target), true),
-      inputBlock("status", "Status", staticSelect("val", GOAL_STATES, draft?.status || GOAL_STATES[0])),
+      inputBlock(id("text"), "Goal", plainInput("val", { initial: draft?.text })),
+      inputBlock(id("why"), "Why it matters", plainInput("val", { multiline: true, initial: draft?.why }), true),
+      inputBlock(id("measure"), "How you'll know it's met", plainInput("val", { initial: draft?.measure }), true),
+      inputBlock(id("target"), "Target date", datePicker("val", draft?.target), true),
+      inputBlock(id("status"), "Status", staticSelect("val", GOAL_STATES, draft?.status || GOAL_STATES[0])),
     ],
     "Save"
   );
@@ -366,16 +375,23 @@ export function listGoalsModal(goals) {
 
 // --------------------------------------------------------- development -----
 
+export const DEVPLAN_FIELDS = ["area", "type", "activity", "target"];
+
 export function addDevPlanModal(draft, saved = false) {
+  // See lib/slack-form-fields.js: rebuilding this modal with a non-empty
+  // draft only ever happens while patching an already-open view, so every
+  // field renders under a "_v2" block_id then instead of its normal one.
+  const v2 = Boolean(draft);
+  const id = (f) => fieldBlockId(f, v2);
   return modal(
     "add_devplan",
     "Add a development plan",
     [
       ...draftControls("save_draft_devplan", saved),
-      inputBlock("area", "Area", plainInput("val", { placeholder: "e.g. Executive presentation skills", initial: draft?.area })),
-      inputBlock("type", "Type", staticSelect("val", DEV_TYPES, draft?.type || DEV_TYPES[0])),
-      inputBlock("activity", "Activity", plainInput("val", { multiline: true, initial: draft?.activity }), true),
-      inputBlock("target", "Target date", datePicker("val", draft?.target), true),
+      inputBlock(id("area"), "Area", plainInput("val", { placeholder: "e.g. Executive presentation skills", initial: draft?.area })),
+      inputBlock(id("type"), "Type", staticSelect("val", DEV_TYPES, draft?.type || DEV_TYPES[0])),
+      inputBlock(id("activity"), "Activity", plainInput("val", { multiline: true, initial: draft?.activity }), true),
+      inputBlock(id("target"), "Target date", datePicker("val", draft?.target), true),
     ],
     "Save"
   );
@@ -396,16 +412,23 @@ export function listDevPlansModal(plans) {
 
 // ---------------------------------------------------------- achievements ---
 
+export const ACHIEVEMENT_FIELDS = ["title", "category", "impact", "date"];
+
 export function addAchievementModal(draft, saved = false) {
+  // See lib/slack-form-fields.js: rebuilding this modal with a non-empty
+  // draft only ever happens while patching an already-open view, so every
+  // field renders under a "_v2" block_id then instead of its normal one.
+  const v2 = Boolean(draft);
+  const id = (f) => fieldBlockId(f, v2);
   return modal(
     "add_achievement",
     "Log an achievement",
     [
       ...draftControls("save_draft_achievement", saved),
-      inputBlock("title", "What happened", plainInput("val", { initial: draft?.title })),
-      inputBlock("category", "Category", staticSelect("val", ACH_CATS, draft?.category || ACH_CATS[0])),
-      inputBlock("impact", "Impact", plainInput("val", { multiline: true, initial: draft?.impact }), true),
-      inputBlock("date", "Date", datePicker("val", draft?.date), true),
+      inputBlock(id("title"), "What happened", plainInput("val", { initial: draft?.title })),
+      inputBlock(id("category"), "Category", staticSelect("val", ACH_CATS, draft?.category || ACH_CATS[0])),
+      inputBlock(id("impact"), "Impact", plainInput("val", { multiline: true, initial: draft?.impact }), true),
+      inputBlock(id("date"), "Date", datePicker("val", draft?.date), true),
     ],
     "Save"
   );
@@ -426,18 +449,36 @@ export function listAchievementsModal(list) {
 
 // ------------------------------------------------------------- feedback ----
 
-export function addFeedbackModal(ctx, draft, saved = false) {
+export const FEEDBACK_FIELDS = ["type", "text", "example"];
+
+// requestId, when present, means this modal is answering a specific open
+// feedback request (see the "Answer" flow in route.js) rather than a
+// standalone "Give feedback" — carried in private_metadata the same way
+// editTopicModal carries a topic id, so SUBMISSIONS.add_feedback can both
+// save the entry and close that exact request in one step. Answering a
+// request is deliberately not a standalone draft (matching the website's
+// own rule in app/(dashboard)/performance/page.js — "'answer' mode is tied
+// to a specific feedback request and isn't a standalone draft"), so no
+// "Save draft" controls show in that case, and callers never pass a draft
+// alongside a requestId.
+export function addFeedbackModal(ctx, draft, saved = false, requestId) {
   const types = ctx.isMgr ? MGR_FB_TYPES : EMP_FB_TYPES;
+  // See lib/slack-form-fields.js: rebuilding this modal with a non-empty
+  // draft only ever happens while patching an already-open view, so every
+  // field renders under a "_v2" block_id then instead of its normal one.
+  const v2 = Boolean(draft);
+  const id = (f) => fieldBlockId(f, v2);
   return modal(
     "add_feedback",
     `Feedback for ${ctx.partnerName}`,
     [
-      ...draftControls("save_draft_feedback", saved),
-      inputBlock("type", "Type", staticSelect("val", types, draft?.type || types[0])),
-      inputBlock("text", "Feedback", plainInput("val", { multiline: true, initial: draft?.text })),
-      inputBlock("example", "A specific example", plainInput("val", { multiline: true, initial: draft?.example }), true),
+      ...(requestId ? [context(`Answering ${ctx.partnerName}'s feedback request.`)] : draftControls("save_draft_feedback", saved)),
+      inputBlock(id("type"), "Type", staticSelect("val", types, draft?.type || types[0])),
+      inputBlock(id("text"), "Feedback", plainInput("val", { multiline: true, initial: draft?.text })),
+      inputBlock(id("example"), "A specific example", plainInput("val", { multiline: true, initial: draft?.example }), true),
     ],
-    "Save"
+    "Save",
+    requestId
   );
 }
 
@@ -457,11 +498,22 @@ export function listFeedbackModal(feedback, requests) {
   const fbBlocks = feedback.length
     ? [section(`*${feedback.length} feedback entr${feedback.length === 1 ? "y" : "ies"}*\n${summary}`)]
     : [section("No feedback yet.")];
+  // The website (app/(dashboard)/performance/page.js) offers two genuinely
+  // different actions on an open request: "Answer" (writes a real feedback
+  // entry and closes the request, atomically — see SUBMISSIONS.add_feedback
+  // in route.js) and "Dismiss"/"Withdraw" (closes with no content, for
+  // whoever decides the request doesn't need a written answer). Both are
+  // real, distinct product behavior, not one being a stand-in for the
+  // other, so both get a button here rather than collapsing back to the
+  // single "Mark answered" no-content action this used to be.
   const reqBlocks = requests.filter((r) => r.status === "open");
   const blocks = [
     ...fbBlocks,
     ...(reqBlocks.length ? [{ type: "divider" }, section("*Open requests*")] : []),
-    ...reqBlocks.map((r) => section(`Requested ${ago(r.created_at)}`, button("Mark answered", "feedback_request_answered", r.id, "primary"))),
+    ...reqBlocks.flatMap((r) => [
+      section(`Requested ${ago(r.created_at)}`),
+      actions([button("Answer", "feedback_request_answer", r.id, "primary"), button("Close without answering", "feedback_request_answered", r.id)]),
+    ]),
     { type: "divider" },
     actions([openInApp("Open feedback in the app for the full text")]),
   ];

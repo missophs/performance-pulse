@@ -15,17 +15,22 @@ import {
   homeView,
   editNameModal,
   addTopicModal,
+  TOPIC_FIELDS,
   listTopicsModal,
   editTopicModal,
   addActionModal,
   listActionsModal,
   addGoalModal,
+  GOAL_FIELDS,
   listGoalsModal,
   addDevPlanModal,
+  DEVPLAN_FIELDS,
   listDevPlansModal,
   addAchievementModal,
+  ACHIEVEMENT_FIELDS,
   listAchievementsModal,
   addFeedbackModal,
+  FEEDBACK_FIELDS,
   addFeedbackRequestModal,
   listFeedbackModal,
   wrapUpModal,
@@ -34,9 +39,11 @@ import {
   noticeModal,
   MULTIPLE_PAIRS_NOTICE,
 } from "@/lib/slack-views";
+import { withV2, normalizeDraft, makeFieldValV2 } from "@/lib/slack-form-fields";
 import {
   setTopicStatus,
   updateTopic,
+  submitTopic,
   toggleActionDone,
   setFeedbackRequestStatus,
   addTopic,
@@ -61,10 +68,10 @@ import {
 // (via Next's after()) instead of firing it synchronously on save, so a
 // notification never lands before the person's actually done.
 const DELAYED_NOTIFY_MS = 4000;
-function delayedNotify(admin, pairId, text, role, otherRole, view, kind) {
+function delayedNotify(admin, pairId, text, role, otherRole, view, kind, entityId) {
   after(async () => {
     await new Promise((resolve) => setTimeout(resolve, DELAYED_NOTIFY_MS));
-    await notify(admin, pairId, text, role, otherRole, view, kind).catch((e) => console.error("delayed notify:", e));
+    await notify(admin, pairId, text, role, otherRole, view, kind, entityId).catch((e) => console.error("delayed notify:", e));
   });
 }
 
@@ -84,33 +91,46 @@ async function draftFor(admin, ctx, kind) {
   return row?.draft;
 }
 
-// A saved topic draft may carry text/why/category under their "_v2"
-// block_id instead (see the block_id comment on addTopicModal,
-// lib/slack-views.js) if "Save draft" was clicked while the modal was
-// showing "_v2" fields. Collapse to the plain keys addTopicModal reads.
-function normalizeTopicDraft(draft) {
-  if (!draft) return draft;
-  const { text_v2, why_v2, category_v2, ...rest } = draft;
-  return {
-    ...rest,
-    ...(text_v2 !== undefined ? { text: text_v2 } : {}),
-    ...(why_v2 !== undefined ? { why: why_v2 } : {}),
-    ...(category_v2 !== undefined ? { category: category_v2 } : {}),
-  };
-}
-
 // `title` is shown in the placeholder modal that opens instantly, so it should
 // match the title `build` returns — only the body swaps when the data lands.
 const OPENERS = {
   open_edit_name: { title: "Your name", build: async (admin, ctx) => editNameModal(ctx) },
-  open_add_topic: { title: "Add a topic", build: async (admin, ctx) => addTopicModal(ctx, normalizeTopicDraft(await draftFor(admin, ctx, "topic"))) },
+  open_add_topic: { title: "Add a topic", build: async (admin, ctx) => addTopicModal(ctx, normalizeDraft(TOPIC_FIELDS, await draftFor(admin, ctx, "topic"))) },
   open_add_action: { title: "Add an action", build: async (admin, ctx) => addActionModal(ctx) },
   open_wrap_up: { title: "Wrap up", build: async (admin, ctx) => wrapUpModal((await loadHomeData(admin, ctx.pairId)).topics) },
-  open_add_goal: { title: "Add a goal", build: async (admin, ctx) => addGoalModal(await draftFor(admin, ctx, "goal")) },
-  open_add_devplan: { title: "Add a development plan", build: async (admin, ctx) => addDevPlanModal(await draftFor(admin, ctx, "dev")) },
-  open_add_achievement: { title: "Log an achievement", build: async (admin, ctx) => addAchievementModal(await draftFor(admin, ctx, "achievement")) },
-  open_add_feedback: { title: "Give feedback", build: async (admin, ctx) => addFeedbackModal(ctx, await draftFor(admin, ctx, "feedback")) },
+  open_add_goal: { title: "Add a goal", build: async (admin, ctx) => addGoalModal(normalizeDraft(GOAL_FIELDS, await draftFor(admin, ctx, "goal"))) },
+  open_add_devplan: {
+    title: "Add a development plan",
+    build: async (admin, ctx) => addDevPlanModal(normalizeDraft(DEVPLAN_FIELDS, await draftFor(admin, ctx, "dev"))),
+  },
+  open_add_achievement: {
+    title: "Log an achievement",
+    build: async (admin, ctx) => addAchievementModal(normalizeDraft(ACHIEVEMENT_FIELDS, await draftFor(admin, ctx, "achievement"))),
+  },
+  open_add_feedback: {
+    title: "Give feedback",
+    build: async (admin, ctx) => addFeedbackModal(ctx, normalizeDraft(FEEDBACK_FIELDS, await draftFor(admin, ctx, "feedback"))),
+  },
   open_add_feedback_request: { title: "Ask for feedback", build: async () => addFeedbackRequestModal() },
+  // Opened from the digest DM's "Answer it" button (kind "request", see
+  // lib/block-kit.js) with the feedback request's id as the button value.
+  // Slack-supplied id, so verify it belongs to this pair before threading it
+  // into the modal's private_metadata — see the governance note in
+  // CLAUDE.md. A request that's missing, already closed, or belongs to
+  // another pair just falls back to a plain, unlinked feedback modal
+  // instead of erroring — the same UX this button gave before this fix
+  // existed. No draft prefill in "answer" mode — see addFeedbackModal.
+  open_answer_feedback_request: {
+    title: "Give feedback",
+    build: async (admin, ctx, id) => {
+      if (!id) return addFeedbackModal(ctx, normalizeDraft(FEEDBACK_FIELDS, await draftFor(admin, ctx, "feedback")));
+      const { data: request } = await admin.from("feedback_requests").select("id, pair_id, status").eq("id", id).maybeSingle();
+      if (!request || request.pair_id !== ctx.pairId || request.status !== "open") {
+        return addFeedbackModal(ctx, normalizeDraft(FEEDBACK_FIELDS, await draftFor(admin, ctx, "feedback")));
+      }
+      return addFeedbackModal(ctx, undefined, false, request.id);
+    },
+  },
   open_list_topics: { title: "Open topics", build: async (admin, ctx) => listTopicsModal((await loadHomeData(admin, ctx.pairId)).topics, ctx.role) },
   open_list_actions: { title: "Open actions", build: async (admin, ctx) => listActionsModal((await loadHomeData(admin, ctx.pairId)).actions) },
   open_list_goals: { title: "Goals", build: async (admin, ctx) => listGoalsModal((await loadHomeData(admin, ctx.pairId)).goals) },
@@ -134,16 +154,30 @@ const OPENERS = {
 // the full current field state — so each add-modal gets an explicit "Save
 // draft" button instead. draftFor() above (used when the modal is opened)
 // is what shows the saved draft again later.
+// Each `fields` list is expanded with withV2() to also check every field's
+// "_v2" block_id (see lib/slack-form-fields.js) — a draft can be captured
+// mid-session under either, depending on whether that "Save draft" click
+// happened before or after the modal first patched into v2 mode. `build`
+// normalizes the merged draft back to plain keys before re-rendering, since
+// addXModal's own draft?.foo reads only ever look at the plain ones.
 const SAVE_DRAFT = {
-  save_draft_topic: {
-    kind: "topic",
-    fields: ["text", "text_v2", "why", "why_v2", "category", "category_v2"],
-    build: (ctx, draft) => addTopicModal(ctx, normalizeTopicDraft(draft), true),
+  save_draft_topic: { kind: "topic", fields: withV2(TOPIC_FIELDS), build: (ctx, draft) => addTopicModal(ctx, normalizeDraft(TOPIC_FIELDS, draft), true) },
+  save_draft_goal: { kind: "goal", fields: withV2(GOAL_FIELDS), build: (ctx, draft) => addGoalModal(normalizeDraft(GOAL_FIELDS, draft), true) },
+  save_draft_devplan: {
+    kind: "dev",
+    fields: withV2(DEVPLAN_FIELDS),
+    build: (ctx, draft) => addDevPlanModal(normalizeDraft(DEVPLAN_FIELDS, draft), true),
   },
-  save_draft_goal: { kind: "goal", fields: ["text", "why", "measure", "target", "status"], build: (ctx, draft) => addGoalModal(draft, true) },
-  save_draft_devplan: { kind: "dev", fields: ["area", "type", "activity", "target"], build: (ctx, draft) => addDevPlanModal(draft, true) },
-  save_draft_achievement: { kind: "achievement", fields: ["title", "category", "impact", "date"], build: (ctx, draft) => addAchievementModal(draft, true) },
-  save_draft_feedback: { kind: "feedback", fields: ["type", "text", "example"], build: (ctx, draft) => addFeedbackModal(ctx, draft, true) },
+  save_draft_achievement: {
+    kind: "achievement",
+    fields: withV2(ACHIEVEMENT_FIELDS),
+    build: (ctx, draft) => addAchievementModal(normalizeDraft(ACHIEVEMENT_FIELDS, draft), true),
+  },
+  save_draft_feedback: {
+    kind: "feedback",
+    fields: withV2(FEEDBACK_FIELDS),
+    build: (ctx, draft) => addFeedbackModal(ctx, normalizeDraft(FEEDBACK_FIELDS, draft), true),
+  },
 };
 
 // ----------------------------------------------------- direct mutations ----
@@ -163,6 +197,23 @@ const QUICK_ACTIONS = {
     },
     refreshList: (data, ctx) => listTopicsModal(data.topics, ctx.role),
   },
+  // The explicit "let them know" action (SLACK_TODO.md item 0) — the only
+  // thing that pings the partner about a topic now; add_topic above no
+  // longer does. id is a plain string in the interaction payload with no
+  // server-side ownership check otherwise — this admin client bypasses RLS
+  // entirely, so pair_id (and, since Submit is creator-gated the same way
+  // Edit is — see listTopicsModal — created_by_role) are checked here
+  // before submitting anything, same pattern as topic_edit below. See the
+  // governance note in CLAUDE.md.
+  topic_submit: {
+    run: async (admin, ctx, id) => {
+      const { data: topic } = await admin.from("topics").select("pair_id, text, submitted_at, created_by_role").eq("id", id).maybeSingle();
+      if (!topic || topic.pair_id !== ctx.pairId || topic.created_by_role !== ctx.role || topic.submitted_at) return;
+      await submitTopic(admin, id, fromSlack(ctx));
+      await notify(admin, ctx.pairId, `${ctx.myName} submitted a topic: ${topic.text}`, ctx.role, ctx.otherRole, "oneOnOne", "topic");
+    },
+    refreshList: (data, ctx) => listTopicsModal(data.topics, ctx.role),
+  },
   action_mark_done: {
     run: async (admin, ctx, id) => {
       await toggleActionDone(admin, id, true, fromSlack(ctx));
@@ -170,8 +221,18 @@ const QUICK_ACTIONS = {
     },
     refreshList: (data) => listActionsModal(data.actions),
   },
+  // The explicit "close without answering" action (see listFeedbackModal) —
+  // real, distinct product behavior from "Answer" (feedback_request_answer
+  // below), matching the website's own Dismiss/Withdraw buttons
+  // (app/(dashboard)/performance/page.js), not a stand-in for it.
   feedback_request_answered: {
     run: async (admin, ctx, id) => {
+      // id is a plain string in the interaction payload with no
+      // server-side ownership check otherwise — this admin client bypasses
+      // RLS entirely, so pair_id is checked here before closing anything.
+      // See the governance note in CLAUDE.md.
+      const { data: request } = await admin.from("feedback_requests").select("pair_id").eq("id", id).maybeSingle();
+      if (!request || request.pair_id !== ctx.pairId) return;
       await setFeedbackRequestStatus(admin, id, "closed", fromSlack(ctx));
     },
     refreshList: (data) => listFeedbackModal(data.feedback, data.feedbackRequests),
@@ -189,13 +250,12 @@ function fieldVal(values, blockId) {
   return f.value;
 }
 
-// addTopicModal renders "text"/"why"/"category" under a "_v2" block_id
-// instead when pre-filled via views.update (see the comment there) — only
+// Every "Save draft"-capable add modal (Topics, Goals, Development plans,
+// Achievements, Feedback) renders its fields under a "_v2" block_id instead
+// when pre-filled via views.update (see lib/slack-form-fields.js) — only
 // one of a base/"_v2" pair is ever actually present in a given view, so
-// try both.
-function fieldValV2(values, blockId) {
-  return fieldVal(values, `${blockId}_v2`) ?? fieldVal(values, blockId);
-}
+// every field read for one of those five forms must try both.
+const fieldValV2 = makeFieldValV2(fieldVal);
 
 const SUBMISSIONS = {
   edit_name: async (admin, ctx, v) => {
@@ -226,7 +286,9 @@ const SUBMISSIONS = {
     const category = fieldValV2(v, "category") || "Other";
     await addTopic(admin, ctx.pairId, { text, why: fieldValV2(v, "why"), category, role: ctx.role, name: ctx.myName });
     await clearFormDraft(admin, ctx.pairId, ctx.role, "topic").catch(() => {});
-    delayedNotify(admin, ctx.pairId, `${ctx.myName} added a topic: ${text}`, ctx.role, ctx.otherRole, "oneOnOne", "topic");
+    // No ping here — adding a topic is not the submit (SLACK_TODO.md item
+    // 0). The pair member who wrote it pings the other side later, from the
+    // Open topics list, via the topic_submit quick action below.
   },
   add_action: async (admin, ctx, v) => {
     const text = fieldVal(v, "text");
@@ -234,22 +296,35 @@ const SUBMISSIONS = {
     await notify(admin, ctx.pairId, `${ctx.myName} added an action: ${text}`, ctx.role, ctx.otherRole, "actions", "action");
   },
   add_goal: async (admin, ctx, v) => {
-    const text = fieldVal(v, "text");
+    // fieldValV2, not fieldVal, for every field here — see the SAVE_DRAFT
+    // comment above: an already-open Goal modal patched via views.update
+    // (the "Save draft" confirmation re-render) can visibly show the right
+    // value while submitting empty under the base block_id.
+    const text = fieldValV2(v, "text");
     await saveGoal(
       admin,
       ctx.pairId,
-      { text, why: fieldVal(v, "why"), measure: fieldVal(v, "measure"), owner: ctx.myName, target: fieldVal(v, "target"), status: fieldVal(v, "status"), progress: 0 },
+      {
+        text,
+        why: fieldValV2(v, "why"),
+        measure: fieldValV2(v, "measure"),
+        owner: ctx.myName,
+        target: fieldValV2(v, "target"),
+        status: fieldValV2(v, "status"),
+        progress: 0,
+      },
       ctx.myName
     );
     await clearFormDraft(admin, ctx.pairId, ctx.role, "goal").catch(() => {});
     delayedNotify(admin, ctx.pairId, `${ctx.myName} added a goal: ${text}`, ctx.role, ctx.otherRole, "goals", "goal");
   },
   add_devplan: async (admin, ctx, v) => {
-    const area = fieldVal(v, "area");
+    // fieldValV2 — see add_goal above.
+    const area = fieldValV2(v, "area");
     await saveDevelopmentPlan(
       admin,
       ctx.pairId,
-      { area, type: fieldVal(v, "type"), activity: fieldVal(v, "activity"), target: fieldVal(v, "target"), status: "Not Started" },
+      { area, type: fieldValV2(v, "type"), activity: fieldValV2(v, "activity"), target: fieldValV2(v, "target"), status: "Not Started" },
       ctx.role,
       ctx.myName
     );
@@ -257,19 +332,65 @@ const SUBMISSIONS = {
     delayedNotify(admin, ctx.pairId, `${ctx.myName} added a development plan: ${area}`, ctx.role, ctx.otherRole, "development", "dev");
   },
   add_achievement: async (admin, ctx, v) => {
-    const title = fieldVal(v, "title");
-    await addAchievement(admin, ctx.pairId, { title, category: fieldVal(v, "category"), impact: fieldVal(v, "impact"), date: fieldVal(v, "date"), role: ctx.role, name: ctx.myName });
+    // fieldValV2 — see add_goal above.
+    const title = fieldValV2(v, "title");
+    await addAchievement(admin, ctx.pairId, {
+      title,
+      category: fieldValV2(v, "category"),
+      impact: fieldValV2(v, "impact"),
+      date: fieldValV2(v, "date"),
+      role: ctx.role,
+      name: ctx.myName,
+    });
     await clearFormDraft(admin, ctx.pairId, ctx.role, "achievement").catch(() => {});
     delayedNotify(admin, ctx.pairId, `${ctx.myName} logged an achievement: ${title}`, ctx.role, ctx.otherRole, "performance", "achievement");
   },
-  add_feedback: async (admin, ctx, v) => {
-    await addFeedback(admin, ctx.pairId, { giverRole: ctx.role, fromName: ctx.myName, toName: ctx.partnerName, type: fieldVal(v, "type"), text: fieldVal(v, "text"), example: fieldVal(v, "example") });
-    await clearFormDraft(admin, ctx.pairId, ctx.role, "feedback").catch(() => {});
-    delayedNotify(admin, ctx.pairId, `${ctx.myName} left you feedback`, ctx.role, ctx.otherRole, "performance", "feedback");
+  // Matches the website's atomic answer-a-request behavior
+  // (app/(dashboard)/performance/page.js's saveFeedback): saving the entry
+  // and closing the request it answers happen together, from one submit,
+  // instead of the two disconnected Slack paths this used to be
+  // (SLACK_TODO.md item 0e).
+  add_feedback: async (admin, ctx, v, view) => {
+    // view.private_metadata carries the request id in "answer" mode
+    // (addFeedbackModal, lib/slack-views.js) — Slack-supplied, so verify it
+    // belongs to this pair before using it to close anything, independently
+    // of the check open_answer_feedback_request/feedback_request_answer
+    // already did when they pushed this modal: private_metadata is exactly
+    // as replayable/tamperable as action.value or a select's option value,
+    // so it gets the same re-check at the point it's actually used to write
+    // something. See the governance note in CLAUDE.md.
+    const requestId = view?.private_metadata || null;
+    let request = null;
+    if (requestId) {
+      const { data } = await admin.from("feedback_requests").select("id, pair_id").eq("id", requestId).maybeSingle();
+      if (data && data.pair_id === ctx.pairId) request = data;
+    }
+    // fieldValV2 — see add_goal above.
+    await addFeedback(admin, ctx.pairId, {
+      giverRole: ctx.role,
+      fromName: ctx.myName,
+      toName: ctx.partnerName,
+      type: fieldValV2(v, "type"),
+      text: fieldValV2(v, "text"),
+      example: fieldValV2(v, "example"),
+    });
+    if (request) {
+      await setFeedbackRequestStatus(admin, request.id, "closed", fromSlack(ctx));
+    } else {
+      // "Answer" mode never saves a draft (see addFeedbackModal), so only
+      // clear one here for the standalone "Give feedback" path — clearing
+      // unconditionally would wipe an unrelated in-progress "Give feedback"
+      // draft the same person might separately have going.
+      await clearFormDraft(admin, ctx.pairId, ctx.role, "feedback").catch(() => {});
+    }
+    const msg = request ? `${ctx.myName} answered your feedback request` : `${ctx.myName} left you feedback`;
+    delayedNotify(admin, ctx.pairId, msg, ctx.role, ctx.otherRole, "performance", "feedback");
   },
   add_feedback_request: async (admin, ctx, v) => {
-    await addFeedbackRequest(admin, ctx.pairId, { fromRole: ctx.role, fromName: ctx.myName, about: fieldVal(v, "about"), why: fieldVal(v, "why") });
-    delayedNotify(admin, ctx.pairId, `${ctx.myName} asked you for feedback`, ctx.role, ctx.otherRole, "performance", "request");
+    const req = await addFeedbackRequest(admin, ctx.pairId, { fromRole: ctx.role, fromName: ctx.myName, about: fieldVal(v, "about"), why: fieldVal(v, "why") });
+    // entity_id so the digest DM's "Answer it" button can thread this
+    // request's id through (see lib/block-kit.js, lib/slack-send.js).
+    delayedNotify(admin, ctx.pairId, `${ctx.myName} asked you for feedback`, ctx.role, ctx.otherRole, "performance", "request", req.id);
   },
   edit_topic: async (admin, ctx, v, view) => {
     const id = view?.private_metadata;
@@ -432,6 +553,20 @@ async function handleInteraction(admin, slackUserId, payload) {
       const { data: topic } = await admin.from("topics").select("id, pair_id, text, why, category, created_by_role").eq("id", action.value).maybeSingle();
       if (topic && topic.pair_id === ctx.pairId && topic.created_by_role === ctx.role) {
         await slackApi("views.push", { trigger_id: payload.trigger_id, view: editTopicModal(topic) }).catch((e) => console.error("edit topic push:", e));
+      }
+    } else if (action.action_id === "feedback_request_answer") {
+      // Clicked from the "Open feedback" list modal (listFeedbackModal) —
+      // pushed on top of it (views.push, not views.open) so Cancel/Save
+      // both return to that list. action.value is a plain string in the
+      // interaction payload with no server-side ownership check otherwise —
+      // this admin client bypasses RLS entirely, so pair_id is checked here
+      // before threading the id into the modal's private_metadata, same
+      // pattern as topic_edit above. See the governance note in CLAUDE.md.
+      const { data: request } = await admin.from("feedback_requests").select("id, pair_id, status").eq("id", action.value).maybeSingle();
+      if (request && request.pair_id === ctx.pairId && request.status === "open") {
+        await slackApi("views.push", { trigger_id: payload.trigger_id, view: addFeedbackModal(ctx, undefined, false, request.id) }).catch((e) =>
+          console.error("answer feedback request push:", e)
+        );
       }
     } else if (action.action_id === "suggested_pick") {
       // Lives in a section block (see addTopicModal, lib/slack-views.js),

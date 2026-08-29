@@ -66,7 +66,15 @@ create table topics (
   created_by_role text not null,
   created_by_name text not null,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  -- Null until the creator deliberately hits Submit — gates the Slack/in-app
+  -- ping separately from add/edit (SLACK_TODO.md item 0; Melissa: "Editing
+  -- or adding a topic is not the submit"). See
+  -- migrations/0009_topic_submit_flag.sql for why this is a plain column
+  -- rather than a trigger change: nothing on this table fires a
+  -- notification on insert in the first place, the app's notify() call site
+  -- does, so that's where the gating happens.
+  submitted_at timestamptz
 );
 
 create table checkins (
@@ -219,6 +227,11 @@ create table notifications (
   -- or null. Tells the Slack sender which ping to build; null means this
   -- notification has no Slack equivalent yet and the sender skips it.
   kind text,
+  -- The specific record this notification is about (e.g. a feedback_requests
+  -- id for kind "request"), so a Slack DM built from this row can act on
+  -- that exact record instead of only aggregate counts. Null for kinds that
+  -- don't need it. See migrations/0008_notification_entity_id.sql.
+  entity_id uuid,
   read boolean not null default false,
   created_at timestamptz not null default now()
 );
@@ -438,6 +451,45 @@ as $$
   );
 $$;
 
+-- concerns is manager-only notes about the employee (see the dedicated
+-- policies below, not the pair_scoped_tables loop) — this checks the
+-- *manager* side specifically, not just pair membership.
+create function is_pair_manager(check_pair_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1 from pairs
+    where id = check_pair_id
+      and manager_id = auth.uid()
+  );
+$$;
+
+-- review_drafts / form_drafts are keyed (pair_id, role) — each row belongs to
+-- one side of the pair (role = 'employee' | 'manager', the same two values
+-- create_pair's my_role check accepts), so membership alone isn't enough:
+-- this also checks the row's role matches which side of the pair auth.uid()
+-- actually is.
+create function is_own_role_row(check_pair_id uuid, check_role text)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1 from pairs
+    where id = check_pair_id
+      and (
+        (check_role = 'employee' and employee_id = auth.uid())
+        or (check_role = 'manager' and manager_id = auth.uid())
+      )
+  );
+$$;
+
 create policy "select own or partner profile" on profiles for select using (
   id = auth.uid()
   or exists (
@@ -459,13 +511,18 @@ create policy "update own pair" on pairs for update using (
 -- can select/insert/update/delete rows belonging to that pair. Looping over
 -- the table list here instead of writing 64 near-identical CREATE POLICY
 -- statements by hand.
+--
+-- concerns, review_drafts, and form_drafts are deliberately NOT in this list
+-- — "is a pair member" is too broad for all three (see the dedicated
+-- policies right after this block, and the RLS gap writeup in
+-- supabase/migrations/0007_role_scoped_rls.sql / SLACK_TODO.md item 0i).
 do $$
 declare
   t text;
   pair_scoped_tables text[] := array[
     'topics', 'checkins', 'meetings', 'achievements', 'feedback_entries',
     'feedback_requests', 'goals', 'development_plans', 'career_answers',
-    'concerns', 'actions', 'notifications', 'review_drafts', 'form_drafts',
+    'actions', 'notifications',
     'custom_suggestions', 'documents', 'handbook_links', 'messages'
   ];
 begin
@@ -498,6 +555,28 @@ create policy "pair members can select" on activity_log
 
 create policy "pair members can insert" on activity_log
   for insert with check (is_pair_member(pair_id));
+
+-- concerns is manager-only notes about the employee — the website UI already
+-- hides this tab from the employee (`mgrOnly: true` on the "Updates" tab,
+-- app/(dashboard)/performance/page.js), so this is a safe default that
+-- matches existing product intent exactly, not a new restriction: the
+-- manager gets full access, the employee gets none at all, not even read.
+create policy "manager can select" on concerns for select using (is_pair_manager(pair_id));
+create policy "manager can insert" on concerns for insert with check (is_pair_manager(pair_id));
+create policy "manager can update" on concerns for update using (is_pair_manager(pair_id));
+create policy "manager can delete" on concerns for delete using (is_pair_manager(pair_id));
+
+-- review_drafts / form_drafts: each row belongs to one side of the pair, not
+-- both — a pair member should only reach the row matching their own role.
+create policy "own role can select" on review_drafts for select using (is_own_role_row(pair_id, role));
+create policy "own role can insert" on review_drafts for insert with check (is_own_role_row(pair_id, role));
+create policy "own role can update" on review_drafts for update using (is_own_role_row(pair_id, role));
+create policy "own role can delete" on review_drafts for delete using (is_own_role_row(pair_id, role));
+
+create policy "own role can select" on form_drafts for select using (is_own_role_row(pair_id, role));
+create policy "own role can insert" on form_drafts for insert with check (is_own_role_row(pair_id, role));
+create policy "own role can update" on form_drafts for update using (is_own_role_row(pair_id, role));
+create policy "own role can delete" on form_drafts for delete using (is_own_role_row(pair_id, role));
 
 -- ============================================================================
 -- Storage bucket for uploaded documents (Dashboard → Documents card).

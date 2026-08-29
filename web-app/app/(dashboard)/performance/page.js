@@ -260,9 +260,11 @@ export default function PerformancePage() {
       frAboutRef.current?.focus();
       return;
     }
-    await addFeedbackRequest(supabase, pairId, { fromRole: role, fromName: myName, about, why: frWhy.trim() });
+    const req = await addFeedbackRequest(supabase, pairId, { fromRole: role, fromName: myName, about, why: frWhy.trim() });
     setFrOpen(false);
-    await notify(supabase, pairId, `${myName} asked you for feedback`, role, otherRole, "performance", "request");
+    // entity_id so a Slack DM built from this notification can thread the
+    // request id through its "Answer it" button (see SLACK_TODO.md item 0e).
+    await notify(supabase, pairId, `${myName} asked you for feedback`, role, otherRole, "performance", "request", req.id);
     toast("Sent", `${partnerName} will see your request.`);
     loadAll();
   }

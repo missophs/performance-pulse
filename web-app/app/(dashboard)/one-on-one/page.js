@@ -13,6 +13,7 @@ import {
   setTopicStatus,
   setTopicNotes,
   updateTopic,
+  submitTopic,
   deleteTopics,
   getOpenCheckin,
   saveCheckin,
@@ -80,14 +81,6 @@ export default function OneOnOnePage() {
   const [wrap, setWrap] = useState(EMPTY_WRAP);
   const wrapNextInit = useRef(false);
 
-  // Topics added while preparing don't ping the partner one at a time —
-  // that fires a Slack DM per click, which is noisy when someone is adding
-  // several topics before a meeting. Instead we batch them and send one
-  // notification when they leave the Prepare tab (see flushTopicNotify).
-  // A timer also flushes a few seconds after the last add, so the
-  // notification isn't lost if the tab is closed before switching away.
-  const pendingTopicNotify = useRef({ count: 0, texts: [], timer: null });
-
   async function loadAll() {
     setLoading(true);
     const userId = (await supabase.auth.getUser()).data.user.id;
@@ -134,13 +127,6 @@ export default function OneOnOnePage() {
     }
   }, [pair]);
 
-  useEffect(() => {
-    return () => {
-      flushTopicNotify();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // Autosave the topic-add form as a draft so it survives a closed tab or a
   // switch away from Prepare. Skipped while the initial load is still
   // populating these fields from a previously-saved draft.
@@ -174,34 +160,27 @@ export default function OneOnOnePage() {
 
   // ------------------------------------------------------------ topics ----
 
-  function queueTopicNotify(text) {
-    const pending = pendingTopicNotify.current;
-    pending.count += 1;
-    pending.texts.push(text);
-    if (pending.timer) clearTimeout(pending.timer);
-    pending.timer = setTimeout(flushTopicNotify, 4000);
-  }
-
+  // Adding a topic no longer pings the partner by itself — see submitTopicRow
+  // below. SLACK_TODO.md item 0; Melissa: "Editing or adding a topic is not
+  // the submit either."
   async function addTopicRow(text, why, category) {
     await addTopic(supabase, pairId, { text, why: why || "", category, role, name: myName });
-    queueTopicNotify(text);
     loadAll();
   }
 
-  async function flushTopicNotify() {
-    const pending = pendingTopicNotify.current;
-    if (pending.timer) clearTimeout(pending.timer);
-    if (!pending.count) return;
-    pendingTopicNotify.current = { count: 0, texts: [], timer: null };
-    const text =
-      pending.count === 1
-        ? `${myName} added a topic: ${pending.texts[0]}`
-        : `${myName} added ${pending.count} topics to your 1:1 agenda`;
-    await notify(supabase, pairId, text, role, otherRole, "oneOnOne", "topic");
+  // The explicit "let them know" action — the only thing that pings the
+  // partner about a topic now. submitTopic() no-ops (returns null) if this
+  // topic was already submitted, so this can't double-notify on a stale
+  // click.
+  async function submitTopicRow(t) {
+    const submitted = await submitTopic(supabase, t.id, { actorName: myName, actorRole: role, source: "web" });
+    if (submitted) {
+      await notify(supabase, pairId, `${myName} submitted a topic: ${submitted.text}`, role, otherRole, "oneOnOne", "topic");
+    }
+    loadAll();
   }
 
   function goToSub(tab) {
-    if (sub === "prepare" && tab !== "prepare") flushTopicNotify();
     setSub(tab);
   }
 
@@ -228,9 +207,10 @@ export default function OneOnOnePage() {
 
   async function addFromHardConvo(outcome, body) {
     await addTopic(supabase, pairId, { text: outcome, why: body, category: "Other", role, name: myName });
-    // Deliberately not queued through queueTopicNotify/flushTopicNotify: this
-    // path is exempt from a real Slack DM (no "topic" kind here), only an
-    // in-app notification, same as before topic-add batching existed.
+    // No "topic" kind here on purpose — an in-app-only notification, not a
+    // real Slack DM, same exemption this path had before topic-add batching
+    // (and now submit-gating, see submitTopicRow) existed for the "topic"
+    // kind itself.
     await notify(supabase, pairId, `${myName} added a topic to the agenda`, role, otherRole, "oneOnOne");
     loadAll();
   }
@@ -534,6 +514,7 @@ export default function OneOnOnePage() {
               onStatusChange={changeTopicStatus}
               onNote={openNoteModal}
               onEdit={openEditModal}
+              onSubmit={submitTopicRow}
               onAction={(t) => setActionModal({ existing: null, seed: { text: "", related: `Topic: ${t.text}` } })}
               onDelete={removeTopic}
             />
@@ -549,6 +530,7 @@ export default function OneOnOnePage() {
               onStatusChange={changeTopicStatus}
               onNote={openNoteModal}
               onEdit={openEditModal}
+              onSubmit={submitTopicRow}
               onAction={(t) => setActionModal({ existing: null, seed: { text: "", related: `Topic: ${t.text}` } })}
               onDelete={removeTopic}
             />

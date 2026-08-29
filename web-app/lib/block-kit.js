@@ -31,8 +31,11 @@ function bkHeader() {
 }
 // Primary button acts right here in Slack (interactivity endpoint); the
 // secondary link is a fallback for anyone who'd rather use the website —
-// people get to choose either way.
-function bkOpenAction(label, inSlackActionId) {
+// people get to choose either way. `value`, when given, is the id of the
+// specific record this button acts on (e.g. a feedback request), threaded
+// through to the interactivity route's OPENERS the same way any other
+// Slack-supplied id gets there.
+function bkOpenAction(label, inSlackActionId, value) {
   const elements = [];
   if (inSlackActionId) {
     elements.push({
@@ -40,6 +43,7 @@ function bkOpenAction(label, inSlackActionId) {
       text: { type: "plain_text", text: label || "Open in Slack", emoji: true },
       style: "primary",
       action_id: inSlackActionId,
+      ...(value !== undefined && value !== null && value !== "" ? { value: String(value) } : {}),
     });
   }
   elements.push({
@@ -97,10 +101,15 @@ export function buildDigestBlockKit(kindCounts, ctx) {
 
 /**
  * Build a Block Kit payload for one ping kind, from live counts only.
- * ctx: { partnerName, isMgr, openTopicsCount, next1on1When, mineActionsCount, devPlansCount }
+ * ctx: { partnerName, isMgr, openTopicsCount, next1on1When, mineActionsCount,
+ *        devPlansCount, requestId }
+ * requestId (kind "request" only): the specific feedback_requests row this
+ * ping is about, so "Answer it" can open a modal that both saves the entry
+ * and closes that exact request (see SLACK_TODO.md item 0e) instead of a
+ * generic, unlinked "Give feedback" modal.
  */
 export function buildBlockKit(kind, ctx) {
-  const { partnerName, isMgr, openTopicsCount, next1on1When, mineActionsCount, devPlansCount } = ctx;
+  const { partnerName, isMgr, openTopicsCount, next1on1When, mineActionsCount, devPlansCount, requestId } = ctx;
   const b = [bkHeader()];
   let text = "";
 
@@ -129,7 +138,12 @@ export function buildBlockKit(kind, ctx) {
     text = `${partnerName} asked you for feedback`;
     b.push(bkSection(`*${partnerName}* asked you for feedback.`));
     b.push(bkContext("No deadline. Answer it whenever you're ready."));
-    b.push(bkOpenAction("Answer it", "open_add_feedback"));
+    // With a requestId, "Answer it" opens a modal that both saves the entry
+    // and closes this exact request (see SLACK_TODO.md item 0e). Without
+    // one — an older notification row from before this column existed, or
+    // any other gap — fall back to the plain, unlinked feedback modal
+    // rather than erroring, same as this button always behaved before.
+    b.push(bkOpenAction("Answer it", requestId ? "open_answer_feedback_request" : "open_add_feedback", requestId));
   } else if (kind === "dev") {
     text = `${partnerName} added a development plan`;
     b.push(bkSection(`*${partnerName}* ${isMgr ? "requested" : "recommended"} a development plan for you.`));

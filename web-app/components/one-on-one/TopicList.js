@@ -11,7 +11,7 @@ import { TOPIC_STATES } from "@/lib/one-on-one-content";
 // viewerRole gates the Edit button to whoever created the topic — status
 // changes, notes, and delete stay open to both partners (unchanged), but
 // rewriting someone else's words is creator-only.
-export default function TopicList({ items, emptyTitle, emptyBody, viewerRole, onStatusChange, onNote, onEdit, onAction, onDelete }) {
+export default function TopicList({ items, emptyTitle, emptyBody, viewerRole, onStatusChange, onNote, onEdit, onSubmit, onAction, onDelete }) {
   if (!items.length) {
     return (
       <div className="empty">
@@ -42,6 +42,7 @@ export default function TopicList({ items, emptyTitle, emptyBody, viewerRole, on
               <div className="item-meta">
                 <Badge cls="b-purple">{t.category}</Badge>
                 <Badge cls={badge.cls}>{badge.label}</Badge>
+                {!t.submitted_at && <Badge cls="b-grey">Not submitted</Badge>}
                 <span>
                   Added by {t.created_by_name} · {ago(t.created_at)}
                 </span>
@@ -65,6 +66,11 @@ export default function TopicList({ items, emptyTitle, emptyBody, viewerRole, on
               {t.created_by_role === viewerRole && (
                 <button className="btn ghost sm" onClick={() => onEdit(t)}>
                   Edit
+                </button>
+              )}
+              {t.created_by_role === viewerRole && !t.submitted_at && (
+                <button className="btn sm" onClick={() => onSubmit(t)}>
+                  Submit
                 </button>
               )}
               <button className="btn secondary sm" onClick={() => onAction(t)}>

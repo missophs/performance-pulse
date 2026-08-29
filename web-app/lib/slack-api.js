@@ -22,7 +22,12 @@ export async function slackApi(method, body) {
   const json = await res.json();
   if (!json.ok) {
     const detail = json.response_metadata?.messages ? ` (${json.response_metadata.messages.join("; ")})` : "";
-    throw new Error(`Slack ${method} failed: ${json.error}${detail}`);
+    // Every Slack route's error handling fails soft (console.error, ack
+    // anyway) — see app/api/slack/{interactivity,notify,events}/route.js —
+    // so a dead/revoked SLACK_BOT_TOKEN would otherwise fail invisibly:
+    // every website feature keeps working, and only Slack goes silently
+    // dark. This marker is the one thing that makes that greppable in logs.
+    throw new Error(`[SLACK_INTEGRATION_DOWN] Slack ${method} failed: ${json.error}${detail}`);
   }
   return json;
 }

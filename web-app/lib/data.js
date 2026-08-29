@@ -151,6 +151,42 @@ export async function deleteTopics(supabase, ids) {
   if (error) throw error;
 }
 
+/**
+ * The explicit "let them know" action (SLACK_TODO.md item 0) — separate from
+ * addTopic/updateTopic, neither of which should ever trigger a ping on their
+ * own anymore (Melissa: "Editing or adding a topic is not the submit").
+ * Idempotent: returns null (does nothing) if the topic is missing or was
+ * already submitted, so a caller can safely skip its own notify() call in
+ * that case instead of re-pinging.
+ *
+ * Ownership: this only takes a topic id, same as setTopicStatus/updateTopic
+ * above — it relies on the caller to have verified the row belongs to the
+ * right pair first. The website's browser-scoped client gets that for free
+ * from RLS; a Slack handler on the admin (service-role) client, which
+ * bypasses RLS, MUST check pair_id itself before calling this — see the
+ * governance note in CLAUDE.md and how the Slack interactivity route's
+ * topic_edit/edit_topic handlers already do this for the same reason.
+ */
+export async function submitTopic(supabase, id, ctx = {}) {
+  const { data: before } = await supabase.from("topics").select("pair_id, text, submitted_at").eq("id", id).maybeSingle();
+  if (!before || before.submitted_at) return null;
+  const { error } = await supabase
+    .from("topics")
+    .update({ submitted_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw error;
+  await logActivity(supabase, before.pair_id, {
+    entity: "topic",
+    entityId: id,
+    label: before.text,
+    field: "submitted",
+    oldValue: null,
+    newValue: "submitted",
+    ...ctx,
+  });
+  return before;
+}
+
 // ------------------------------------------------------------- checkins ----
 
 export async function getOpenCheckin(supabase, pairId, role) {
@@ -760,10 +796,15 @@ export function groupNotifications(notifications) {
   return groups.map((g) => ({ ...g, count: g.items.length, unread: g.items.some((i) => !i.read) }));
 }
 
-export async function notify(supabase, pairId, text, role, toRole, view, kind) {
+// entityId: the specific record this notification is about (e.g. a
+// feedback_requests id for kind "request"), so a Slack DM built from it can
+// act on that exact record — see SLACK_TODO.md item 0e and
+// supabase/migrations/0008_notification_entity_id.sql. Optional; most kinds
+// don't need it and it defaults to null.
+export async function notify(supabase, pairId, text, role, toRole, view, kind, entityId) {
   const { error } = await supabase
     .from("notifications")
-    .insert({ pair_id: pairId, text, created_by_role: role, to_role: toRole, view: view || null, kind: kind || null });
+    .insert({ pair_id: pairId, text, created_by_role: role, to_role: toRole, view: view || null, kind: kind || null, entity_id: entityId || null });
   if (error) throw error;
 
   const { data: overflow } = await supabase

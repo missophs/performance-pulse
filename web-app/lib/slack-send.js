@@ -36,7 +36,7 @@ function recipientsFor(toRole, pair) {
   ].filter(Boolean);
 }
 
-function ctxFor(recipient, pair, counts) {
+function ctxFor(recipient, pair, counts, notification) {
   return {
     partnerName: recipient.partnerName,
     isMgr: recipient.isMgr,
@@ -44,6 +44,11 @@ function ctxFor(recipient, pair, counts) {
     mineActionsCount: counts.mineActionsCount,
     devPlansCount: counts.devPlansCount,
     next1on1When: pair.next_1on1_date ? fmtDate(pair.next_1on1_date) : "not scheduled yet",
+    // Only meaningful for kind "request" (see buildBlockKit) — the specific
+    // feedback_requests row this ping is about. "request" kind is always
+    // sent one-at-a-time (see NEVER_BATCH in app/api/slack/notify/route.js),
+    // so there's always exactly one notification row to read it from here.
+    requestId: notification?.entity_id || null,
   };
 }
 
@@ -58,7 +63,7 @@ export async function sendSlackPing(notification, pair, counts) {
 
   const sent = [];
   for (const r of recipientsFor(notification.to_role, pair)) {
-    await dmByEmail(r.email, buildBlockKit(kind, ctxFor(r, pair, counts)));
+    await dmByEmail(r.email, buildBlockKit(kind, ctxFor(r, pair, counts, notification)));
     sent.push(r.email);
   }
   return { sent };
