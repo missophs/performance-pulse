@@ -1,11 +1,19 @@
 // Thin wrapper around Slack's Web API. Server-only — needs SLACK_BOT_TOKEN.
 
 const SLACK_API = "https://slack.com/api";
+// Slack's interactivity endpoint calls this synchronously inside its 3s
+// response budget (see app/api/slack/interactivity/route.js), so a retry
+// wait is capped well under that instead of trusting Retry-After verbatim —
+// one slow retry shouldn't turn into a second, worse failure (a dropped
+// interaction) on top of the first.
+const MAX_RETRY_WAIT_MS = 1500;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Older methods (users.info, etc.) reject a raw JSON body with
 // user_not_found/invalid_arguments; form-encoding works for every method,
 // so long as object/array values are JSON-stringified first.
-export async function slackApi(method, body) {
+export async function slackApi(method, body, _isRetry = false) {
   const form = new URLSearchParams();
   for (const [key, value] of Object.entries(body || {})) {
     if (value === undefined) continue;
@@ -19,6 +27,18 @@ export async function slackApi(method, body) {
     },
     body: form,
   });
+
+  // A 429 body isn't JSON-parseable the same way — Slack sends it as plain
+  // text with a Retry-After header, not the usual {ok:false, error} shape.
+  // Retried once, not looped: at today's single-tiny-workspace scale a
+  // second 429 in a row means something's actually wrong, not just a burst.
+  if (res.status === 429 && !_isRetry) {
+    const retryAfterSec = parseInt(res.headers.get("Retry-After"), 10);
+    const waitMs = Math.min((Number.isFinite(retryAfterSec) ? retryAfterSec : 1) * 1000, MAX_RETRY_WAIT_MS);
+    await sleep(waitMs);
+    return slackApi(method, body, true);
+  }
+
   const json = await res.json();
   if (!json.ok) {
     const detail = json.response_metadata?.messages ? ` (${json.response_metadata.messages.join("; ")})` : "";
