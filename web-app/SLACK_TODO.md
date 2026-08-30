@@ -1,5 +1,57 @@
 # Slack integration — status and what's left
 
+## Session closeout (2026-08-29, night)
+
+**Code:** all of tonight's fixes (RLS, save-draft generalization, feedback
+fulfillment, topic submit/ping decoupling, plus the 4-bug code-review fix
+pass) are committed and pushed to `main` — commits `f2a7d41` and `2983731`.
+
+**Database:** migrations `0007_role_scoped_rls.sql`,
+`0008_notification_entity_id.sql`, and `0009_topic_submit_flag.sql` were
+run by hand in the Supabase SQL editor tonight and all three returned
+Success — the database is current.
+
+**Deploy — the one real gap found tonight, now documented permanently in
+`CLAUDE.md`:** pushing to GitHub does not deploy this app. There's no
+GitHub→Vercel webhook wired up here; every prior deployment was a manual
+`vercel --prod` run, and tonight's two pushes sat un-deployed for hours
+before this was caught by testing live in Slack (a real Slack DM fired
+immediately on adding a test topic — the exact old behavior item 0 was
+supposed to remove — and the deployed `lib/data.js` was confirmed, by
+reading it directly in the Vercel dashboard, to not contain any of
+tonight's code). Melissa ran `vercel --prod` herself from a terminal
+(Claude Code's sandbox correctly blocks running production deploys
+directly) — deploy succeeded, "Ready in 24s."
+
+**Confirmed live after the deploy, from three independent sources, not
+just a claim:** added a fresh test topic in Slack (`TEST verifying
+submit/ping decoupling deploy - safe to delete`, under "Wins" — still
+sitting in the real Topics list, harmless, delete or ignore whenever) —
+it showed "not yet submitted" and a Submit button, exactly as item 0
+intends. Clicking Submit made both disappear. Cross-checked against the
+Vercel function logs for that click (`/api/slack/notify`, 21:31:20,
+called `slack.com/api/chat.postMessage`, 200) and directly against the
+`notifications` table (`select ... from notifications order by
+created_at desc` — top row timestamped `2026-08-30 01:31:20.73+00`,
+matching the server log to the second). The Slack **client** never
+rendered the resulting DM in this session (its own message list got
+stuck mid-load) — that's Slack's web client being flaky, the same
+intermittent-drop behavior already documented elsewhere in this file,
+not a bug in this app. All three checks agree: the fix is really live.
+
+**Also reconfirmed clean:** `npm run lint` (34/34, same baseline),
+`npm test` (5/5), and `npm run build` all pass after the final deploy —
+no errors left in the code from tonight's work.
+
+**Next actual priority:** the four decisions made tonight but not yet
+built — Goals+Actions de-redaction (item 0b), Slack delete (item 0c),
+edit for Goals/Dev plans/Actions (item 0d, unblocked, follows 0b's
+scope), and Slack presence for all six website-only features (item 0g).
+See those items below for the recorded decisions. Also still open:
+0k/0l/0m (new findings from tonight's code-review pass, see Done section
+for detail) and everything already listed under "Still open" below that
+predates tonight.
+
 ## Where things stand (2026-08-29, afternoon)
 
 **App/website, big picture:** one Next.js app (`web-app/`) serves both the

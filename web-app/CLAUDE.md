@@ -32,3 +32,28 @@ member," not "is the *correct* pair member," so the asymmetry those
 tables need is UI-only today. See `SLACK_TODO.md` for the full writeup and
 fix shape; this file exists so the *rule* survives independently of
 that document's length.
+
+# Deploy pipeline: `git push` does NOT deploy this app (found 2026-08-29)
+
+There is no GitHub→Vercel webhook wired up for this project, despite
+"Connect Git Repository" showing as done in the Vercel dashboard's
+production checklist. Every deployment in Vercel's history was created by
+someone manually running the Vercel CLI, not by a push — confirmed by
+committing and pushing two real fix commits to `main` and then finding,
+hours later, that the live site's `lib/data.js` still didn't contain code
+from either commit. Pushing to GitHub is necessary (it's the source of
+truth) but is **not sufficient** to ship anything.
+
+**To actually deploy:** run `vercel --prod` from `web-app/` (the Vercel
+CLI is already installed and authenticated as the project's account).
+This must be run in a real terminal — Claude Code's sandboxed Bash tool
+gets blocked by its own safety classifier from running this, by design,
+since it's a production-affecting action; if you're an agent working in
+this repo, don't try to work around that block — tell the person you're
+working with to run it themselves and explain why.
+
+Same applies to Supabase migrations: there's no Supabase CLI linked in
+this repo either (`supabase/.temp` has no project ref), so any new
+`supabase/migrations/*.sql` file needs to be run by hand in the Supabase
+SQL editor before it does anything — writing the migration file is not
+the same as applying it.
