@@ -20,9 +20,11 @@ import {
   editTopicModal,
   addActionModal,
   listActionsModal,
+  editActionModal,
   addGoalModal,
   GOAL_FIELDS,
   listGoalsModal,
+  editGoalModal,
   addDevPlanModal,
   DEVPLAN_FIELDS,
   listDevPlansModal,
@@ -48,9 +50,14 @@ import {
   setFeedbackRequestStatus,
   addTopic,
   saveAction,
+  deleteAction,
   saveGoal,
+  deleteGoal,
   saveDevelopmentPlan,
+  deleteDevelopmentPlan,
   addAchievement,
+  deleteAchievement,
+  deleteTopics,
   addFeedback,
   addFeedbackRequest,
   saveWrapUp,
@@ -210,8 +217,23 @@ const fromSlack = (ctx) => ({ actorName: ctx.myName, actorRole: ctx.role, source
 const QUICK_ACTIONS = {
   topic_mark_discussed: {
     run: async (admin, ctx, id) => {
+      // Was missing this check entirely (SLACK_TODO.md item 0k, found in the
+      // 2026-08-29 code-review) — action.value has no server-side ownership
+      // check otherwise. See the governance note in CLAUDE.md.
+      const topic = await verifyOwnedRow(admin, "topics", "pair_id", id, ctx);
+      if (!topic) return;
       await setTopicStatus(admin, id, "Discussed", fromSlack(ctx));
       await notify(admin, ctx.pairId, `Topic marked Discussed by ${ctx.myName}`, ctx.role, ctx.otherRole, "oneOnOne");
+    },
+    refreshList: (data, ctx) => listTopicsModal(data.topics, ctx.role),
+  },
+  // Open to both partners, matching the website (TopicList.js has no
+  // creator gate on Remove).
+  topic_delete: {
+    run: async (admin, ctx, id) => {
+      const topic = await verifyOwnedRow(admin, "topics", "pair_id", id, ctx);
+      if (!topic) return;
+      await deleteTopics(admin, [id]);
     },
     refreshList: (data, ctx) => listTopicsModal(data.topics, ctx.role),
   },
@@ -239,10 +261,54 @@ const QUICK_ACTIONS = {
   },
   action_mark_done: {
     run: async (admin, ctx, id) => {
+      // Was missing this check entirely (SLACK_TODO.md item 0k, found in the
+      // 2026-08-29 code-review) — action.value has no server-side ownership
+      // check otherwise. See the governance note in CLAUDE.md.
+      const task = await verifyOwnedRow(admin, "actions", "pair_id", id, ctx);
+      if (!task) return;
       await toggleActionDone(admin, id, true, fromSlack(ctx));
       await notify(admin, ctx.pairId, `${ctx.myName} marked an action done`, ctx.role, ctx.otherRole, "actions");
     },
     refreshList: (data) => listActionsModal(data.actions),
+  },
+  // Open to both partners, matching the website (no creator gate on Remove
+  // for any kind).
+  action_delete: {
+    run: async (admin, ctx, id) => {
+      const task = await verifyOwnedRow(admin, "actions", "pair_id", id, ctx);
+      if (!task) return;
+      await deleteAction(admin, id);
+    },
+    refreshList: (data) => listActionsModal(data.actions),
+  },
+  goal_delete: {
+    run: async (admin, ctx, id) => {
+      const goal = await verifyOwnedRow(admin, "goals", "pair_id, text", id, ctx);
+      if (!goal) return;
+      await deleteGoal(admin, id);
+      // Matches the website (goals/page.js handleDelete): in-app bell only,
+      // no "kind" — deleting a goal doesn't fire a real Slack DM.
+      await notify(admin, ctx.pairId, `Goal removed: ${goal.text}`, ctx.role, ctx.otherRole);
+    },
+    refreshList: (data) => listGoalsModal(data.goals),
+  },
+  devplan_delete: {
+    run: async (admin, ctx, id) => {
+      const plan = await verifyOwnedRow(admin, "development_plans", "pair_id, area", id, ctx);
+      if (!plan) return;
+      await deleteDevelopmentPlan(admin, id);
+      // Matches the website (development/page.js handleDeleteDev).
+      await notify(admin, ctx.pairId, `Development plan removed: ${plan.area}`, ctx.role, ctx.otherRole);
+    },
+    refreshList: (data) => listDevPlansModal(data.devPlans),
+  },
+  achievement_delete: {
+    run: async (admin, ctx, id) => {
+      const item = await verifyOwnedRow(admin, "achievements", "pair_id", id, ctx);
+      if (!item) return;
+      await deleteAchievement(admin, id);
+    },
+    refreshList: (data) => listAchievementsModal(data.achievements),
   },
   // The explicit "close without answering" action (see listFeedbackModal) —
   // real, distinct product behavior from "Answer" (feedback_request_answer
@@ -451,6 +517,59 @@ const SUBMISSIONS = {
       );
     }
   },
+  edit_goal: async (admin, ctx, v, view) => {
+    const id = view?.private_metadata;
+    if (!id) return;
+    const text = (fieldVal(v, "text") || "").trim();
+    if (!text) return { error: { blockId: "text", message: "Goal can't be empty." } };
+    // Fetch progress/obstacles/support too, not just for the ownership
+    // check — the edit modal has no fields for them, so they'd otherwise get
+    // silently wiped by saveGoal's upsert.
+    const existing = await verifyOwnedRow(admin, "goals", "pair_id, progress, obstacles, support", id, ctx);
+    if (!existing) return;
+    await saveGoal(
+      admin,
+      ctx.pairId,
+      {
+        id,
+        text,
+        why: fieldVal(v, "why"),
+        measure: fieldVal(v, "measure"),
+        // Owner is always the employee — see SUBMISSIONS.add_goal above.
+        owner: ctx.role === "manager" ? ctx.partnerName : ctx.myName,
+        target: fieldVal(v, "target"),
+        status: fieldVal(v, "status"),
+        progress: existing.progress,
+        obstacles: existing.obstacles,
+        support: existing.support,
+      },
+      ctx.myName
+    );
+    if (view.previous_view_id) {
+      const data = await loadHomeData(admin, ctx.pairId);
+      await slackApi("views.update", { view_id: view.previous_view_id, view: listGoalsModal(data.goals) }).catch((e) => console.error("edit goal list refresh:", e));
+    }
+  },
+  edit_action: async (admin, ctx, v, view) => {
+    const id = view?.private_metadata;
+    if (!id) return;
+    const text = (fieldVal(v, "text") || "").trim();
+    if (!text) return { error: { blockId: "text", message: "Action can't be empty." } };
+    // Fetch status/related/notes too — the edit modal has no fields for
+    // them, so they'd otherwise get silently wiped by saveAction's upsert.
+    const existing = await verifyOwnedRow(admin, "actions", "pair_id, status, related, notes", id, ctx);
+    if (!existing) return;
+    await saveAction(
+      admin,
+      ctx.pairId,
+      { id, text, owner: fieldVal(v, "owner"), due: fieldVal(v, "due"), status: existing.status, related: existing.related, notes: existing.notes },
+      ctx.myName
+    );
+    if (view.previous_view_id) {
+      const data = await loadHomeData(admin, ctx.pairId);
+      await slackApi("views.update", { view_id: view.previous_view_id, view: listActionsModal(data.actions) }).catch((e) => console.error("edit action list refresh:", e));
+    }
+  },
   wrap_up: async (admin, ctx, v) => {
     const discussedTopicIds = fieldVal(v, "discussed_topics") || [];
     await saveWrapUp(
@@ -589,6 +708,19 @@ async function handleInteraction(admin, slackUserId, payload) {
       const { data: topic } = await admin.from("topics").select("id, pair_id, text, why, category, created_by_role").eq("id", action.value).maybeSingle();
       if (topic && topic.pair_id === ctx.pairId && topic.created_by_role === ctx.role) {
         await slackApi("views.push", { trigger_id: payload.trigger_id, view: editTopicModal(topic) }).catch((e) => console.error("edit topic push:", e));
+      }
+    } else if (action.action_id === "goal_edit") {
+      // Open to both partners (unlike topic_edit) — Goals no longer has a
+      // creator-restricted concept now owner is always the employee. Same
+      // pair_id check as topic_edit, for the same governance reason.
+      const goal = await verifyOwnedRow(admin, "goals", "id, pair_id, text, why, measure, target_date, status", action.value, ctx);
+      if (goal) {
+        await slackApi("views.push", { trigger_id: payload.trigger_id, view: editGoalModal(goal) }).catch((e) => console.error("edit goal push:", e));
+      }
+    } else if (action.action_id === "action_edit") {
+      const task = await verifyOwnedRow(admin, "actions", "id, pair_id, text, owner_label, due_date", action.value, ctx);
+      if (task) {
+        await slackApi("views.push", { trigger_id: payload.trigger_id, view: editActionModal(ctx, task) }).catch((e) => console.error("edit action push:", e));
       }
     } else if (action.action_id === "feedback_request_answer") {
       // Clicked from the "Open feedback" list modal (listFeedbackModal) —

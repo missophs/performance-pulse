@@ -273,17 +273,18 @@ export function listTopicsModal(topics, viewerRole) {
   const open = topics.filter(isOpenTopic);
   const blocks = open.length
     ? open.flatMap((t) => [
-        section(
-          `*${t.text}*\n${t.category} · added ${ago(t.created_at)}${t.submitted_at ? "" : " · _not yet submitted_"}`,
-          button("Mark discussed", "topic_mark_discussed", t.id, "primary")
-        ),
-        // Submit is the explicit "let them know" action (SLACK_TODO.md item
-        // 0) — creator-gated, same as Edit right next to it, since it's
-        // finalizing your own entry, not something either pair member can
-        // do to the other's topic.
-        ...(t.created_by_role === viewerRole
-          ? [actions([...(t.submitted_at ? [] : [button("Submit", "topic_submit", t.id)]), button("Edit", "topic_edit", t.id)])]
-          : []),
+        section(`*${t.text}*\n${t.category} · added ${ago(t.created_at)}${t.submitted_at ? "" : " · _not yet submitted_"}`),
+        actions([
+          button("Mark discussed", "topic_mark_discussed", t.id, "primary"),
+          // Submit is the explicit "let them know" action (SLACK_TODO.md item
+          // 0) — creator-gated, same as Edit right next to it, since it's
+          // finalizing your own entry, not something either pair member can
+          // do to the other's topic.
+          ...(t.created_by_role === viewerRole ? [...(t.submitted_at ? [] : [button("Submit", "topic_submit", t.id)]), button("Edit", "topic_edit", t.id)] : []),
+          // Delete, unlike Edit/Submit, is open to both partners — matches
+          // the website (TopicList.js has no creator gate on Remove).
+          button("Delete", "topic_delete", t.id, "danger"),
+        ]),
       ])
     : [section("No open topics. Add one from the Home tab.")];
   blocks.push({ type: "divider" }, actions([openInApp("Open topics in the app for full notes")]));
@@ -325,11 +326,28 @@ export function addActionModal(ctx) {
   ]);
 }
 
+// Pushed on top of listActionsModal (views.push), same pattern as
+// editTopicModal/editGoalModal — open to both partners, matching Delete.
+export function editActionModal(ctx, action) {
+  return modal(
+    "edit_action",
+    "Edit action",
+    [
+      inputBlock("text", "Action", plainInput("val", { initial: action.text })),
+      inputBlock("owner", "Owner", staticSelect("val", [ctx.myName, ctx.partnerName, "Both of us"], action.owner_label)),
+      inputBlock("due", "Due date", datePicker("val", action.due_date), true),
+    ],
+    "Save changes",
+    action.id
+  );
+}
+
 export function listActionsModal(list) {
   const open = list.filter((a) => a.status !== "Done");
   const blocks = open.length
     ? open.flatMap((a, i) => [
-        section(`*Action ${i + 1}* — ${a.owner_label}${a.due_date ? ` · due ${a.due_date}` : " · no due date"}`, button("Mark done", "action_mark_done", a.id, "primary")),
+        section(`*Action ${i + 1}* — ${a.owner_label}${a.due_date ? ` · due ${a.due_date}` : " · no due date"}`),
+        actions([button("Mark done", "action_mark_done", a.id, "primary"), button("Edit", "action_edit", a.id), button("Delete", "action_delete", a.id, "danger")]),
       ])
     : [section("No open actions. Add one from the Home tab.")];
   blocks.push({ type: "divider" }, actions([openInApp("Open actions in the app for full notes")]));
@@ -380,17 +398,36 @@ export function addGoalModal(ctx, draft, saved = false) {
   );
 }
 
+// Shows real text (matches Topics, per Melissa's decision, SLACK_TODO.md item
+// 0b) — Edit/Delete both open to both partners, since Goals no longer has a
+// meaningful "creator" concept now owner is always the employee.
 export function listGoalsModal(goals) {
-  const byStatus = {};
-  goals.forEach((g) => (byStatus[g.status] = (byStatus[g.status] || 0) + 1));
-  const summary = Object.entries(byStatus)
-    .map(([s, n]) => `${n} ${s}`)
-    .join(" · ");
   const blocks = goals.length
-    ? [section(`*${goals.length} goal${goals.length === 1 ? "" : "s"} on record*\n${summary}`)]
+    ? goals.flatMap((g) => [
+        section(`*${g.text}*\n${g.status} · ${g.progress || 0}%${g.target_date ? ` · target ${g.target_date}` : ""}`),
+        actions([button("Edit", "goal_edit", g.id), button("Delete", "goal_delete", g.id, "danger")]),
+      ])
     : [section("No goals yet. Add one from the Home tab.")];
   blocks.push({ type: "divider" }, actions([openInApp("Open goals in the app for the full text")]));
   return modal("view_goals", "Goals", blocks, "Close");
+}
+
+// Pushed on top of listGoalsModal (views.push), same pattern as
+// editTopicModal — private_metadata carries the goal id.
+export function editGoalModal(goal) {
+  return modal(
+    "edit_goal",
+    "Edit goal",
+    [
+      inputBlock("text", "Goal", plainInput("val", { initial: goal.text })),
+      inputBlock("why", "Why it matters", plainInput("val", { multiline: true, initial: goal.why }), true),
+      inputBlock("measure", "How you'll know it's met", plainInput("val", { initial: goal.measure }), true),
+      inputBlock("target", "Target date", datePicker("val", goal.target_date), true),
+      inputBlock("status", "Status", staticSelect("val", GOAL_STATES, goal.status)),
+    ],
+    "Save changes",
+    goal.id
+  );
 }
 
 // --------------------------------------------------------- development -----
@@ -417,14 +454,16 @@ export function addDevPlanModal(draft, saved = false) {
   );
 }
 
+// No content-parity decision for Dev plans (unlike Goals/Actions, see
+// SLACK_TODO.md item 0b) — stays redacted to structural fields only (type,
+// status, target date), same reasoning as the pre-existing Actions
+// redaction. Delete only, no Edit (item 0d's scope is Goals + Actions).
 export function listDevPlansModal(plans) {
-  const byStatus = {};
-  plans.forEach((p) => (byStatus[p.status] = (byStatus[p.status] || 0) + 1));
-  const summary = Object.entries(byStatus)
-    .map(([s, n]) => `${n} ${s}`)
-    .join(" · ");
   const blocks = plans.length
-    ? [section(`*${plans.length} development plan${plans.length === 1 ? "" : "s"}*\n${summary}`)]
+    ? plans.flatMap((p, i) => [
+        section(`*Plan ${i + 1}* — ${p.type}${p.status ? ` · ${p.status}` : ""}${p.target_date ? ` · target ${p.target_date}` : ""}`),
+        actions([button("Delete", "devplan_delete", p.id, "danger")]),
+      ])
     : [section("No development plans yet. Add one from the Home tab.")];
   blocks.push({ type: "divider" }, actions([openInApp("Open plans in the app for the full text")]));
   return modal("view_devplans", "Development plans", blocks, "Close");
@@ -454,14 +493,14 @@ export function addAchievementModal(draft, saved = false) {
   );
 }
 
+// Same redaction reasoning as Dev plans above — structural fields only.
+// Delete only, no Edit (item 0d's scope is Goals + Actions).
 export function listAchievementsModal(list) {
-  const byCat = {};
-  list.forEach((a) => (byCat[a.category] = (byCat[a.category] || 0) + 1));
-  const summary = Object.entries(byCat)
-    .map(([c, n]) => `${n} ${c}`)
-    .join(" · ");
   const blocks = list.length
-    ? [section(`*${list.length} achievement${list.length === 1 ? "" : "s"} logged*\n${summary}`)]
+    ? list.flatMap((a, i) => [
+        section(`*Achievement ${i + 1}* — ${a.category}${a.achievement_date ? ` · ${a.achievement_date}` : ""}`),
+        actions([button("Delete", "achievement_delete", a.id, "danger")]),
+      ])
     : [section("Nothing logged yet. Add one from the Home tab.")];
   blocks.push({ type: "divider" }, actions([openInApp("Open achievements in the app for the full text")]));
   return modal("view_achievements", "Achievements", blocks, "Close");
