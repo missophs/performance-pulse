@@ -143,9 +143,15 @@ lint/build/test pass after each, matching how tonight's work went.
 **0h. Two pieces worth doing, one worth explicitly skipping for now.**
 Confirmed still accurate by re-reading the current code tonight — nothing
 here has changed since the 2026-08-29 audit:
-- **Rate-limit backoff in `slackApi()`** (`lib/slack-api.js`) — it still
-  throws on any non-ok response with no special handling for a 429/
-  `Retry-After`. Contained to one function. **~20-30 min.**
+- ~~**Rate-limit backoff in `slackApi()`**~~ **Done, 2026-08-30 night —
+  built, verified, not yet deployed.** A 429 now retries once, waiting up
+  to `Retry-After` seconds (capped at 1.5s so it can't blow the
+  interactivity endpoint's 3s response budget) before giving up the old
+  way. `npm run lint` (34/34, same baseline), `npm run build`, `npm test`
+  (7/7) all clean; committed (`b351a87`). **Deliberately not deployed
+  tonight** — bundled into tomorrow's `vercel --prod` with everything
+  else, rather than a separate late-night trip to Terminal for one small
+  fix.
 - **`app_uninstalled`/`tokens_revoked` handling** — `events/route.js`
   still only branches on `app_home_opened`. At today's single-hardcoded-
   workspace scale this is really just "log it," not "revoke a stored
