@@ -77,14 +77,105 @@ real second pairing.
 2. **Slack-parity live-testing (lower priority, optional):** Actions
    Edit/Delete, Topics Delete, Dev plans Delete, Achievements Delete — all
    code-verified, not yet individually clicked through in real Slack.
-3. **Item 3 — magic-link email rate limit (2 emails/hour, project-wide).**
-   Still open, still explicitly deferred ("we will do Supabase later").
-   Worth doing before more multi-pair testing since it's already cost real
-   time twice during earlier item-2 testing.
-4. **Items 0f, 0g, 0h, 5 — untouched, not yet prioritized:** missing
-   add-form fields, six website-only features with no Slack presence,
-   infra hardening (rate limiting, OAuth flow, uninstall handling), and
-   the 3-second cold-start submission timeout.
+3. **Item 3 — magic-link email rate limit. Decided 2026-08-30 (Melissa):
+   add password sign-in as the everyday path, not just raise the limit or
+   improve the lockout message.** Reasoning: "I don't want anyone waiting
+   for an email to send." Magic link stays as a backup option, not
+   removed. Not started — see the new scoping write-up below (item 3a) for
+   the build plan and estimate.
+4. **Items 0g, 0h, 5 — scoped tonight (2026-08-30), not built.** Six
+   website-only features get Slack presence (0g), the two highest-value
+   pieces of infra hardening get picked up (0h), and the cold-start
+   submission timeout (item 5) gets a decision + a plan. See the new
+   scoping write-up below for the full breakdown and estimates. Item 0f
+   (missing Slack add-form fields) is untouched, not yet prioritized.
+
+## Scoped tonight (2026-08-30), not built — build plan for tomorrow
+
+**3a. Password sign-in.** Supabase Auth already supports email+password
+natively — this is UI + flow work, not a new auth provider. Needed:
+- Sign-up: add a password field next to the existing name/role/partner
+  fields, call `supabase.auth.signUp({ email, password })` instead of (or
+  alongside) the magic-link `signInWithOtp` currently used.
+- Sign-in: a real login form (email + password fields + submit) replacing
+  today's email-only "send magic link" form as the default; magic link
+  moves to a "having trouble? use a link instead" secondary option.
+- Forgot-password flow — this one still needs an email, but it's a
+  password-reset link, not a sign-in-blocking one, so the 2/hour cap
+  matters far less here.
+- Test: signup with password, sign out, sign back in with password, wrong
+  password shows an error, forgot-password sends a working reset link.
+**Estimate: ~2-3 hours** (new UI states, two new/changed forms, the reset
+flow, and testing all four paths above) — sized against how long today's
+comparably-scoped features (the pairing switcher, the add-pairing flow)
+each took.
+
+**0g. Slack presence for the six decided features** (career conversations,
+concerns tracker, documents, handbook links, custom suggestions,
+quick-notes/Hard Conversation) — each follows the same
+list-modal-plus-button pattern every existing Slack feature already uses,
+so risk is low, it's mostly volume:
+- **Career conversations** — a view/add pair mirroring Topics: fixed
+  prompts from `EMP_CAREER`/`MGR_CAREER` (`lib/career-content.js`), free-text
+  answer per prompt, `career_answers` table. **~45-60 min.**
+- **Concerns tracker — manager-only, read-only** (per the decision — not a
+  new Slack write path). A list modal gated the same way other
+  manager-only buttons already are, showing `concerns`' seven fields per
+  entry. **~30-45 min** (more fields to lay out, but no save logic).
+- **Documents — view + add-link only, no raw upload** (per the decision).
+  A list modal (name + open-in-app link) and an add modal (name + url) —
+  `addDocumentLink`, not `uploadDocument`. **~30-40 min.**
+- **Handbook links — view only.** Simplest of the six: title + url, no
+  add/edit at all. **~15-20 min.**
+- **Custom suggestions — save/delete.** Scope isn't fully nailed down yet
+  — need to look at how `custom_suggestions` is actually surfaced on the
+  website (`listCustomSuggestions`/`addCustomSuggestion`/
+  `deleteCustomSuggestion`, `lib/data.js`) before sizing this one for
+  real; it may turn out to integrate into the existing topic-suggestion
+  picker rather than needing its own modal. **~30-45 min, less certain
+  than the others.**
+- **Quick-notes "Hard Conversation" capture.** One add modal (kind + free
+  text) writing to `messages` via `addMessage`, mirroring
+  `addFromHardConvo`. **~30-45 min.**
+**Subtotal: roughly 3-4 hours for all six**, done one at a time with a
+lint/build/test pass after each, matching how tonight's work went.
+
+**0h. Two pieces worth doing, one worth explicitly skipping for now.**
+Confirmed still accurate by re-reading the current code tonight — nothing
+here has changed since the 2026-08-29 audit:
+- **Rate-limit backoff in `slackApi()`** (`lib/slack-api.js`) — it still
+  throws on any non-ok response with no special handling for a 429/
+  `Retry-After`. Contained to one function. **~20-30 min.**
+- **`app_uninstalled`/`tokens_revoked` handling** — `events/route.js`
+  still only branches on `app_home_opened`. At today's single-hardcoded-
+  workspace scale this is really just "log it," not "revoke a stored
+  token" (there's no per-workspace token stored to revoke yet). **~15-20
+  min, low value until the Marketplace-listing goal is actually picked
+  up** — worth doing only if you want it, not urgent.
+- **Skip for now: the OAuth/multi-workspace install flow.** This is
+  genuinely big — new schema fields, an `oauth.v2.access` call, a Slack
+  app manifest — and only matters if the Marketplace-listing goal is being
+  pursued soon. Not sized here; deserves its own scoping session if/when
+  that goal moves up.
+
+**5. Cold-start submission timeout — needs one decision, then a small
+build.** Two real options, re-confirmed against the current code tonight:
+- **Keep the function warm** — a scheduled ping (Vercel Cron hitting a
+  tiny keep-alive route every few minutes) so a real submission rarely
+  hits a cold start at all. Lower risk: no change to validation behavior,
+  just infrastructure. **~20-30 min**, plus a small ongoing cron running
+  forever.
+- **Respond immediately, move the save into `after()`** — only safe for
+  submission kinds that never return `response_action: "errors"` (true for
+  `add_goal`, not `add_action`/`add_topic`), since Slack needs the
+  synchronous response to know whether to show a field error. More
+  surgical, but per-kind, and gives up server-side validation on the ones
+  it applies to. **~30-45 min**, plus the ongoing cost of one exception to
+  reason about later.
+**My read:** keep-warm is the safer default — it fixes the "error shown
+over work that actually saved" annoyance for every submission kind at
+once, with no validation tradeoff. Worth confirming with you before
+building either way.
 
 See item 2 below for the full multi-pair writeup — how pairing works, the
 label-problem risk, and everything else that went into today's build.
