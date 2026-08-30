@@ -188,6 +188,7 @@ export const SUGGESTIONS = {
       "Where do you think you stand right now? Let's compare notes.",
       "If your review were today, nothing in it should surprise you — does that hold?",
       "I want to flag something small before it becomes something big — can we talk about it?",
+      "How are you doing?",
     ],
     "Follow-ups": [
       "What did we agree last time, and where did it land?",
@@ -208,6 +209,7 @@ export const SUGGESTIONS = {
       "What's slowing you down that I could remove?",
       "Where are you waiting on someone else?",
       "What have you given up asking for?",
+      "Are there any roadblocks getting in your way that I can help with?",
     ],
     Workload: [
       "How is your workload actually feeling — not the tidy answer?",
@@ -263,6 +265,7 @@ export const SUGGESTIONS = {
       "What do you need from me that you're not getting?",
       "What decision are you waiting on me for?",
       "Where am I in your way?",
+      "Do you need anything from me that is not being given?",
     ],
   },
 };

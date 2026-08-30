@@ -6,6 +6,7 @@ import { useToast } from "@/components/ui/ToastProvider";
 import { listGoals, saveGoal, deleteGoal, addTopic, notify, getFormDraft, saveFormDraft, clearFormDraft } from "@/lib/data";
 import { fmtDate, ago, staleGoal } from "@/lib/format";
 import { goalStatusBadge } from "@/lib/badges";
+import { GOAL_SUGGESTIONS, SMART_GOAL_HELP, EMPLOYEE_GOAL_PROMPT } from "@/lib/goals-content";
 import Badge from "@/components/ui/Badge";
 import Modal from "@/components/ui/Modal";
 
@@ -80,7 +81,12 @@ export default function GoalsPage() {
       text: g.text || "",
       why: g.why || "",
       measure: g.measure || "",
-      owner: g.owner_label || employeeName,
+      // Goals only ever go manager-to-employee (Melissa: "they would never
+      // give their manager assigned goals") — owner is always the employee,
+      // regardless of who created or is editing the goal. Normalizes any
+      // pre-existing goal owned by "manager"/"Both of us" the next time it's
+      // edited.
+      owner: employeeName,
       target: g.target_date || "",
       status: g.status || "Not Started",
       progress: g.progress ?? 0,
@@ -193,6 +199,41 @@ export default function GoalsPage() {
         saveDisabled={!form.text.trim()}
         onDiscard={editing ? undefined : discardDraft}
       >
+        <div style={{ marginBottom: 14, fontSize: "0.9em", opacity: 0.85 }}>
+          <strong>SMART goals</strong>
+          <p style={{ margin: "4px 0" }}>{SMART_GOAL_HELP.intro}</p>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {SMART_GOAL_HELP.criteria.map(([label, desc]) => (
+              <li key={label}>
+                <strong>{label}:</strong> {desc}
+              </li>
+            ))}
+          </ul>
+        </div>
+        {!isMgr && (
+          <div style={{ marginBottom: 14, fontSize: "0.9em", opacity: 0.85 }}>{EMPLOYEE_GOAL_PROMPT}</div>
+        )}
+        <div className="field">
+          <label htmlFor="glSuggest">Pick a suggestion (optional)</label>
+          <select
+            id="glSuggest"
+            value=""
+            onChange={(e) => {
+              if (e.target.value) setForm({ ...form, text: e.target.value });
+            }}
+          >
+            <option value="">Browse suggested goals</option>
+            {Object.entries(GOAL_SUGGESTIONS).map(([cat, texts]) => (
+              <optgroup key={cat} label={cat}>
+                {texts.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </div>
         <div className="field">
           <label htmlFor="glText">The goal</label>
           <input id="glText" type="text" placeholder="e.g. Cut onboarding time for new customers to under 10 days" value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} />
@@ -205,19 +246,9 @@ export default function GoalsPage() {
           <label htmlFor="glMeasure">How we'll know it worked</label>
           <textarea id="glMeasure" placeholder="The success measure. Be concrete." value={form.measure} onChange={(e) => setForm({ ...form, measure: e.target.value })} />
         </div>
-        <div className="row">
-          <div className="field">
-            <label htmlFor="glOwner">Owner</label>
-            <select id="glOwner" value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })}>
-              <option>{employeeName}</option>
-              <option>{managerName}</option>
-              <option>Both of us</option>
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="glTarget">Target date</label>
-            <input id="glTarget" type="date" value={form.target} onChange={(e) => setForm({ ...form, target: e.target.value })} />
-          </div>
+        <div className="field">
+          <label htmlFor="glTarget">Target date</label>
+          <input id="glTarget" type="date" value={form.target} onChange={(e) => setForm({ ...form, target: e.target.value })} />
         </div>
         <div className="field">
           <label htmlFor="glStatus">Status</label>

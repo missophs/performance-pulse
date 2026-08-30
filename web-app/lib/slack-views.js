@@ -12,6 +12,7 @@
 
 import { isOpenTopic, ago } from "@/lib/format";
 import { TOPIC_CATEGORIES, SUGGESTIONS } from "@/lib/one-on-one-content";
+import { GOAL_SUGGESTIONS, SMART_GOAL_HELP, EMPLOYEE_GOAL_PROMPT } from "@/lib/goals-content";
 import { fieldBlockId } from "@/lib/slack-form-fields";
 
 const APP_URL = "https://performance-pulse-lyart.vercel.app";
@@ -339,7 +340,18 @@ export function listActionsModal(list) {
 
 export const GOAL_FIELDS = ["text", "why", "measure", "target", "status"];
 
-export function addGoalModal(draft, saved = false) {
+// Same relationship to GOAL_SUGGESTIONS as suggestionOptionGroups above has
+// to SUGGESTIONS — goals have no per-role library, just one shared list.
+function goalSuggestionOptionGroups() {
+  return Object.entries(GOAL_SUGGESTIONS).map(([cat, texts]) => ({
+    label: { type: "plain_text", text: cat.slice(0, 75) },
+    options: texts.map((t) => opt(t, t)),
+  }));
+}
+
+const SMART_GOAL_CONTEXT = [SMART_GOAL_HELP.intro, ...SMART_GOAL_HELP.criteria.map(([k, v]) => `*${k}:* ${v}`)].join("\n");
+
+export function addGoalModal(ctx, draft, saved = false) {
   // See lib/slack-form-fields.js: rebuilding this modal with a non-empty
   // draft only ever happens while patching an already-open view, so every
   // field renders under a "_v2" block_id then instead of its normal one.
@@ -350,6 +362,14 @@ export function addGoalModal(draft, saved = false) {
     "Add a goal",
     [
       ...draftControls("save_draft_goal", saved),
+      context(SMART_GOAL_CONTEXT),
+      // Verbatim match to the website's Add Goal modal (Melissa's
+      // instruction) — shown only to the employee, same as there.
+      ...(ctx?.role === "employee" ? [context(EMPLOYEE_GOAL_PROMPT)] : []),
+      section(
+        "*Pick a suggestion (optional)*",
+        { type: "static_select", action_id: "goal_suggested_pick", option_groups: goalSuggestionOptionGroups(), placeholder: { type: "plain_text", text: "Browse suggested goals" } }
+      ),
       inputBlock(id("text"), "Goal", plainInput("val", { initial: draft?.text })),
       inputBlock(id("why"), "Why it matters", plainInput("val", { multiline: true, initial: draft?.why }), true),
       inputBlock(id("measure"), "How you'll know it's met", plainInput("val", { initial: draft?.measure }), true),

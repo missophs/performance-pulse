@@ -116,7 +116,7 @@ const OPENERS = {
   open_add_topic: { title: "Add a topic", build: async (admin, ctx) => addTopicModal(ctx, normalizeDraft(TOPIC_FIELDS, await draftFor(admin, ctx, "topic"))) },
   open_add_action: { title: "Add an action", build: async (admin, ctx) => addActionModal(ctx) },
   open_wrap_up: { title: "Wrap up", build: async (admin, ctx) => wrapUpModal((await loadHomeData(admin, ctx.pairId)).topics) },
-  open_add_goal: { title: "Add a goal", build: async (admin, ctx) => addGoalModal(normalizeDraft(GOAL_FIELDS, await draftFor(admin, ctx, "goal"))) },
+  open_add_goal: { title: "Add a goal", build: async (admin, ctx) => addGoalModal(ctx, normalizeDraft(GOAL_FIELDS, await draftFor(admin, ctx, "goal"))) },
   open_add_devplan: {
     title: "Add a development plan",
     build: async (admin, ctx) => addDevPlanModal(normalizeDraft(DEVPLAN_FIELDS, await draftFor(admin, ctx, "dev"))),
@@ -180,7 +180,7 @@ const OPENERS = {
 // addXModal's own draft?.foo reads only ever look at the plain ones.
 const SAVE_DRAFT = {
   save_draft_topic: { kind: "topic", fields: withV2(TOPIC_FIELDS), build: (ctx, draft) => addTopicModal(ctx, normalizeDraft(TOPIC_FIELDS, draft), true) },
-  save_draft_goal: { kind: "goal", fields: withV2(GOAL_FIELDS), build: (ctx, draft) => addGoalModal(normalizeDraft(GOAL_FIELDS, draft), true) },
+  save_draft_goal: { kind: "goal", fields: withV2(GOAL_FIELDS), build: (ctx, draft) => addGoalModal(ctx, normalizeDraft(GOAL_FIELDS, draft), true) },
   save_draft_devplan: {
     kind: "dev",
     fields: withV2(DEVPLAN_FIELDS),
@@ -331,7 +331,10 @@ const SUBMISSIONS = {
         text,
         why: fieldValV2(v, "why"),
         measure: fieldValV2(v, "measure"),
-        owner: ctx.myName,
+        // Goals only ever go manager-to-employee — owner is always the
+        // employee, never whoever happens to submit (a manager adding a
+        // goal must not end up owning it themselves).
+        owner: ctx.role === "manager" ? ctx.partnerName : ctx.myName,
         target: fieldValV2(v, "target"),
         status: fieldValV2(v, "status"),
         progress: 0,
@@ -624,6 +627,23 @@ async function handleInteraction(admin, slackUserId, payload) {
       if (payload.view?.id) {
         await slackApi("views.update", { view_id: payload.view.id, view: addTopicModal(ctx, { text, why, category }) }).catch((e) =>
           console.error("suggestion prefill view update:", e)
+        );
+      }
+    } else if (action.action_id === "goal_suggested_pick") {
+      // Same section+accessory reasoning as "suggested_pick" above — an
+      // input-block select never dispatches block_actions on selection.
+      // Goals have no category concept, so this only ever fills "text";
+      // every other field's current value is carried forward via
+      // fieldValV2 so picking a suggestion doesn't wipe what's already typed.
+      const text = action.selected_option?.value || "";
+      const values = payload.view?.state?.values;
+      const why = fieldValV2(values, "why");
+      const measure = fieldValV2(values, "measure");
+      const target = fieldValV2(values, "target");
+      const status = fieldValV2(values, "status");
+      if (payload.view?.id) {
+        await slackApi("views.update", { view_id: payload.view.id, view: addGoalModal(ctx, { text, why, measure, target, status }) }).catch((e) =>
+          console.error("goal suggestion prefill view update:", e)
         );
       }
     }
