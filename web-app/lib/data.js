@@ -11,21 +11,24 @@ const NOTIFICATION_CAP = 80;
 
 // ---------------------------------------------------------------- pair -----
 
-// Returns `{ ambiguous: true }` if the account is on more than one pair (a
-// middle manager, or a manager with 2+ reports) — the app assumes one pair
-// per person throughout, so rather than guess which one this request meant,
-// callers should show a "not supported yet" notice. Check `pair?.ambiguous`
-// before reading pair fields. Mirrors resolveSlackUser's same guard.
-export async function getMyPair(supabase, userId) {
+// An account can be on any number of pairs (a middle manager, or a manager
+// with 2+ reports — see SLACK_TODO.md item 2). Ordered oldest-first so the
+// dashboard layout has a stable default ("first pair created") when there's
+// no cookie yet.
+export async function listMyPairs(supabase, userId) {
   const { data, error } = await supabase
     .from("pairs")
     .select("*")
     .or(`employee_id.eq.${userId},manager_id.eq.${userId}`)
-    .limit(2);
+    .order("created_at", { ascending: true });
   if (error) throw error;
-  if (!data?.length) return null;
-  if (data.length > 1) return { ambiguous: true };
-  return data[0];
+  return data;
+}
+
+export async function getPair(supabase, pairId) {
+  const { data, error } = await supabase.from("pairs").select("*").eq("id", pairId).maybeSingle();
+  if (error) throw error;
+  return data;
 }
 
 export async function createPair(supabase, myRole, partnerEmail) {

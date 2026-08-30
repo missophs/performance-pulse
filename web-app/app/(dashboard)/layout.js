@@ -1,9 +1,12 @@
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
-import { getMyPair, getProfile, listTopics, listGoals, listActions, listDevelopmentPlans } from "@/lib/data";
+import { listMyPairs, getProfile, listTopics, listGoals, listActions, listDevelopmentPlans } from "@/lib/data";
 import { isOpenTopic, isActiveGoal, isOpenAction, isActiveDev } from "@/lib/format";
 import { ToastProvider } from "@/components/ui/ToastProvider";
 import AppShell from "@/components/AppShell";
+
+const PAIR_COOKIE = "pp_pair_id";
 
 export default async function DashboardLayout({ children }) {
   const supabase = await createClient();
@@ -12,34 +15,34 @@ export default async function DashboardLayout({ children }) {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const pair = await getMyPair(supabase, user.id);
-  if (!pair) redirect("/onboarding");
-  if (pair.ambiguous) {
-    return (
-      <div className="auth-shell">
-        <div className="card auth-card">
-          <div className="auth-logo">
-            <div className="logo">PP</div>
-            <div>
-              <strong>Multiple pairs not supported yet</strong>
-            </div>
-          </div>
-          <p>
-            This account is on more than one Performance Pulse pair, and the app doesn&apos;t handle that yet.
-            Rather than guess which pair to show you here, we&apos;re showing nothing — you&apos;d have no way to
-            tell whose numbers you were looking at.
-          </p>
-        </div>
-      </div>
-    );
-  }
+  const pairs = await listMyPairs(supabase, user.id);
+  if (!pairs.length) redirect("/onboarding");
 
+  const cookieStore = await cookies();
+  const savedPairId = cookieStore.get(PAIR_COOKIE)?.value;
+  const pair = pairs.find((p) => p.id === savedPairId) || pairs[0];
   const role = pair.employee_id === user.id ? "employee" : "manager";
-  const partnerId = role === "employee" ? pair.manager_id : pair.employee_id;
 
-  const [myProfile, partnerProfile, topics, goals, actions, devPlans] = await Promise.all([
+  // One profile fetch per distinct partner across all of this account's
+  // pairs, so the switcher can label every option without N+1 queries.
+  const partnerIdOf = (p) => (p.employee_id === user.id ? p.manager_id : p.employee_id);
+  const uniquePartnerIds = [...new Set(pairs.map(partnerIdOf).filter(Boolean))];
+
+  const [myProfile, ...partnerProfiles] = await Promise.all([
     getProfile(supabase, user.id),
-    partnerId ? getProfile(supabase, partnerId) : null,
+    ...uniquePartnerIds.map((id) => getProfile(supabase, id)),
+  ]);
+  const partnerNameById = new Map(uniquePartnerIds.map((id, i) => [id, partnerProfiles[i]?.full_name || partnerProfiles[i]?.email || null]));
+
+  const pairOptions = pairs.map((p) => {
+    const r = p.employee_id === user.id ? "employee" : "manager";
+    return {
+      id: p.id,
+      partnerName: partnerNameById.get(partnerIdOf(p)) || (r === "employee" ? "Your manager" : "Your employee"),
+    };
+  });
+
+  const [topics, goals, actions, devPlans] = await Promise.all([
     listTopics(supabase, pair.id),
     listGoals(supabase, pair.id),
     listActions(supabase, pair.id),
@@ -55,9 +58,10 @@ export default async function DashboardLayout({ children }) {
 
   const ctx = {
     pairId: pair.id,
+    pairs: pairOptions,
     role,
     myName: myProfile?.full_name || myProfile?.email || "",
-    partnerName: partnerProfile?.full_name || partnerProfile?.email || (role === "employee" ? "Your manager" : "Your employee"),
+    partnerName: pairOptions.find((p) => p.id === pair.id)?.partnerName || (role === "employee" ? "Your manager" : "Your employee"),
     email: user.email,
   };
 

@@ -9,7 +9,7 @@ import { roleBadge } from "@/lib/badges";
 import { fmtDate, ago, today } from "@/lib/format";
 import { isVague } from "@/components/performance/vague";
 import {
-  getMyPair,
+  getPair,
   listAchievements,
   addAchievement,
   deleteAchievement,
@@ -68,9 +68,8 @@ export default function PerformancePage() {
 
   async function loadAll() {
     setLoading(true);
-    const { data: userData } = await supabase.auth.getUser();
     const [p, ach, fb, fbReq, cc, g, dp, ca, rd] = await Promise.all([
-      getMyPair(supabase, userData.user.id),
+      getPair(supabase, pairId),
       listAchievements(supabase, pairId),
       listFeedback(supabase, pairId),
       listFeedbackRequests(supabase, pairId),

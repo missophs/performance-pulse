@@ -23,9 +23,10 @@ create table profiles (
 alter table profiles enable row level security;
 
 -- ============================================================================
--- pairs — exactly one employee + one manager account. v1 is one pair per
--- account (enforced by the partial unique indexes below) — a user who needs
--- a second 1:1 relationship needs a second account for now.
+-- pairs — one employee + one manager per row. An account may appear in any
+-- number of rows (multi-pair support, SLACK_TODO.md item 2) — the only
+-- restriction is the same two people can't be paired to each other twice
+-- (pairs_employee_manager_key below).
 -- ============================================================================
 
 create table pairs (
@@ -43,10 +44,23 @@ create table pairs (
   created_at timestamptz not null default now()
 );
 
-create unique index pairs_employee_id_key on pairs (employee_id) where employee_id is not null;
-create unique index pairs_manager_id_key on pairs (manager_id) where manager_id is not null;
+create unique index pairs_employee_manager_key on pairs (employee_id, manager_id);
 
 alter table pairs enable row level security;
+
+-- Slack-side "current pair" selection for an account on 2+ pairs — Slack
+-- requests are stateless, so the Home tab switcher's choice is persisted
+-- here instead of a cookie. Only ever touched by the admin (service-role)
+-- client, but RLS is still ON with zero policies — off would leave it
+-- reachable over Supabase's public REST API by anyone with the project's
+-- public anon key. On with no policies means service-role-only.
+create table slack_pair_selections (
+  slack_user_id text primary key,
+  pair_id uuid not null references pairs (id) on delete cascade,
+  updated_at timestamptz not null default now()
+);
+
+alter table slack_pair_selections enable row level security;
 
 -- ============================================================================
 -- Pair-scoped record tables — mirror of the original localStorage shape.
@@ -419,15 +433,20 @@ begin
   order by id
   limit 1;
 
-  if my_role = 'employee' then
-    insert into pairs (employee_id, manager_id, employee_email, manager_email)
-    values (auth.uid(), partner_id, my_email, partner_email)
-    returning * into result;
-  else
-    insert into pairs (employee_id, manager_id, employee_email, manager_email)
-    values (partner_id, auth.uid(), partner_email, my_email)
-    returning * into result;
-  end if;
+  begin
+    if my_role = 'employee' then
+      insert into pairs (employee_id, manager_id, employee_email, manager_email)
+      values (auth.uid(), partner_id, my_email, partner_email)
+      returning * into result;
+    else
+      insert into pairs (employee_id, manager_id, employee_email, manager_email)
+      values (partner_id, auth.uid(), partner_email, my_email)
+      returning * into result;
+    end if;
+  exception
+    when unique_violation then
+      raise exception 'You''re already paired with this person.';
+  end;
 
   return result;
 end;

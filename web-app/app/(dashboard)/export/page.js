@@ -13,7 +13,7 @@ import {
   listCareerAnswers,
   listActions,
   listConcerns,
-  getMyPair,
+  getPair,
   getReviewDraft,
   updatePair,
   notify,
@@ -74,7 +74,7 @@ export default function ExportPage() {
   async function loadAll() {
     setLoading(true);
     const [p, t, ci, m, g, d, ach, fb, ca, a, cc, rd] = await Promise.all([
-      getMyPair(supabase, (await supabase.auth.getUser()).data.user.id),
+      getPair(supabase, pairId),
       listTopics(supabase, pairId),
       listCheckinsAll(supabase, pairId),
       listMeetings(supabase, pairId),

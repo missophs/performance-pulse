@@ -6,14 +6,22 @@
 // Either role can still write a fully custom goal — this is a picker, not a
 // restriction, same relationship as SUGGESTIONS (lib/one-on-one-content.js)
 // has to a topic's free-text field.
+// `label` is a short teaser for Slack's dropdown, which can't wrap or fit a
+// full sentence in its narrow menu box. `text` is the exact goal text that
+// gets inserted either way — the website shows `text` directly (no width
+// limit there), so the actual goal content stays verbatim on both surfaces.
 export const GOAL_SUGGESTIONS = {
-  "Skill growth": ["Pick one new skill or certification that helps you grow in your current career path."],
-  "Focus & quality": [
-    "Measure success by the quality of completed results, not the number of hours spent online.",
-    "Align your weekly tasks directly with the big-picture goals of the team.",
+  "Skill growth": [
+    { text: "Pick one new skill or certification that helps you grow in your current career path.", label: "Pick a new skill or certification" },
   ],
-  "Time management": ["Improve time management."],
-  Collaboration: ["Support a colleague in achieving their goals — it lifts personal motivation, productivity, and team resilience."],
+  "Focus & quality": [
+    { text: "Measure success by the quality of completed results, not the number of hours spent online.", label: "Measure quality, not hours worked" },
+    { text: "Align your weekly tasks directly with the big-picture goals of the team.", label: "Align weekly tasks with team goals" },
+  ],
+  "Time management": [{ text: "Improve time management.", label: "Improve time management." }],
+  Collaboration: [
+    { text: "Support a colleague in achieving their goals — it lifts personal motivation, productivity, and team resilience.", label: "Support a colleague's goals" },
+  ],
 };
 
 // Shown on every Add Goal modal, both surfaces, verbatim.

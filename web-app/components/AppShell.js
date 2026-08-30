@@ -7,6 +7,7 @@ import { PulseProvider, usePulse } from "@/components/PulseContext";
 import { createClient } from "@/lib/supabase/client";
 import { initials } from "@/lib/format";
 import { updateProfile } from "@/lib/data";
+import { setCurrentPair } from "@/lib/actions";
 import NotificationBell from "@/components/NotificationBell";
 import Modal from "@/components/ui/Modal";
 
@@ -32,19 +33,28 @@ export default function AppShell({ ctx, counts, children }) {
 }
 
 function ShellBody({ counts, children }) {
-  const { role, myName, isMgr, supabase } = usePulse();
+  const { pairId, pairs, role, myName, isMgr, supabase } = usePulse();
   const pathname = usePathname();
   const router = useRouter();
 
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(myName);
   const [savingName, setSavingName] = useState(false);
+  const [switching, setSwitching] = useState(false);
 
   async function signOut() {
     const supabase = createClient();
     await supabase.auth.signOut();
     router.push("/login");
     router.refresh();
+  }
+
+  async function switchPair(id) {
+    if (id === pairId) return;
+    setSwitching(true);
+    await setCurrentPair(id);
+    router.refresh();
+    setSwitching(false);
   }
 
   function openNameEdit() {
@@ -97,6 +107,24 @@ function ShellBody({ counts, children }) {
         <div className="topbar">
           <div className="process-flow">PREPARE &rarr; TALK &rarr; REFLECT &rarr; ACT &rarr; FOLLOW UP</div>
           <div className="role-switch">
+            {pairs?.length > 1 && (
+              <select
+                className="pair-switch"
+                value={pairId}
+                disabled={switching}
+                onChange={(e) => switchPair(e.target.value)}
+                title="Switch which 1:1 you're viewing"
+              >
+                {pairs.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.partnerName}
+                  </option>
+                ))}
+              </select>
+            )}
+            <Link href="/onboarding/add" className="btn ghost sm" title="Set up a 1:1 with someone else">
+              + Add pairing
+            </Link>
             <span className="badge b-purple" title="Your role in this 1:1">
               {isMgr ? "Manager" : "Employee"}
             </span>

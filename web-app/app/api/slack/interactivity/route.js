@@ -8,7 +8,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { after } from "next/server";
 import { verifySlackSignature } from "@/lib/slack-verify";
-import { resolveSlackUser } from "@/lib/slack-user";
+import { resolveSlackUser, setSlackPairSelection } from "@/lib/slack-user";
 import { slackApi } from "@/lib/slack-api";
 import { loadHomeData } from "@/lib/slack-home-data";
 import {
@@ -39,7 +39,6 @@ import {
   lastMeetingModal,
   loadingModal,
   noticeModal,
-  MULTIPLE_PAIRS_NOTICE,
 } from "@/lib/slack-views";
 import { withV2, normalizeDraft, makeFieldValV2 } from "@/lib/slack-form-fields";
 import {
@@ -633,10 +632,6 @@ async function openDeferred(opener, payload) {
     try {
       const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
       const ctx = payload.user?.id ? await resolveSlackUser(admin, payload.user.id) : null;
-      if (ctx?.ambiguous) {
-        await swap(noticeModal(opener.title, MULTIPLE_PAIRS_NOTICE));
-        return;
-      }
       if (!ctx) {
         await swap(noticeModal(opener.title, "We couldn't match your Slack account to a Performance Pulse profile. Open the app once to link it, then try again."));
         return;
@@ -653,17 +648,6 @@ async function openDeferred(opener, payload) {
 
 async function handleInteraction(admin, slackUserId, payload) {
   const ctx = slackUserId ? await resolveSlackUser(admin, slackUserId) : null;
-  if (ctx?.ambiguous) {
-    // Say so on whatever surface is already open. A silent ok here would mean
-    // buttons that do nothing at all, which is the confusing half of the bug
-    // this guard exists to remove.
-    const notice = noticeModal("Performance Pulse", MULTIPLE_PAIRS_NOTICE);
-    if (payload.type === "view_submission") return Response.json({ response_action: "update", view: notice });
-    if (payload.view?.id) {
-      await slackApi("views.update", { view_id: payload.view.id, view: notice }).catch((e) => console.error("multiple pairs notice:", e));
-    }
-    return Response.json({ ok: true });
-  }
   if (!ctx) return Response.json({ ok: true }); // not linked — nothing we can do
 
   if (payload.type === "block_actions") {
@@ -777,6 +761,17 @@ async function handleInteraction(admin, slackUserId, payload) {
         await slackApi("views.update", { view_id: payload.view.id, view: addGoalModal(ctx, { text, why, measure, target, status }) }).catch((e) =>
           console.error("goal suggestion prefill view update:", e)
         );
+      }
+    } else if (action.action_id === "switch_pair") {
+      const chosenId = action.selected_option?.value;
+      if (chosenId && chosenId !== ctx.pairId) {
+        try {
+          await setSlackPairSelection(admin, ctx.slackUserId, chosenId, ctx.pairs.map((p) => p.id));
+          const newCtx = await resolveSlackUser(admin, ctx.slackUserId);
+          if (newCtx) await refreshHome(admin, newCtx);
+        } catch (e) {
+          console.error("switch pair:", e);
+        }
       }
     }
     return Response.json({ ok: true });

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePulse } from "@/components/PulseContext";
 import { useToast } from "@/components/ui/ToastProvider";
-import { listTopics, listActions, listDevelopmentPlans, getMyPair } from "@/lib/data";
+import { listTopics, listActions, listDevelopmentPlans, getPair } from "@/lib/data";
 import { isOpenTopic, fmtDate, fmtTime } from "@/lib/format";
 import { BK_KINDS, buildBlockKit } from "@/lib/block-kit";
 
@@ -28,7 +28,7 @@ export default function SlackPage() {
   async function loadAll() {
     setLoading(true);
     const [p, t, a, d] = await Promise.all([
-      getMyPair(supabase, (await supabase.auth.getUser()).data.user.id),
+      getPair(supabase, pairId),
       listTopics(supabase, pairId),
       listActions(supabase, pairId),
       listDevelopmentPlans(supabase, pairId),

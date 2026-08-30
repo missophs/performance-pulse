@@ -223,11 +223,11 @@ export default function GoalsPage() {
             }}
           >
             <option value="">Browse suggested goals</option>
-            {Object.entries(GOAL_SUGGESTIONS).map(([cat, texts]) => (
+            {Object.entries(GOAL_SUGGESTIONS).map(([cat, items]) => (
               <optgroup key={cat} label={cat}>
-                {texts.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
+                {items.map((s) => (
+                  <option key={s.text} value={s.text}>
+                    {s.text}
                   </option>
                 ))}
               </optgroup>

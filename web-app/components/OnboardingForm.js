@@ -4,8 +4,12 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { createPair, updateProfile } from "@/lib/data";
+import { setCurrentPair } from "@/lib/actions";
 
-export default function OnboardingForm() {
+// `showName` is false for the "add another pairing" flow (/onboarding/add) —
+// the account already has a display name at that point, so only role +
+// partner email are needed.
+export default function OnboardingForm({ showName = true }) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [role, setRole] = useState("employee");
@@ -16,7 +20,7 @@ export default function OnboardingForm() {
   async function submit(e) {
     e.preventDefault();
     const trimmedName = name.trim();
-    if (!trimmedName) {
+    if (showName && !trimmedName) {
       setError("Enter your name.");
       return;
     }
@@ -27,8 +31,9 @@ export default function OnboardingForm() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      await updateProfile(supabase, user.id, { full_name: trimmedName });
-      await createPair(supabase, role, partnerEmail.trim());
+      if (showName) await updateProfile(supabase, user.id, { full_name: trimmedName });
+      const pair = await createPair(supabase, role, partnerEmail.trim());
+      await setCurrentPair(pair.id);
       router.push("/dashboard");
       router.refresh();
     } catch (err) {
@@ -39,16 +44,20 @@ export default function OnboardingForm() {
 
   return (
     <form onSubmit={submit} style={{ marginTop: 16 }}>
-      <label htmlFor="yourName">Your name</label>
-      <input
-        id="yourName"
-        type="text"
-        required
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        placeholder="What your 1:1 partner should see you as"
-        style={{ marginBottom: 16 }}
-      />
+      {showName && (
+        <>
+          <label htmlFor="yourName">Your name</label>
+          <input
+            id="yourName"
+            type="text"
+            required
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="What your 1:1 partner should see you as"
+            style={{ marginBottom: 16 }}
+          />
+        </>
+      )}
 
       <label>You are the</label>
       <div className="role-pick">

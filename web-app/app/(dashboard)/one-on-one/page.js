@@ -7,7 +7,7 @@ import { useToast } from "@/components/ui/ToastProvider";
 import Modal from "@/components/ui/Modal";
 import Badge from "@/components/ui/Badge";
 import {
-  getMyPair,
+  getPair,
   listTopics,
   addTopic,
   setTopicStatus,
@@ -83,9 +83,8 @@ export default function OneOnOnePage() {
 
   async function loadAll() {
     setLoading(true);
-    const userId = (await supabase.auth.getUser()).data.user.id;
     const [p, t, oc, cs, ac, draft, topicDraft] = await Promise.all([
-      getMyPair(supabase, userId),
+      getPair(supabase, pairId),
       listTopics(supabase, pairId),
       getOpenCheckin(supabase, pairId, role),
       listCustomSuggestions(supabase, pairId),

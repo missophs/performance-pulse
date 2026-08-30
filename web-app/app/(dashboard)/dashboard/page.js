@@ -29,7 +29,7 @@ import {
   markAllNotificationsRead,
   groupNotifications,
   updatePair,
-  getMyPair,
+  getPair,
 } from "@/lib/data";
 import { isOpenTopic, isActiveGoal, isOpenAction, isActiveDev, isOverdue, fmtDate, fmtTime, daysBetween, today, ago } from "@/lib/format";
 import Badge from "@/components/ui/Badge";
@@ -63,7 +63,7 @@ export default function DashboardPage() {
   async function loadAll() {
     setLoading(true);
     const [p, t, g, a, d, m, ci, ach, fb, cc, ca, msgs, docs, hb, notifs] = await Promise.all([
-      getMyPair(supabase, (await supabase.auth.getUser()).data.user.id),
+      getPair(supabase, pairId),
       listTopics(supabase, pairId),
       listGoals(supabase, pairId),
       listActions(supabase, pairId),

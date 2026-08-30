@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { usePulse } from "@/components/PulseContext";
-import { listNotifications, markAllNotificationsRead, groupNotifications, listActions, listGoals, listFeedbackRequests, getMyPair } from "@/lib/data";
+import { listNotifications, markAllNotificationsRead, groupNotifications, listActions, listGoals, listFeedbackRequests, getPair } from "@/lib/data";
 import { ago, today, daysBetween, staleGoal } from "@/lib/format";
 
 const TAB_HREF = {
@@ -29,7 +29,7 @@ export default function NotificationBell() {
       listActions(supabase, pairId),
       listGoals(supabase, pairId),
       listFeedbackRequests(supabase, pairId),
-      getMyPair(supabase, (await supabase.auth.getUser()).data.user.id),
+      getPair(supabase, pairId),
     ]);
 
     const mine = notifs.filter((n) => n.to_role === role || n.to_role === "both");

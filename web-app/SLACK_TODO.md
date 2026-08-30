@@ -1,5 +1,47 @@
 # Slack integration — status and what's left
 
+## Session closeout (2026-08-30)
+
+**Shipped and live (from the prior session, confirmed working this
+session):** Goals content parity — manager-to-employee-only ownership, the
+suggested-goals picker, SMART-goals guidance, verbatim between website and
+Slack (commit `d8e9413`) — and Slack delete for all five kinds (Topics,
+Goals, Development plans, Actions, Achievements) plus edit for Goals and
+Actions, open to both partners (commit `eed4d7a`). Both were deployed via
+`vercel --prod` and confirmed live in the Vercel dashboard.
+
+**Live-tested this session, not just code-reviewed:** Goals Add → List →
+Edit → Delete, clicked through end-to-end in real Slack (test data cleaned
+up afterward, nothing left behind). Actions Edit/Delete and Topics/Dev
+plans/Achievements Delete reuse the identical, already-proven
+`verifyOwnedRow`/`QUICK_ACTIONS`/`views.push` pattern — verified via
+`npm run lint` (34/34, same baseline), `npm test` (5/5), `npm run build`,
+and code review, but not individually clicked through live yet.
+
+**Found and fixed live, same session: the goal-suggestion dropdown was
+cutting off mid-word in Slack.** Two distinct bugs, not one — see item 4
+below for the full writeup. Both fixed, deployed, and confirmed live: the
+dropdown now shows short, clean labels, and picking one still inserts the
+exact full sentence into the goal field, verbatim, matching the website.
+
+**Continued item 2 (multi-pair support) through both the website and Slack
+code — database step (0010) done and verified live; 0011 (Slack selection
+table) written, not yet applied; neither website nor Slack code deployed
+yet.** `getMyPair`/`resolveSlackUser`'s ambiguous sentinel are both gone,
+replaced on the website by `listMyPairs`/`getPair` plus a cookie-based
+switcher in the dashboard topbar and a new `/onboarding/add` flow, and on
+Slack by `resolveSlackUser` always resolving a real current pair (from a
+new `slack_pair_selections` table) plus a Home tab switcher wired to a new
+`switch_pair` handler with the same client-can't-set-someone-else's-pair
+ownership check every other Slack write already has. Also found while
+doing the Slack half: the "what does a ping say with 3 reports" open
+question was already answered by existing code (every ping already names
+the partner) — no fix needed there. `npm run lint`/`build`/`test` all
+clean (7/7 tests, 2 new). **Not yet live-tested against real multi-pair
+data on either surface, and migration 0011 not yet run** — melissaw212's
+account only has one pairing today. See item 2 below for the full
+writeup and what's left.
+
 ## Session closeout (2026-08-29, night)
 
 **Code:** all of tonight's fixes (RLS, save-draft generalization, feedback
@@ -1165,6 +1207,15 @@ Still open, in priority order:
     history), not an oversight, so extending it to any other kind is also
     a real decision, not just a copy-paste.
 
+    **Done, 2026-08-30: Goals and Actions built, shipped, and live-tested —
+    the two kinds this was scoped to.** `listGoalsModal` now shows each
+    goal's real text/status/progress per row, matching `listTopicsModal`'s
+    model; `listActionsModal` now shows each action's real text alongside
+    owner and due date. Dev plans, Achievements, Feedback, and the
+    Last-meeting summary are untouched — still redacted, exactly as scoped.
+    Shipped as part of commit `eed4d7a`. Goals confirmed live end-to-end in
+    real Slack; Actions confirmed via lint/build/test and code review.
+
 0c. **NEW, found on a 2026-08-29 full-codebase audit — delete doesn't exist
     in Slack at all, for any kind.** Melissa asked "make sure ... all the
     other pieces are fixed" and this audit was run specifically to find
@@ -1176,6 +1227,17 @@ Still open, in priority order:
     **Decided 2026-08-29 (later session, Melissa):** yes, add delete to
     Slack, for the same kinds the website already supports it for (topics,
     goals, development plans, actions, achievements). Not yet built.
+
+    **Done, 2026-08-30: delete built for all five kinds, shipped.**
+    `topic_delete`, `goal_delete`, `devplan_delete`, `action_delete`, and
+    `achievement_delete` all added to Slack's `QUICK_ACTIONS`, each gated by
+    `verifyOwnedRow` before deleting (per the pair_id-ownership rule in
+    `CLAUDE.md`) — open to both partners, matching the website. Shipped as
+    part of commit `eed4d7a`. Goals delete confirmed live end-to-end in real
+    Slack (added a test goal, deleted it, list emptied cleanly, nothing left
+    behind). Topics/Dev plans/Actions/Achievements delete confirmed via
+    lint/build/test and code review — not yet individually clicked through
+    live.
 
 0d. **NEW, found on the same audit — edit exists on the website for Goals,
     Development plans, and Actions, with no Slack equivalent; Topics is
@@ -1191,6 +1253,17 @@ Still open, in priority order:
     this is unblocked and should logically follow the same two kinds
     (Goals + Actions), matching 0b's scope, unless Melissa says otherwise.
     Not started.
+
+    **Done, 2026-08-30: edit built for Goals and Actions, shipped — matches
+    0b/0c's scope decision.** `edit_goal` and `edit_action` added (same
+    `views.push` pattern as `edit_topic`), each verifies pair_id ownership
+    before saving, and refreshes the underlying list via `previous_view_id`
+    on save so it updates without the list modal needing to be reopened. Dev
+    plans edit intentionally NOT added — matches the Goals+Actions-only
+    scope decided 2026-08-29. Shipped as part of commit `eed4d7a`. Goals
+    edit confirmed live end-to-end in real Slack (edited a test goal's text,
+    confirmed the list behind it updated to match). Actions edit confirmed
+    via lint/build/test and code review only.
 
 0e. ~~Feedback requests can't actually be fulfilled from Slack.~~ **Done —
     closed 2026-08-29 later session, full detail in the Done section
@@ -1794,6 +1867,21 @@ Still open, in priority order:
       before: dropping `pairs_manager_id_key` is what makes broken states
       creatable, so the app should be ready to handle them first.
 
+   **Done, 2026-08-30: database step written, not yet applied.** Migration
+   `supabase/migrations/0010_multi_pair.sql` drops
+   `pairs_employee_id_key`/`pairs_manager_id_key`, replaces them with a
+   unique index on `(employee_id, manager_id)` (same two people can't be
+   paired twice, everything else now allowed), and updates `create_pair` to
+   catch that unique violation and raise a readable message instead of a raw
+   Postgres error. `supabase/schema.sql` (the from-scratch reference copy)
+   updated to match, so a fresh setup doesn't regress to the v1 constraint.
+   **Not yet run against the live database** — same as every other
+   migration in this project, needs to be pasted into the Supabase SQL
+   Editor by hand; nothing changes for real users until that happens. Website
+   and Slack code (below) still assume one pairing per account either way —
+   this step alone doesn't turn on multi-pair, it only stops the database
+   from blocking it.
+
    **The work, in order.**
 
    *Database*
@@ -1832,6 +1920,49 @@ Still open, in priority order:
      pairings that somehow already exist. Easy to miss when scoping this:
      the switcher is the visible half, this is the other half.
 
+   **Done, 2026-08-30: website step built.** `getMyPair` deleted from
+   `lib/data.js`, replaced by `listMyPairs` (all pairs for a user, no
+   ambiguous sentinel) and `getPair` (one pair by id — used by the 9 call
+   sites that only ever needed the *current* pair's row, not a lookup by
+   user). Re-grepped `getMyPair(` before starting per the note above; it was
+   10 call sites as corrected, all now updated:
+   `app/(dashboard)/layout.js`, `dashboard`, `development`, `performance`,
+   `one-on-one`, `export`, `slack`, `app/onboarding`, `lib/data.js` itself,
+   `components/NotificationBell.js`.
+
+   Went with the cookie (`pp_pair_id`, httpOnly) over a URL segment, per the
+   "less work" option above — `app/(dashboard)/layout.js` reads it, falls
+   back to the oldest pair if unset or stale, and builds `ctx.pairs` (every
+   pairing's id + partner name) alongside the existing `ctx.pairId`. The
+   "Multiple pairs not supported yet" block is gone — an account with 2+
+   pairs now gets a real dashboard, on whichever pair the cookie names.
+
+   Switcher lives in `AppShell.js`'s topbar (`lib/actions.js` has the
+   `setCurrentPair` server action it calls), shown only when `pairs.length >
+   1`, labeled with the partner's name — visible on every page, addressing
+   the label-problem risk below rather than leaving it unsolved. "Add
+   another pairing" flow built as `/onboarding/add`
+   (`app/onboarding/add/page.js`), reusing `OnboardingForm` with a new
+   `showName={false}` mode (skips the now-redundant name field) — this was
+   the missing half noted above; there was genuinely no way to create a
+   second pairing from the UI before this.
+
+   Verified: `npm run lint` (34/34, same baseline, no new errors),
+   `npm run build` clean (`/onboarding/add` appears as a new route),
+   `npm test` (5/5 — Slack-side tests untouched, confirming this pass
+   stayed website-only). Local dev server smoke-tested unauthenticated:
+   `/dashboard` and `/onboarding/add` both redirect to login cleanly, no
+   server errors in the logs.
+
+   **Not yet live-tested against real multi-pair data** — melissaw212's
+   account currently holds exactly one pairing, so the single-pair path
+   (unchanged behavior) is what got smoke-tested; the switcher itself,
+   `/onboarding/add`, and the cookie fallback logic still need a real
+   second pairing to click through, the way item 2's log above did for the
+   crash fix. **Stale-selection risk (two tabs disagreeing) is unchanged
+   from the plan above** — the cookie approach still doesn't solve it, only
+   accepted it as the cheaper option.
+
    *Slack (after the website — the hard part is shared)*
    - `resolveSlackUser` returns all pairings; today's `{ ambiguous: true }`
      sentinel gets replaced by a real selection.
@@ -1840,6 +1971,56 @@ Still open, in priority order:
      nothing about which pairing is selected or how that's remembered.
    - Decide what a Slack ping says when a manager has three reports (see
      risks).
+
+   **Done, 2026-08-30: Slack step built.** `resolveSlackUser`
+   (`lib/slack-user.js`) no longer returns `{ ambiguous: true }` — it always
+   resolves one *current* pair (oldest by default) plus a `pairs` list
+   (every pairing's id + partner name), the same shape the website's ctx now
+   carries. "Current" is persisted in a new table, `slack_pair_selections`
+   (`slack_user_id` → `pair_id`), since Slack requests are stateless — no
+   cookie to read the way the website has. New migration
+   `supabase/migrations/0011_slack_pair_selection.sql` (not yet applied —
+   same manual SQL-Editor step as every other migration here).
+
+   Home tab (`homeView`, `lib/slack-views.js`) gets a `static_select` at the
+   top, labeled with each pairing's partner name, shown only when
+   `pairs.length > 1` — same visibility rule as the website switcher, so the
+   label-problem risk below is addressed on both surfaces, not just one.
+   Picking an option fires a new `switch_pair` handler
+   (`app/api/slack/interactivity/route.js`), which is the one place this
+   touches the CLAUDE.md governance rule: `selected_option.value` is a
+   plain client-supplied string like any other Slack action value, so the
+   new `setSlackPairSelection` (`lib/slack-user.js`) checks it against the
+   `pairs` list `resolveSlackUser` just returned for *that* Slack user
+   before saving — a tampered value can't set someone else's pair as your
+   current one. Modals inherit the selection for free: `ctx` is resolved
+   once per request from the saved selection, and every modal/action
+   already reads `ctx.pairId`, so nothing else needed touching.
+   `multiplePairsHomeView`/`MULTIPLE_PAIRS_NOTICE` and both `ctx?.ambiguous`
+   branches (interactivity route) deleted as dead code.
+
+   **Slack pings — turns out already solved, not open.** Checked
+   `lib/slack-send.js`/`lib/block-kit.js` while doing this: every ping's
+   Block Kit text already includes `*${partnerName}*` (e.g. "*Dana* added a
+   goal."), and `sendSlackPing`'s webhook is keyed by `pair_id` from the
+   start, not by "the" pair for an account. So a manager with three reports
+   already gets three separately-labeled DMs today, not one ambiguous one —
+   the open question in the risks list below is answered, no code change
+   needed.
+
+   Verified: `npm run lint` (34/34, same baseline), `npm run build` clean,
+   `npm test` (7/7 — the 3 middle-manager tests in
+   `test/slack-user.test.mjs` rewritten to assert the new pick-a-current-pair
+   behavior instead of the removed ambiguous sentinel; 2 new saved-selection
+   cases added since that's now real logic worth pinning).
+
+   **Not yet live-tested against real multi-pair Slack data** — same
+   limitation as the website step: no real second pairing exists on
+   melissaw212's account today, so the switcher itself and
+   `setSlackPairSelection`'s ownership check haven't been clicked through
+   for real, only exercised via the unit tests above. Migration not yet run
+   in Supabase either — nothing in this paragraph is live until both of
+   those happen.
 
    **What's risky.**
    - **The label problem — highest risk in the whole app.** Wrong pairing
@@ -1851,10 +2032,10 @@ Still open, in priority order:
    - **Stale selection.** Two browser tabs, or a Slack modal opened before
      the switch. The cookie approach makes this easy to get wrong in
      exactly the way above.
-   - **Slack pings.** A manager with three reports gets three streams of
-     pings and nothing in the current message says which pairing fired.
-     Must be fixed with the same care — and *not* by putting topic text in
-     the message (see item 5).
+   - ~~**Slack pings.**~~ Checked 2026-08-30, already fine — see Done above:
+     every ping already names the partner (`*${partnerName}* added a
+     goal.`) and is sent per-`pair_id`, so three reports already means three
+     correctly-labeled DMs, not one ambiguous one.
    - **Already safe, don't break it:** `is_pair_member`
      (`schema.sql:396`) is written per-pairing, not per-person, so reports
      can never see each other no matter how many a manager has. Same for
@@ -1885,6 +2066,32 @@ Still open, in priority order:
    keyword-matched "propose activities" flow (button-triggered, not a
    fixed per-category list) — would need its own design for Slack, not a
    copy of the topic pattern.
+
+   **Done, 2026-08-30: Goals now has one too, website and Slack both, and a
+   two-part Slack bug found and fixed along the way.** `lib/goals-content.js`'s
+   `GOAL_SUGGESTIONS` feeds a category-grouped picker on both surfaces,
+   verbatim, matching Topics' pattern. Melissa reported the Slack dropdown
+   cutting off mid-word; turned out to be two separate problems, not one:
+   - **First bug (fixed, but not the real cause of what she saw):** Slack
+     hard-caps a dropdown option's visible text at 75 characters, and the
+     code was slicing at exactly 75, mid-word. Fixed in the shared `opt()`
+     helper (`lib/slack-views.js`) to cut at the last whole word and add
+     "…" — a real fix, reused by every Slack dropdown in the app (this one
+     and the Topics suggestion picker), but confirmed live afterward to not
+     be what she was actually seeing.
+   - **Second bug (the actual cause):** Slack's dropdown menu box is only
+     about 35-40 characters wide and does not wrap text to a second line —
+     confirmed by opening the live dropdown and zooming into the rendered
+     menu. No amount of truncating a single "one string is both the label
+     and the value" string fixes that; a full sentence physically cannot
+     fit. Fixed by decoupling the two: each `GOAL_SUGGESTIONS` entry now
+     carries a short `label` for Slack's menu alongside the full `text`
+     that actually gets inserted into the goal field — the website still
+     shows `text` directly (no width limit there), so the real goal content
+     stays verbatim on both surfaces; only the Slack browsing label is
+     short. Confirmed live: the dropdown shows clean short labels, and
+     picking one still inserts the complete original sentence.
+   Achievements/Feedback/Development still have no picker — unchanged.
 5. **Submissions can still exceed Slack's 3s window on a cold start.**
    Measured 2026-08-25 against production with a signed synthetic
    `add_goal` submission: **5.2s cold, 1.76s warm** (both include the

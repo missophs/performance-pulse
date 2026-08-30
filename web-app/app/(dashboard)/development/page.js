@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { usePulse } from "@/components/PulseContext";
 import { useToast } from "@/components/ui/ToastProvider";
-import { listDevelopmentPlans, saveDevelopmentPlan, deleteDevelopmentPlan, getMyPair, updatePair, notify, getFormDraft, saveFormDraft, clearFormDraft } from "@/lib/data";
+import { listDevelopmentPlans, saveDevelopmentPlan, deleteDevelopmentPlan, getPair, updatePair, notify, getFormDraft, saveFormDraft, clearFormDraft } from "@/lib/data";
 import { fmtDate, ago } from "@/lib/format";
 import { devStatusBadge } from "@/lib/badges";
 import { DEV_TYPES, DEV_STATES, DEV_IDEAS, ldMatch } from "@/lib/development-content";
@@ -46,10 +46,7 @@ function DevelopmentPageInner() {
 
   async function loadAll() {
     setLoading(true);
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    const [d, p] = await Promise.all([listDevelopmentPlans(supabase, pairId), getMyPair(supabase, user.id)]);
+    const [d, p] = await Promise.all([listDevelopmentPlans(supabase, pairId), getPair(supabase, pairId)]);
     setDevPlans(d);
     setAssistEnabled(!!p?.assist_enabled);
     setLoading(false);

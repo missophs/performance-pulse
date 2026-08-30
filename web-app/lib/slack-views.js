@@ -22,7 +22,16 @@ const ACH_CATS = ["Business results", "Customer impact", "Collaboration", "Leade
 const MGR_FB_TYPES = ["Recognition", "Coaching", "Performance feedback", "Expectations", "Development feedback"];
 const EMP_FB_TYPES = ["What's working", "What could improve", "Support I need", "What would help me succeed"];
 
-const opt = (label, value) => ({ text: { type: "plain_text", text: String(label).slice(0, 75) }, value: String(value ?? label).slice(0, 150) });
+// Slack hard-caps option text at 75 characters — cut at the last whole
+// word instead of slicing mid-word, since several goal/topic suggestions
+// are full sentences longer than that.
+function truncateOptionText(label) {
+  const text = String(label);
+  if (text.length <= 75) return text;
+  return text.slice(0, 74).replace(/\s+\S*$/, "") + "…";
+}
+
+const opt = (label, value) => ({ text: { type: "plain_text", text: truncateOptionText(label) }, value: String(value ?? label).slice(0, 150) });
 const staticSelect = (actionId, options, initial) => ({
   type: "static_select",
   action_id: actionId,
@@ -99,6 +108,19 @@ export function homeView(ctx, d) {
 
   const blocks = [
     { type: "header", text: { type: "plain_text", text: "Performance Pulse", emoji: true } },
+    ...(ctx.pairs.length > 1
+      ? [
+          actions([
+            {
+              type: "static_select",
+              action_id: "switch_pair",
+              placeholder: { type: "plain_text", text: "Switch pairing" },
+              options: ctx.pairs.map((p) => opt(p.partnerName, p.id)),
+              initial_option: opt(ctx.partnerName, ctx.pairId),
+            },
+          ]),
+        ]
+      : []),
     section(`Your 1:1 partner: *${ctx.partnerName}* · you're the ${ctx.role}.`, button("Edit your name", "open_edit_name")),
     context(`Next 1:1: ${next1on1}  ·  ${openTopics.length} open topic${openTopics.length === 1 ? "" : "s"}  ·  ${openActions.length} open action${openActions.length === 1 ? "" : "s"}`),
     { type: "divider" },
@@ -146,24 +168,6 @@ export function notLinkedHomeView() {
     ],
   };
 }
-
-// Shown when one email is on more than one pair (see resolveSlackUser). No
-// pair is named: we deliberately haven't picked one, and naming them would
-// tell each pair something about the other.
-export function multiplePairsHomeView() {
-  return {
-    type: "home",
-    blocks: [
-      { type: "header", text: { type: "plain_text", text: "Performance Pulse" } },
-      section(
-        "This email address is on more than one Performance Pulse pair, and the app doesn't handle that yet. Rather than guess which pair to show you here, we're showing nothing — you'd have no way to tell whose numbers you were looking at."
-      ),
-    ],
-  };
-}
-
-export const MULTIPLE_PAIRS_NOTICE =
-  "This email address is on more than one Performance Pulse pair, and the app doesn't handle that yet. We'd rather not guess which pair you meant.";
 
 // -------------------------------------------------------------- topics -----
 
@@ -361,9 +365,9 @@ export const GOAL_FIELDS = ["text", "why", "measure", "target", "status"];
 // Same relationship to GOAL_SUGGESTIONS as suggestionOptionGroups above has
 // to SUGGESTIONS — goals have no per-role library, just one shared list.
 function goalSuggestionOptionGroups() {
-  return Object.entries(GOAL_SUGGESTIONS).map(([cat, texts]) => ({
+  return Object.entries(GOAL_SUGGESTIONS).map(([cat, items]) => ({
     label: { type: "plain_text", text: cat.slice(0, 75) },
-    options: texts.map((t) => opt(t, t)),
+    options: items.map((s) => opt(s.label, s.text)),
   }));
 }
 

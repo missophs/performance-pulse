@@ -1,8 +1,10 @@
 // resolveSlackUser decides which pair — and therefore whose private 1:1 data —
-// a Slack request is allowed to see. These tests pin the "how many pairs did we
-// find" branch in particular: one pair is the normal case, two pairs is a real
-// org shape (a middle manager) that used to throw, and the two-pair answer must
-// never carry pair data a caller could mistake for "the" pair.
+// a Slack request is allowed to see. These tests pin the "how many pairs did
+// we find" branch in particular: one pair is the normal case; two pairs is a
+// real org shape (a middle manager) that used to throw, then used to refuse
+// with an ambiguous sentinel, and now must pick one *current* pair (from a
+// saved selection, or the oldest pair otherwise) while still listing every
+// pairing so a caller (the Home tab switcher) can show which one is current.
 import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 
@@ -20,14 +22,18 @@ mock.module("@/lib/slack-api", {
 
 const { resolveSlackUser } = await import("@/lib/slack-user");
 
-// Stands in for the Supabase query builder: the chained calls return the
-// builder, and awaiting the final .limit() resolves to whatever rows we plant.
-function fakeAdmin(rows) {
+// Stands in for the Supabase query builder used for both the `pairs` query
+// (terminates in .order()) and the `slack_pair_selections` lookup
+// (terminates in .maybeSingle()) — same builder shape works for both since
+// each chain only ever calls its own terminal method.
+function fakeAdmin(rows, selection) {
   const builder = {
     from: () => builder,
     select: () => builder,
     or: () => builder,
-    limit: () => Promise.resolve({ data: rows, error: null }),
+    eq: () => builder,
+    order: () => Promise.resolve({ data: rows, error: null }),
+    maybeSingle: () => Promise.resolve({ data: selection || null, error: null }),
   };
   return builder;
 }
@@ -58,11 +64,11 @@ test("no matching pair returns null", async () => {
 
 test("one matching pair returns the usual context", async () => {
   const ctx = await resolveSlackUser(fakeAdmin([pairAsEmployee]), "U123");
-  assert.equal(ctx.ambiguous, undefined);
   assert.equal(ctx.pairId, "pair-1");
   assert.equal(ctx.role, "employee");
   assert.equal(ctx.myName, "Middle Manager");
   assert.equal(ctx.partnerName, "Big Boss");
+  assert.deepEqual(ctx.pairs, [{ id: "pair-1", partnerName: "Big Boss" }]);
 });
 
 test("one matching pair, as the manager, still resolves", async () => {
@@ -72,12 +78,26 @@ test("one matching pair, as the manager, still resolves", async () => {
   assert.equal(ctx.partnerName, "Direct Report");
 });
 
-test("two matching pairs return ambiguous instead of throwing", async () => {
+test("two matching pairs, no saved selection, uses the first (oldest) and lists both", async () => {
   const ctx = await resolveSlackUser(fakeAdmin([pairAsEmployee, pairAsManager]), "U123");
-  assert.deepEqual(ctx, { ambiguous: true });
-  // The whole point of the sentinel: no pair data leaks out for a caller to
-  // read past the guard and treat as "the" pair.
-  assert.equal(ctx.pairId, undefined);
+  assert.equal(ctx.pairId, "pair-1");
+  assert.equal(ctx.role, "employee");
+  assert.deepEqual(ctx.pairs, [
+    { id: "pair-1", partnerName: "Big Boss" },
+    { id: "pair-2", partnerName: "Direct Report" },
+  ]);
+});
+
+test("two matching pairs, with a saved selection, uses the saved pair", async () => {
+  const ctx = await resolveSlackUser(fakeAdmin([pairAsEmployee, pairAsManager], { pair_id: "pair-2" }), "U123");
+  assert.equal(ctx.pairId, "pair-2");
+  assert.equal(ctx.role, "manager");
+  assert.equal(ctx.partnerName, "Direct Report");
+});
+
+test("two matching pairs, saved selection points at an unrelated pair, falls back to the oldest", async () => {
+  const ctx = await resolveSlackUser(fakeAdmin([pairAsEmployee, pairAsManager], { pair_id: "some-other-pair" }), "U123");
+  assert.equal(ctx.pairId, "pair-1");
 });
 
 test("no email on the Slack profile returns null", async () => {
