@@ -2,45 +2,92 @@
 
 ## Session closeout (2026-08-30)
 
-**Shipped and live (from the prior session, confirmed working this
-session):** Goals content parity — manager-to-employee-only ownership, the
-suggested-goals picker, SMART-goals guidance, verbatim between website and
-Slack (commit `d8e9413`) — and Slack delete for all five kinds (Topics,
-Goals, Development plans, Actions, Achievements) plus edit for Goals and
-Actions, open to both partners (commit `eed4d7a`). Both were deployed via
-`vercel --prod` and confirmed live in the Vercel dashboard.
+**Shipped, deployed, and confirmed live — commit `0a616a0`, deployed via
+`vercel --prod`, checked directly in real Slack and the real website after
+deploy (not just trusted from a terminal message):**
 
-**Live-tested this session, not just code-reviewed:** Goals Add → List →
-Edit → Delete, clicked through end-to-end in real Slack (test data cleaned
-up afterward, nothing left behind). Actions Edit/Delete and Topics/Dev
-plans/Achievements Delete reuse the identical, already-proven
-`verifyOwnedRow`/`QUICK_ACTIONS`/`views.push` pattern — verified via
-`npm run lint` (34/34, same baseline), `npm test` (5/5), `npm run build`,
-and code review, but not individually clicked through live yet.
+1. **Goals content parity, from earlier in the day** (commits `d8e9413`,
+   `eed4d7a`): manager-to-employee-only ownership, the suggested-goals
+   picker, SMART-goals guidance verbatim between website and Slack; Slack
+   delete for all five kinds (Topics, Goals, Development plans, Actions,
+   Achievements) plus edit for Goals and Actions, open to both partners.
+   Goals Add → List → Edit → Delete live-tested end to end in real Slack.
+   Actions Edit/Delete and Topics/Dev plans/Achievements Delete reuse the
+   identical, already-proven `verifyOwnedRow`/`QUICK_ACTIONS`/`views.push`
+   pattern — code-verified (lint/build/test/review), not yet individually
+   clicked through live.
 
-**Found and fixed live, same session: the goal-suggestion dropdown was
-cutting off mid-word in Slack.** Two distinct bugs, not one — see item 4
-below for the full writeup. Both fixed, deployed, and confirmed live: the
-dropdown now shows short, clean labels, and picking one still inserts the
-exact full sentence into the goal field, verbatim, matching the website.
+2. **Goal-suggestion dropdown fix.** Two distinct bugs, not one — Slack's
+   75-character hard limit on option text, and separately its ~35-40
+   character menu box that doesn't wrap. Fixed by decoupling the dropdown's
+   short display label from the full sentence it inserts (`{text, label}`
+   in `GOAL_SUGGESTIONS`) — Slack now shows a clean label, picking it still
+   inserts the exact full sentence, verbatim, matching the website.
 
-**Continued item 2 (multi-pair support) through both the website and Slack
-code — database step (0010) done and verified live; 0011 (Slack selection
-table) written, not yet applied; neither website nor Slack code deployed
-yet.** `getMyPair`/`resolveSlackUser`'s ambiguous sentinel are both gone,
-replaced on the website by `listMyPairs`/`getPair` plus a cookie-based
-switcher in the dashboard topbar and a new `/onboarding/add` flow, and on
-Slack by `resolveSlackUser` always resolving a real current pair (from a
-new `slack_pair_selections` table) plus a Home tab switcher wired to a new
-`switch_pair` handler with the same client-can't-set-someone-else's-pair
-ownership check every other Slack write already has. Also found while
-doing the Slack half: the "what does a ping say with 3 reports" open
-question was already answered by existing code (every ping already names
-the partner) — no fix needed there. `npm run lint`/`build`/`test` all
-clean (7/7 tests, 2 new). **Not yet live-tested against real multi-pair
-data on either surface, and migration 0011 not yet run** — melissaw212's
-account only has one pairing today. See item 2 below for the full
-writeup and what's left.
+3. **Multi-pair support (item 2) — both database migrations, the website
+   half, and the Slack half, all built and now live.**
+   - *Database:* `0010_multi_pair.sql` (drops the old one-pairing-per-account
+     indexes, replaces with one that only blocks pairing the same two
+     people twice) and `0011_slack_pair_selection.sql` (new
+     `slack_pair_selections` table for the Slack Home tab's "current pair"
+     memory). Both run by hand in the Supabase SQL Editor, both verified
+     directly against the live database afterward.
+   - *Website:* `getMyPair` replaced by `listMyPairs`/`getPair`; a
+     cookie-based pair switcher added to the dashboard topbar; a new
+     `/onboarding/add` flow for creating a second pairing (didn't exist
+     before). Confirmed live: dashboard loads clean, shows the new
+     **"+ Add pairing"** button.
+   - *Slack:* `resolveSlackUser`'s `{ ambiguous: true }` sentinel replaced
+     by always resolving one real current pair plus a `pairs` list; Home
+     tab gets the same switcher, wired to a new `switch_pair` handler with
+     an ownership check (a selected pair id is verified against that
+     Slack user's own `pairs` list before being saved — same rule as
+     every other Slack write per `CLAUDE.md`). Confirmed live: Home tab
+     reloads clean with real data, no crash, no leftover "not supported"
+     message.
+   - *Found along the way, already solved:* the open "what does a Slack
+     ping say when a manager has 3 reports" question — checked, every ping
+     already names the specific partner and is sent per-pairing, so this
+     was never actually ambiguous. Closed, no code change needed.
+   - *Caught before it shipped:* my first draft of `slack_pair_selections`
+     didn't enable Row Level Security — reasoned "only the service-role
+     client ever touches it" without noticing that leaves it reachable
+     over Supabase's public REST API to anyone holding the project's
+     public key. Supabase's own SQL Editor flagged it before she ran it.
+     Fixed: RLS is on, no policies (service-role only, same as intended).
+
+**Verified across all of the above:** `npm run lint` (34/34, same
+pre-existing baseline all session, zero new errors), `npm run build`
+clean, `npm test` (7/7, 2 new for the multi-pair selection logic).
+
+**Not yet live-tested: the multi-pair switcher itself, on either
+surface.** melissaw212's account only has one real pairing today, so
+everything multi-pair-specific (the switcher, `/onboarding/add`, the
+Slack `switch_pair` ownership check) has only been exercised through unit
+tests and single-pair smoke tests — never actually clicked through with a
+real second pairing.
+
+**What's left — pick up tomorrow, in order:**
+1. **Test the multi-pair switcher for real,** on both the website and
+   Slack. Needs a genuine second pairing (or a throwaway test account) —
+   same recipe item 2's earlier crash-fix testing used below. This is the
+   one piece of today's work that's shipped but unverified against real
+   data, and the label-problem risk (item 2's "what's risky" section)
+   means it's worth doing carefully, not skipping.
+2. **Slack-parity live-testing (lower priority, optional):** Actions
+   Edit/Delete, Topics Delete, Dev plans Delete, Achievements Delete — all
+   code-verified, not yet individually clicked through in real Slack.
+3. **Item 3 — magic-link email rate limit (2 emails/hour, project-wide).**
+   Still open, still explicitly deferred ("we will do Supabase later").
+   Worth doing before more multi-pair testing since it's already cost real
+   time twice during earlier item-2 testing.
+4. **Items 0f, 0g, 0h, 5 — untouched, not yet prioritized:** missing
+   add-form fields, six website-only features with no Slack presence,
+   infra hardening (rate limiting, OAuth flow, uninstall handling), and
+   the 3-second cold-start submission timeout.
+
+See item 2 below for the full multi-pair writeup — how pairing works, the
+label-problem risk, and everything else that went into today's build.
 
 ## Session closeout (2026-08-29, night)
 
