@@ -67,30 +67,53 @@ Slack `switch_pair` ownership check) has only been exercised through unit
 tests and single-pair smoke tests — never actually clicked through with a
 real second pairing.
 
+**Also built and committed later the same night, after the scoping pass
+below — verified, deliberately not deployed:**
+- **Slack API rate-limit backoff** (`lib/slack-api.js`, commit `b351a87`) —
+  a 429 now retries once (capped wait, can't blow the interactivity
+  endpoint's 3s budget) instead of failing hard. Closes one of item 0h's
+  two "worth doing" pieces.
+- **Handbook links, view-only, on the Slack Home tab** (`lib/slack-views.js`,
+  `app/api/slack/interactivity/route.js`, commit `b45f6e9`) — closes the
+  simplest of item 0g's six features.
+- Both held back from tonight's deploy on purpose, to avoid a second late-
+  night trip to Terminal for two small fixes — see "what's left" below.
+
+**Everything re-verified clean at the end of the night, nothing left
+uncommitted:** `npm run lint` (34/34, same baseline all session), `npm run
+build`, `npm test` (7/7), `git status` empty.
+
 **What's left — pick up tomorrow, in order:**
-1. **Test the multi-pair switcher for real,** on both the website and
+1. **Deploy tonight's two small fixes** (rate-limit backoff, handbook
+   links) — a plain `vercel --prod`, same as any other deploy. Nothing new
+   to decide, just needs the trip to Terminal that was deliberately
+   skipped tonight.
+2. **Test the multi-pair switcher for real,** on both the website and
    Slack. Needs a genuine second pairing (or a throwaway test account) —
    same recipe item 2's earlier crash-fix testing used below. This is the
    one piece of today's work that's shipped but unverified against real
    data, and the label-problem risk (item 2's "what's risky" section)
    means it's worth doing carefully, not skipping.
-2. **Slack-parity live-testing (lower priority, optional):** Actions
+3. **Slack-parity live-testing (lower priority, optional):** Actions
    Edit/Delete, Topics Delete, Dev plans Delete, Achievements Delete — all
    code-verified, not yet individually clicked through in real Slack.
-3. **Item 3 — magic-link email rate limit. Decided 2026-08-30 (Melissa):
-   add password sign-in as the everyday path, not just raise the limit or
-   improve the lockout message.** Reasoning: "I don't want anyone waiting
-   for an email to send." Magic link stays as a backup option, not
-   removed. Not started — see the new scoping write-up below (item 3a) for
-   the build plan and estimate.
-4. **Items 0g, 0h, 5 — scoped tonight (2026-08-30), not built.** Six
-   website-only features get Slack presence (0g), the two highest-value
-   pieces of infra hardening get picked up (0h), and the cold-start
-   submission timeout (item 5) gets a decision + a plan. See the new
-   scoping write-up below for the full breakdown and estimates. Item 0f
-   (missing Slack add-form fields) is untouched, not yet prioritized.
+4. **Item 3a — password sign-in.** Decided 2026-08-30 (Melissa): add
+   password sign-in as the everyday path instead of raising the magic-link
+   rate limit. Reasoning: "I don't want anyone waiting for an email to
+   send." Magic link stays as a backup option, not removed. Not started —
+   see the scoping write-up below for the build plan (~2-3 hrs).
+5. **Remaining items 0g/0h/5 — scoped, not built.** Five more features
+   still need Slack presence (career, concerns, documents, custom
+   suggestions, quick-notes), the uninstall-handling piece of 0h is still
+   open (low priority), and item 5's cold-start timeout needs one decision
+   before building (see the scoping write-up below — my read is keep-warm
+   is the safer default, but confirm before building). Item 0f (missing
+   Slack add-form fields) is untouched, not yet prioritized.
 
-## Scoped tonight (2026-08-30), not built — build plan for tomorrow
+## Scoped tonight (2026-08-30) — build plan for tomorrow
+(two of these — the rate-limit backoff and handbook links — got built the
+same night after scoping; see the "also built and committed" note above.
+Everything else below is still just a plan.)
 
 **3a. Password sign-in.** Supabase Auth already supports email+password
 natively — this is UI + flow work, not a new auth provider. Needed:
