@@ -125,8 +125,15 @@ so risk is low, it's mostly volume:
 - **Documents — view + add-link only, no raw upload** (per the decision).
   A list modal (name + open-in-app link) and an add modal (name + url) —
   `addDocumentLink`, not `uploadDocument`. **~30-40 min.**
-- **Handbook links — view only.** Simplest of the six: title + url, no
-  add/edit at all. **~15-20 min.**
+- ~~**Handbook links — view only.**~~ **Done, 2026-08-30 night — built,
+  verified, not yet deployed.** New "Handbook" section on the Home tab
+  (`open_list_handbook`) opens `listHandbookLinksModal` — one row per
+  link with an Open button (Slack's native url-button, no round trip
+  through the interactivity endpoint needed to follow it), plus a link
+  back to the app for adding/editing. `npm run lint` (34/34, same
+  baseline), `npm run build`, `npm test` (7/7) all clean; committed
+  (`b45f6e9`). Not deployed tonight, same reasoning as the rate-limit fix
+  above — bundled into tomorrow's batch.
 - **Custom suggestions — save/delete.** Scope isn't fully nailed down yet
   — need to look at how `custom_suggestions` is actually surfaced on the
   website (`listCustomSuggestions`/`addCustomSuggestion`/
