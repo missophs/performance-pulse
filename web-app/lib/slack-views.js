@@ -145,6 +145,8 @@ export function homeView(ctx, d) {
       button("Give feedback", "open_add_feedback"),
       button("Ask for feedback", "open_add_feedback_request"),
     ]),
+    section("*Handbook*"),
+    actions([button("View links", "open_list_handbook")]),
     { type: "divider" },
     context(":lock: Everything here is shared only between you and your 1:1 partner — never with HR."),
   ];
@@ -591,6 +593,21 @@ export function listFeedbackModal(feedback, requests, viewerRole) {
     actions([openInApp("Open feedback in the app for the full text")]),
   ];
   return modal("view_feedback", "Feedback", blocks, "Close");
+}
+
+// -------------------------------------------------------------- handbook ---
+
+// View-only, per the item 0g decision — no add/edit from Slack, just a way
+// to reach the links without opening the website first.
+export function listHandbookLinksModal(links) {
+  const blocks = links.length
+    ? links.flatMap((l) => [
+        section(`*${l.title}*`),
+        actions([{ type: "button", text: { type: "plain_text", text: "Open", emoji: true }, url: l.url, action_id: "open_handbook_link" }]),
+      ])
+    : [section("No handbook links yet. Add one from the Home tab.")];
+  blocks.push({ type: "divider" }, actions([openInApp("Add or edit links in the app")]));
+  return modal("view_handbook_links", "Handbook links", blocks, "Close");
 }
 
 export function lastMeetingModal(meetings) {

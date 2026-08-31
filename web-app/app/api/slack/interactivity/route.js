@@ -37,6 +37,7 @@ import {
   listFeedbackModal,
   wrapUpModal,
   lastMeetingModal,
+  listHandbookLinksModal,
   loadingModal,
   noticeModal,
 } from "@/lib/slack-views";
@@ -62,6 +63,7 @@ import {
   saveWrapUp,
   notify,
   listMeetings,
+  listHandbookLinks,
   updateProfile,
   getFormDraft,
   saveFormDraft,
@@ -168,6 +170,7 @@ const OPENERS = {
     },
   },
   open_last_meeting: { title: "Last 1:1", build: async (admin, ctx) => lastMeetingModal(await listMeetings(admin, ctx.pairId)) },
+  open_list_handbook: { title: "Handbook links", build: async (admin, ctx) => listHandbookLinksModal(await listHandbookLinks(admin, ctx.pairId)) },
 };
 
 // --------------------------------------------- save a draft mid-modal ------
