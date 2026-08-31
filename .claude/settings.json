@@ -1,0 +1,37 @@
+{
+  "description": "Shared team hooks: Impeccable design detector (Edit/Write + Stop) and graphify auto-update (Edit/Write). graphify's own hook is a no-op on machines without the graphify CLI installed.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ ! -f \"${CLAUDE_PROJECT_DIR}/.claude/skills/impeccable/scripts/hook.mjs\" ] || node \"${CLAUDE_PROJECT_DIR}/.claude/skills/impeccable/scripts/hook.mjs\"",
+            "timeout": 5,
+            "statusMessage": "Checking UI changes"
+          },
+          {
+            "type": "command",
+            "command": "command -v graphify >/dev/null 2>&1 && graphify update \"${CLAUDE_PROJECT_DIR}\" >/dev/null 2>&1 || true",
+            "timeout": 180,
+            "async": true,
+            "statusMessage": "Updating knowledge graph"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ ! -f \"${CLAUDE_PROJECT_DIR}/.claude/skills/impeccable/scripts/hook.mjs\" ] || node \"${CLAUDE_PROJECT_DIR}/.claude/skills/impeccable/scripts/hook.mjs\"",
+            "timeout": 30,
+            "statusMessage": "Design deep pass"
+          }
+        ]
+      }
+    ]
+  }
+}
