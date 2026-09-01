@@ -8,17 +8,69 @@ switcher, password sign-in, the two small deployed fixes, cold-start,
 uninstall logging — is built, live-tested, and running in production.
 That's not "still in progress," that's finished.
 
-**Two things remain, and they're not the same kind of thing:**
+**Update 2026-09-01 (morning): both remaining items are now closed.**
 
-1. **Get tonight's code into git (not a coding task, an iCloud problem on
-   this Mac).** Time: unpredictable, but small once it works — 5 minutes
-   of running three commands. The blocker is iCloud Drive not finishing a
-   download, not anything about the code. See "Tried tonight" below for
-   the full troubleshooting trail and the two remaining options.
-2. **Item 0f — a handful of missing fields on Slack's add-forms**
-   (discovered and scoped during tonight's closeout, not part of the
-   original ask). Optional, not urgent, nothing depends on it. **~1.5-2
-   hours total**, breakdown in the item 0f entry further down.
+1. ~~**Get tonight's code into git**~~ **Done, 2026-09-01.** iCloud
+   finished syncing overnight on its own. It left one artifact behind:
+   while stuck, iCloud's conflict handling had renamed `index.html` →
+   `index-3.html` and `web-app/CLAUDE.md` → `web-app/CLAUDE-3.md` (both
+   byte-identical to what was already committed — verified with `diff`
+   against `git show HEAD:`). Renamed back, then committed everything
+   from 2026-08-31 as `677fc00` and pushed. The "move the repo out of
+   `~/Documents`" option below is still worth doing deliberately at some
+   point — this will recur.
+2. ~~**Item 0f — missing fields on Slack's add-forms**~~ **Done,
+   2026-09-01 — built, code-verified, NOT yet deployed or live-tested.**
+   Two of the five pieces turned out not to be real gaps once checked
+   against the website code (not the old note):
+   - **Goals — nothing to build.** `measure` was already in Slack's
+     `addGoalModal`; and owner is deliberately always the employee on
+     *both* surfaces (`goals/page.js` line ~85 says so in a comment, and
+     `SUBMISSIONS.add_goal` already does the same) — the website never
+     lets either side pick. The old note's "lets either side pick" was
+     wrong.
+   - **Topics notes — not an add-form field on the website either.** It's
+     a separate "add a note after the conversation" modal opened from the
+     topic list (`openNoteModal`/`setTopicNotes`), so there's no add-form
+     parity gap. A "Note" button on Slack's topics list would be new
+     scope (~15 min), not parity — skipped, say so if wanted.
+   - **Dev plans — built.** `addDevPlanModal` now takes `ctx` (so the
+     support field's label can name the actual manager, same as the
+     website's "What {managerName} will do to support this") and gained
+     `why`, `support`, and `measure` ("How we'll know it worked"), all
+     optional, all wired through the `_v2` draft scheme (`DEVPLAN_FIELDS`
+     extended so Save-draft carries them). `SUBMISSIONS.add_devplan`
+     passes all three to `saveDevelopmentPlan`.
+   - **Actions — built.** `notes` (multiline, optional) added to both
+     `addActionModal` and `editActionModal`; `add_action` and
+     `edit_action` now save it (the edit handler used to preserve the
+     old notes untouched because there was no field — now it reads the
+     field).
+   - **Wrap-up — built.** `wrapUpModal` gained "Topics to revisit next
+     time", the Start/Stop/Continue trio (with the website's "the only
+     rating here" context line), "Next conversation" (date), and the
+     90-day check-in date. `wrap_up` handler: `meeting_time` is taken
+     from `ctx.pair.next_1on1_time` exactly like the website (it's not a
+     form field there either); a chosen "Next conversation" date updates
+     `pairs.next_1on1_date` via `updatePair`, matching the website; and
+     it now rejects a submission with neither "discussed" nor "agreed"
+     filled (field-level error on "discussed"), matching the website's
+     alert.
+
+   **Verified:** `node --check` clean on both changed files; `npm test`
+   7/7 unchanged after each piece; each changed modal render-tested with
+   a mock manager and mock employee ctx (no duplicate `block_id`s, `_v2`
+   draft path carries the new fields, support label names the manager
+   from both sides, edit-action pre-fills existing notes); **`npm run
+   lint` and `npm run build` both actually ran this morning** (sandbox
+   network was fine for once) — lint 34 errors, all the pre-existing
+   baseline, none in the two changed files; build clean.
+   **Not verified:** nothing live. Needs `vercel --prod` (Melissa, real
+   terminal) and then a click-through in real Slack of: Add a development
+   plan (all fields, and Save-draft → reopen), Add an action with notes,
+   Edit an action and change its notes, and Wrap up with every new field
+   filled — then check the `meetings` row and `pairs.next_1on1_date` in
+   Supabase.
 
 **Nothing else is open.** If it feels like this has been going longer than
 expected, that's tonight's actual list being larger than a normal

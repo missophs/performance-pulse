@@ -81,6 +81,7 @@ import {
   addCustomSuggestion,
   deleteCustomSuggestion,
   updateProfile,
+  updatePair,
   getFormDraft,
   saveFormDraft,
   clearFormDraft,
@@ -171,7 +172,7 @@ const OPENERS = {
   open_add_goal: { title: "Add a goal", build: async (admin, ctx) => addGoalModal(ctx, normalizeDraft(GOAL_FIELDS, await draftFor(admin, ctx, "goal"))) },
   open_add_devplan: {
     title: "Add a development plan",
-    build: async (admin, ctx) => addDevPlanModal(normalizeDraft(DEVPLAN_FIELDS, await draftFor(admin, ctx, "dev"))),
+    build: async (admin, ctx) => addDevPlanModal(ctx, normalizeDraft(DEVPLAN_FIELDS, await draftFor(admin, ctx, "dev"))),
   },
   open_add_achievement: {
     title: "Log an achievement",
@@ -250,7 +251,7 @@ const SAVE_DRAFT = {
   save_draft_devplan: {
     kind: "dev",
     fields: withV2(DEVPLAN_FIELDS),
-    build: (ctx, draft) => addDevPlanModal(normalizeDraft(DEVPLAN_FIELDS, draft), true),
+    build: (ctx, draft) => addDevPlanModal(ctx, normalizeDraft(DEVPLAN_FIELDS, draft), true),
   },
   save_draft_achievement: {
     kind: "achievement",
@@ -460,7 +461,7 @@ const SUBMISSIONS = {
   },
   add_action: async (admin, ctx, v) => {
     const text = fieldVal(v, "text");
-    await saveAction(admin, ctx.pairId, { text, owner: fieldVal(v, "owner"), due: fieldVal(v, "due"), status: "Open" }, ctx.myName);
+    await saveAction(admin, ctx.pairId, { text, owner: fieldVal(v, "owner"), due: fieldVal(v, "due"), notes: fieldVal(v, "notes"), status: "Open" }, ctx.myName);
     await notify(admin, ctx.pairId, `${ctx.myName} added an action: ${text}`, ctx.role, ctx.otherRole, "actions", "action");
   },
   add_goal: async (admin, ctx, v) => {
@@ -495,7 +496,16 @@ const SUBMISSIONS = {
     await saveDevelopmentPlan(
       admin,
       ctx.pairId,
-      { area, type: fieldValV2(v, "type"), activity: fieldValV2(v, "activity"), target: fieldValV2(v, "target"), status: "Not Started" },
+      {
+        area,
+        why: fieldValV2(v, "why"),
+        type: fieldValV2(v, "type"),
+        activity: fieldValV2(v, "activity"),
+        support: fieldValV2(v, "support"),
+        measure: fieldValV2(v, "measure"),
+        target: fieldValV2(v, "target"),
+        status: "Not Started",
+      },
       ctx.role,
       ctx.myName
     );
@@ -681,14 +691,14 @@ const SUBMISSIONS = {
     if (!id) return;
     const text = (fieldVal(v, "text") || "").trim();
     if (!text) return { error: { blockId: "text", message: "Action can't be empty." } };
-    // Fetch status/related/notes too — the edit modal has no fields for
-    // them, so they'd otherwise get silently wiped by saveAction's upsert.
-    const existing = await verifyOwnedRow(admin, "actions", "pair_id, status, related, notes", id, ctx);
+    // Fetch status/related too — the edit modal has no fields for them, so
+    // they'd otherwise get silently wiped by saveAction's upsert.
+    const existing = await verifyOwnedRow(admin, "actions", "pair_id, status, related", id, ctx);
     if (!existing) return;
     await saveAction(
       admin,
       ctx.pairId,
-      { id, text, owner: fieldVal(v, "owner"), due: fieldVal(v, "due"), status: existing.status, related: existing.related, notes: existing.notes },
+      { id, text, owner: fieldVal(v, "owner"), due: fieldVal(v, "due"), notes: fieldVal(v, "notes"), status: existing.status, related: existing.related },
       ctx.myName
     );
     if (view.previous_view_id) {
@@ -697,14 +707,30 @@ const SUBMISSIONS = {
     }
   },
   wrap_up: async (admin, ctx, v) => {
+    const discussed = (fieldVal(v, "discussed") || "").trim();
+    const agreed = (fieldVal(v, "agreed") || "").trim();
+    if (!discussed && !agreed) return { error: { blockId: "discussed", message: "Add at least what you discussed or what you agreed on." } };
     const discussedTopicIds = fieldVal(v, "discussed_topics") || [];
     await saveWrapUp(
       admin,
       ctx.pairId,
-      { date: fieldVal(v, "date"), discussed: fieldVal(v, "discussed"), agreed: fieldVal(v, "agreed") },
+      {
+        date: fieldVal(v, "date"),
+        // Same source as the website's wrap-up: the pair's scheduled 1:1 time, not a form field.
+        time: ctx.pair.next_1on1_time || null,
+        discussed,
+        agreed,
+        revisit: fieldVal(v, "revisit"),
+        start: fieldVal(v, "start"),
+        stop: fieldVal(v, "stop"),
+        keep: fieldVal(v, "keep"),
+        checkin90: fieldVal(v, "checkin90"),
+      },
       discussedTopicIds,
       ctx.myName
     );
+    const next = fieldVal(v, "next");
+    if (next) await updatePair(admin, ctx.pairId, { next_1on1_date: next });
     await notify(admin, ctx.pairId, `1:1 summary saved by ${ctx.myName}`, ctx.role, ctx.otherRole, "oneOnOne", "wrap");
   },
 };

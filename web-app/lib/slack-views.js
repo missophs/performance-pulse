@@ -390,6 +390,7 @@ export function addActionModal(ctx) {
     inputBlock("text", "Action", plainInput("val", { placeholder: "What needs to happen?" })),
     inputBlock("owner", "Owner", staticSelect("val", [ctx.myName, ctx.partnerName, "Both of us"], ctx.myName)),
     inputBlock("due", "Due date", { type: "datepicker", action_id: "val" }, true),
+    inputBlock("notes", "Notes", plainInput("val", { multiline: true, placeholder: "Anything that would help whoever picks this up." }), true),
   ]);
 }
 
@@ -403,6 +404,7 @@ export function editActionModal(ctx, action) {
       inputBlock("text", "Action", plainInput("val", { initial: action.text })),
       inputBlock("owner", "Owner", staticSelect("val", [ctx.myName, ctx.partnerName, "Both of us"], action.owner_label)),
       inputBlock("due", "Due date", datePicker("val", action.due_date), true),
+      inputBlock("notes", "Notes", plainInput("val", { multiline: true, initial: action.notes }), true),
     ],
     "Save changes",
     action.id
@@ -499,23 +501,27 @@ export function editGoalModal(goal) {
 
 // --------------------------------------------------------- development -----
 
-export const DEVPLAN_FIELDS = ["area", "type", "activity", "target"];
+export const DEVPLAN_FIELDS = ["area", "why", "type", "activity", "support", "measure", "target"];
 
-export function addDevPlanModal(draft, saved = false) {
+export function addDevPlanModal(ctx, draft, saved = false) {
   // See lib/slack-form-fields.js: rebuilding this modal with a non-empty
   // draft only ever happens while patching an already-open view, so every
   // field renders under a "_v2" block_id then instead of its normal one.
   const v2 = Boolean(draft);
   const id = (f) => fieldBlockId(f, v2);
+  const managerName = ctx.isMgr ? ctx.myName : ctx.partnerName;
   return modal(
     "add_devplan",
     "Add a development plan",
     [
       ...draftControls("save_draft_devplan", saved),
       inputBlock(id("area"), "Area", plainInput("val", { placeholder: "e.g. Executive presentation skills", initial: draft?.area })),
+      inputBlock(id("why"), "Why it matters", plainInput("val", { multiline: true, placeholder: "e.g. Increase effectiveness presenting to senior stakeholders", initial: draft?.why }), true),
       inputBlock(id("type"), "Type", staticSelect("val", DEV_TYPES, draft?.type || DEV_TYPES[0])),
-      inputBlock(id("activity"), "Activity", plainInput("val", { multiline: true, initial: draft?.activity }), true),
+      inputBlock(id("activity"), "Activity", plainInput("val", { multiline: true, placeholder: "e.g. Present the monthly business update", initial: draft?.activity }), true),
+      inputBlock(id("support"), `What ${managerName} will do to support this`, plainInput("val", { multiline: true, placeholder: "e.g. Review the first two decks and give feedback", initial: draft?.support }), true),
       inputBlock(id("target"), "Target date", datePicker("val", draft?.target), true),
+      inputBlock(id("measure"), "How we'll know it worked", plainInput("val", { multiline: true, placeholder: "e.g. Confidently leads the quarterly leadership presentation", initial: draft?.measure }), true),
     ],
     "Save"
   );
@@ -766,10 +772,17 @@ export function wrapUpModal(topics) {
   const checkboxOptions = open.map((t) => opt(t.text, t.id));
   return modal("wrap_up", "Wrap up your 1:1", [
     inputBlock("date", "Meeting date", { type: "datepicker", action_id: "val", initial_date: new Date().toISOString().slice(0, 10) }),
-    inputBlock("discussed", "What you discussed", plainInput("val", { multiline: true }), true),
-    inputBlock("agreed", "What you agreed", plainInput("val", { multiline: true }), true),
+    inputBlock("discussed", "What you discussed", plainInput("val", { multiline: true, placeholder: "The headline of what you talked about." }), true),
+    inputBlock("agreed", "What you agreed", plainInput("val", { multiline: true, placeholder: "Decisions, expectations, anything you both signed up for." }), true),
+    inputBlock("revisit", "Topics to revisit next time", plainInput("val", { multiline: true, placeholder: "Anything you ran out of time for." }), true),
     ...(checkboxOptions.length
       ? [inputBlock("discussed_topics", "Topics covered", { type: "checkboxes", action_id: "val", options: checkboxOptions }, true)]
       : []),
+    context("*Start · Stop · Continue* — the only rating here. No numbers, no scores."),
+    inputBlock("start", "Start", plainInput("val", { placeholder: "One thing to start doing" }), true),
+    inputBlock("stop", "Stop", plainInput("val", { placeholder: "One thing to stop doing" }), true),
+    inputBlock("keep", "Continue", plainInput("val", { placeholder: "One thing that works — keep doing it" }), true),
+    inputBlock("next", "Next conversation", datePicker("val"), true),
+    inputBlock("checkin90", "We will check in with you in 90 days — on", datePicker("val"), true),
   ]);
 }
