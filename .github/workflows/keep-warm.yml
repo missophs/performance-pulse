@@ -1,0 +1,22 @@
+name: Keep Slack interactivity endpoint warm
+
+# SLACK_TODO.md item 5: pings the Slack interactivity endpoint every 10
+# minutes so a real submission rarely hits a cold start. Uses GitHub
+# Actions instead of Vercel Cron because Vercel's Hobby plan only allows
+# cron jobs to run once a day — too infrequent to prevent cold starts.
+#
+# The ping has no valid Slack signature, so it always gets rejected with
+# 401 before touching the database (see verifySlackSignature in
+# app/api/slack/interactivity/route.js) — that's expected and harmless,
+# the point is only to keep the serverless function's runtime warm.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping interactivity endpoint
+        run: curl -s -o /dev/null -w "status: %{http_code}\n" -X POST https://performance-pulse-lyart.vercel.app/api/slack/interactivity

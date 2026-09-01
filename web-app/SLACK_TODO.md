@@ -1,5 +1,147 @@
 # Slack integration — status and what's left
 
+## What's actually left, total (as of 2026-08-31, night)
+
+**The original scoped work is done.** Everything that was on this list at
+the start of tonight — all six Slack-presence features, the multi-pair
+switcher, password sign-in, the two small deployed fixes, cold-start,
+uninstall logging — is built, live-tested, and running in production.
+That's not "still in progress," that's finished.
+
+**Two things remain, and they're not the same kind of thing:**
+
+1. **Get tonight's code into git (not a coding task, an iCloud problem on
+   this Mac).** Time: unpredictable, but small once it works — 5 minutes
+   of running three commands. The blocker is iCloud Drive not finishing a
+   download, not anything about the code. See "Tried tonight" below for
+   the full troubleshooting trail and the two remaining options.
+2. **Item 0f — a handful of missing fields on Slack's add-forms**
+   (discovered and scoped during tonight's closeout, not part of the
+   original ask). Optional, not urgent, nothing depends on it. **~1.5-2
+   hours total**, breakdown in the item 0f entry further down.
+
+**Nothing else is open.** If it feels like this has been going longer than
+expected, that's tonight's actual list being larger than a normal
+session (six new features plus two real bugs found and fixed along the
+way) — not scope creeping past what was asked.
+
+## Session closeout (2026-08-31, night)
+
+**Everything planned for tonight is built, verified, and deployed to
+production. Not yet committed to git** — see the note below, this is a
+real gap, not a formality. Full detail for each piece is in the
+2026-08-31 entries below — this is just the map.
+
+**Shipped and live-tested in real Slack tonight:**
+1. The two small fixes held back from last night (rate-limit backoff,
+   handbook links) — deployed and confirmed live.
+2. The multi-pair switcher, tested for real on both website and Slack —
+   found and fixed a genuine Slack Block Kit bug in the process (see item
+   2 below).
+3. Password sign-in, all four paths (signup, sign-out/back-in, wrong
+   password, forgot-password) — found and fixed a real signup bug along
+   the way (see item 4 below).
+4. All six Slack-presence features (career conversations, concerns
+   tracker, documents, quick-notes/"Hard conversation", and custom
+   suggestions) — built, deployed, and clicked through live in Slack, one
+   at a time, each verified against the real website behavior first.
+5. The Slack-parity live-testing pass (Actions Edit/Delete, Topics
+   Delete, Dev plans Delete, Achievements Delete) — all five clicked
+   through live, no bugs found, all throwaway test rows cleaned up after.
+6. Cold-start keep-warm (via GitHub Actions, not Vercel Cron — see item 5
+   below for why) and uninstall-event logging.
+
+**Deployed to production tonight (confirmed via a real `vercel --prod`
+run, "Ready in 23s") but NOT yet committed to git.** Items #4, #5, #6
+above only exist on this Mac's local disk and on Vercel's production
+servers right now, not in the GitHub repo.
+
+**Tried tonight, in order, to get the commit through:**
+1. `git commit` — failed: `fatal: could not open '.git/COMMIT_EDITMSG':
+   Operation timed out`. Reproduced identically in Claude Code's own
+   sandbox first (ruled out as just a sandbox issue).
+2. Retried `git commit` in a real Terminal on this Mac — same exact
+   error. Confirms it's a real issue on this machine, not the sandbox.
+3. Diagnosed the likely cause: this repo lives inside `~/Documents`,
+   which syncs via iCloud Drive. Checked System Settings → Apple ID →
+   iCloud → iCloud Drive → "Desktop & Documents Folders" — **confirmed
+   ON** (the switch is blue).
+4. Checked Finder: the `performance` folder itself showed a cloud-with-
+   down-arrow icon — confirmed **not fully downloaded** to this Mac,
+   still a cloud placeholder. This is the actual root cause: git tries to
+   open a `.git` file that iCloud hasn't finished bringing down locally,
+   and times out waiting.
+5. Right-clicked the folder → "Download Now" to force it to finish —
+   **stuck, not progressing.** Stopped here for the night rather than
+   keep troubleshooting iCloud itself.
+
+**Two ways to actually fix this, next time:**
+- **Simplest: just retry "Download Now" later.** iCloud sync issues are
+  often transient (network hiccup, iCloud servers momentarily backed up) —
+  a fresh attempt in the morning may just work. Then rerun the three
+  commands (`git add ...`, `git commit -m "..."`, `git push`) — Claude can
+  regenerate the exact command list.
+- **More permanent: move this repo out of the iCloud-synced folder.**
+  E.g. `~/Projects/performance` instead of `~/Documents/performance` —
+  git and other dev tools generally don't play well with iCloud's
+  on-demand-download files, so this prevents the problem recurring on any
+  future commit, not just tonight's. Bigger one-time change (needs
+  updating any saved terminal shortcuts/muscle memory for the path), so
+  worth doing deliberately, not as a rushed fix.
+
+Nothing is at risk in the meantime beyond the usual "uncommitted work
+only exists on one machine" risk — production itself is fine and already
+running tonight's code.
+
+**Verified before committing, so this shouldn't break tomorrow:**
+`node --check` clean on every changed file, `npm test` 7/7 passing
+(unchanged test count — nothing in tonight's work touches
+`resolveSlackUser`, which is all the suite covers), `git diff` reviewed
+file-by-file for stray debug code or unrelated changes (none found).
+**Still true, and still a real gap, not fixed tonight:** `npm run lint`
+and `npm run build` cannot run in this sandbox (a network-timeout issue
+in the environment itself, present every session this week, not caused
+by tonight's code) — Vercel's own remote build is what actually proves
+the code compiles, which is why nothing gets marked "done" here until
+it's deployed and clicked through live, not just committed.
+
+**What's actually left — one item, scoped and sized just now (checked
+against the live schema and both website and Slack code, not
+estimated from memory):**
+
+**Item 0f — Slack's add-forms are missing several fields the website
+version has.** Confirmed still real by comparing the actual field lists
+tonight, not trusting the old note:
+- **Goals** — Slack's `addGoalModal` has only "Goal" and "Why it
+  matters." Missing: **owner** (website defaults it to the employee but
+  lets either side pick — same `staticSelect` pattern already used for
+  Actions' owner field) and **measure** ("How you'll know it's met").
+  **~20-25 min.**
+- **Development plans** — Slack's `addDevPlanModal` has Area/Type/
+  Activity/Target. Missing: **measure** ("How we'll know it worked") and
+  **support** (what help is needed). **~15-20 min.**
+- **Actions** — Slack's `addActionModal` already has Action/Owner/Due
+  date (this part of the old note was stale — owner's already there).
+  Missing: **notes** (a free-text field the website's action rows carry
+  and display, `actions.notes` in the schema). **~10 min.**
+- **Topics** — `topics.notes` is a real column in the schema, separate
+  from "why," not exposed anywhere in Slack's add or edit topic modals.
+  **~10 min.**
+- **Wrap-up** — the biggest gap. Slack's `wrapUpModal` only has meeting
+  date, what you discussed, what you agreed, and topics covered. The
+  `meetings` table has six more real columns nothing in Slack touches:
+  `meeting_time`, `revisit`, `start_line`/`stop_line`/`keep_line` (a
+  keep/stop/start retro format), and `checkin90_date`. **~40-50 min** —
+  more fields, and the start/stop/keep shape needs a little more layout
+  thought than a flat field list.
+
+**Total: roughly 1.5-2 hours for all of item 0f**, done one piece at a
+time with a `node --check`/`npm test` pass after each, same rhythm as
+every other feature this week. No open decisions block starting it —
+unlike item 5 (cold-start) or item 3a (password sign-in) earlier this
+week, nothing here needs a call from you first.
+
+
 ## Session closeout (2026-08-30)
 
 **Shipped, deployed, and confirmed live — commit `0a616a0`, deployed via
@@ -83,32 +225,200 @@ below — verified, deliberately not deployed:**
 uncommitted:** `npm run lint` (34/34, same baseline all session), `npm run
 build`, `npm test` (7/7), `git status` empty.
 
-**What's left — pick up tomorrow, in order:**
-1. **Deploy tonight's two small fixes** (rate-limit backoff, handbook
-   links) — a plain `vercel --prod`, same as any other deploy. Nothing new
-   to decide, just needs the trip to Terminal that was deliberately
-   skipped tonight.
-2. **Test the multi-pair switcher for real,** on both the website and
-   Slack. Needs a genuine second pairing (or a throwaway test account) —
-   same recipe item 2's earlier crash-fix testing used below. This is the
-   one piece of today's work that's shipped but unverified against real
-   data, and the label-problem risk (item 2's "what's risky" section)
-   means it's worth doing carefully, not skipping.
-3. **Slack-parity live-testing (lower priority, optional):** Actions
-   Edit/Delete, Topics Delete, Dev plans Delete, Achievements Delete — all
-   code-verified, not yet individually clicked through in real Slack.
-4. **Item 3a — password sign-in.** Decided 2026-08-30 (Melissa): add
+**What's left — in order:**
+1. ~~**Deploy the two small fixes**~~ **Done, 2026-08-31 — deployed and
+   live-confirmed.** Rate-limit backoff and handbook links both verified
+   live in Slack (Home tab Handbook section renders, "View links" modal
+   opens correctly).
+2. ~~**Test the multi-pair switcher for real**~~ **Done, 2026-08-31 —
+   tested on both surfaces, found and fixed a real bug.** Website switcher
+   worked correctly first try (added a real second pairing via
+   `/onboarding/add`, switched both directions, data updated correctly
+   each time). Slack switcher was genuinely broken: clicking a new option
+   in the Home tab's `switch_pair` select silently reverted on reload —
+   root cause was the same Slack Block Kit staleness class documented
+   above for `addTopicModal` (a `static_select` needs its `block_id` to
+   change whenever the selection changes, or Slack's client can report a
+   stale `selected_option`). Fixed by keying the switcher's `block_id` to
+   `ctx.pairId` (`lib/slack-views.js`'s `actions()` helper gained an
+   optional `blockId` param). Verified both directions, twice each, via
+   fresh page reloads (not just client-side state) after deploy — a stray
+   second Slack tab open in the same browser caused one false "still
+   broken" reading during testing (its background `app_home_opened`
+   events raced with the test) — closing it and retesting confirmed the
+   fix is real. `npm test` 7/7 unchanged; lint/build couldn't run locally
+   (sandbox network timeout on both `eslint` and `next build` binaries,
+   unrelated to the change — Vercel's own build succeeded, which is what
+   actually matters). One throwaway test pairing
+   (`pp-switcher-test@example.com`) is left in the database under
+   melissahr212@gmail.com's account — harmless, never signs in, not
+   cleaned up.
+3. ~~**Slack-parity live-testing.**~~ **Done, 2026-08-31 — all five clicked
+   through live, no bugs found.** Topics Delete (deleted one of two test
+   topics, list and count both updated correctly); Actions Edit (added a
+   test action, edited its text, reopened Edit to confirm the new text
+   persisted — not just a client-side echo); Actions Delete; Dev plans
+   Delete; Achievements Delete (all three: added a throwaway row, deleted
+   it via the list modal's Delete button, confirmed both the list and the
+   Home tab count went back to zero/empty). Test rows created for this
+   were all deleted as part of the test, nothing left behind.
+4. ~~**Item 3a — password sign-in.**~~ **Done, 2026-08-31 — built, deployed,
+   all four test paths verified live.** Decided 2026-08-30 (Melissa): add
    password sign-in as the everyday path instead of raising the magic-link
-   rate limit. Reasoning: "I don't want anyone waiting for an email to
-   send." Magic link stays as a backup option, not removed. Not started —
-   see the scoping write-up below for the build plan (~2-3 hrs).
-5. **Remaining items 0g/0h/5 — scoped, not built.** Five more features
-   still need Slack presence (career, concerns, documents, custom
-   suggestions, quick-notes), the uninstall-handling piece of 0h is still
-   open (low priority), and item 5's cold-start timeout needs one decision
-   before building (see the scoping write-up below — my read is keep-warm
-   is the safer default, but confirm before building). Item 0f (missing
-   Slack add-form fields) is untouched, not yet prioritized.
+   rate limit ("I don't want anyone waiting for an email to send"). Magic
+   link kept, not removed — demoted to a "Having trouble? Use a link
+   instead" secondary option on `/login`.
+
+   `app/login/page.js` rewritten with four modes (signin/signup/forgot/
+   magiclink) sharing one card. `app/auth/callback/route.js` gained an
+   optional `?next=` param (validated to a same-site relative path only —
+   it's client-controlled via the URL, a trust boundary) so the reset-link
+   email can land on the new `app/auth/reset-password/page.js` instead of
+   always going to `/dashboard`.
+
+   **Real bug found and fixed during testing, not caught by code review:**
+   `supabase.auth.signUp()` didn't return a session immediately even
+   though the account could sign in with that same password right away —
+   Melissa's first live signup got a confusing "check your email" screen
+   she didn't actually need to act on (confirmed by her manually signing
+   in right after with no email click). Fixed: `signUp` now falls back to
+   an immediate `signInWithPassword` call with the same credentials when
+   no session comes back, only falling through to the "check your email"
+   state if that fallback sign-in itself fails. This means the actual
+   Supabase project setting (whether "Confirm email" is on) no longer
+   matters for the happy path — signup goes straight to the dashboard
+   either way.
+
+   **All four paths live-verified in production, not just code-reviewed:**
+   signup → instant dashboard (after the fallback fix); sign out → sign
+   back in with password → dashboard; wrong password → clean "Wrong email
+   or password." error, no crash; forgot-password → correctly triggers
+   Supabase's reset flow (hit Supabase's own email rate limit on the test
+   account from repeated test emails in one session — handled gracefully,
+   not a bug, and won't happen under normal one-reset-at-a-time use).
+   `npm test` 7/7 unchanged both times; lint/build still can't run locally
+   (same sandbox binary-timeout issue noted in item 2, unrelated to this
+   change) — Vercel's own build succeeded both deploys, which is the real
+   signal. One test account (`swm3016@gmail.com`, display name "Password
+   Test") is left in the database, paired with a placeholder manager email
+   (`pp-password-test-partner@example.com`) that never signs in — both
+   harmless, not cleaned up.
+5. **Item 0g — DONE. All six Slack-presence features built, deployed, and
+   live-tested in real Slack, 2026-08-31.** Career conversations, concerns
+   tracker, documents, and quick-notes ("Hard conversation") all built
+   matching their website counterparts' exact data flow (verified
+   against the real source functions, not assumed from the earlier scoping
+   note — one assumption in that note turned out wrong: quick-notes writes
+   to `topics` via `addTopic`, not `messages` via `addMessage`; caught
+   before building the wrong thing).
+   - **Quick-notes / "Hard conversation"** — new Home tab button opens a
+     4-field modal (Outcome/Facts/Their view/Ask), mirroring
+     `SuggestionsCard.js`'s tool exactly. Writes a `submitted:true` topic,
+     Slack-silent (no real DM), matching the website path precisely.
+   - **Concerns tracker** — manager-only, read-only, gated both by hiding
+     the Home tab button AND a server-side `ctx.isMgr` check in the opener
+     (belt-and-suspenders, since a hidden button is still just UI). Shows
+     all seven fields per entry.
+   - **Documents** — view (with native Slack url-buttons, same pattern as
+     Handbook links) + add-link only, no raw upload, matching the
+     decision. `loadHomeData` (`lib/slack-home-data.js`) gained a
+     `documents` key for this. No notification sent on add, on either
+     surface — matches the website's own document-add flow, which doesn't
+     notify either.
+   - **Career conversations** — full diff-save across all role-specific
+     prompts at once (update/insert/delete-when-blank), matching
+     `career/page.js`'s `handleSave` exactly, not a naive per-field save.
+     Answers are shown to both partners in the list modal (not redacted —
+     matches the website: "Your manager sees these").
+   - **Custom suggestions — built as its own "My suggestions" list-plus-add
+     pair, not merged into the existing "Browse suggested topics" picker.**
+     That picker (`suggested_pick` in `addTopicModal`) draws from the fixed
+     `SUGGESTIONS` library and is a Block Kit `static_select` restricted to
+     option-value pairs baked in at render time — merging in per-pair,
+     user-generated custom suggestions would mean rebuilding it as a
+     dynamic list and risking the same `static_select` staleness class
+     already hit twice this session (the pair switcher, the
+     suggestion/category "_v2" trick). A separate list modal
+     (`listMySuggestionsModal`) sidesteps all of that and matches every
+     other Slack feature's own established shape (list-modal-plus-button).
+     Role-scoped both ways — `mySuggestionCategories(role)` for the "File
+     it under" dropdown (the same `SUGGESTIONS[role]` keys the website's
+     own "File it under" select uses, not `TOPIC_CATEGORIES`) and a
+     server-side `row.role === ctx.role` check (not just `pair_id`) on
+     both quick actions, since a saved suggestion belongs to one side of
+     the pair, not the whole pair — matching the website's own
+     `mine.filter(s => s.role === role)` gate. "Add to agenda"
+     (`suggestion_add`) mirrors `addFromSuggestion`: creates a plain
+     unsubmitted topic, no ping until Submit, same as adding one by hand.
+     "Remove" (`suggestion_delete`) matches `removeCustomSuggestion`. The
+     add-modal itself sends no notification either, matching
+     `saveCustomSuggestion` exactly (a saved suggestion is a private
+     note-to-self). `loadHomeData` (`lib/slack-home-data.js`) gained a
+     `customSuggestions` key for this, same pattern as `documents`.
+     `npm test` 7/7 unchanged; `node --check` clean on all three changed
+     files. **Deployed and live-tested in real Slack:** "Write my own
+     suggestion" saved with the correct role-scoped category ("Where
+     things stand" for the manager role); "Add to agenda" created a real
+     topic (Topics count 1→2) without deleting the saved suggestion
+     (matches the website — a suggestion is reusable); "Remove" deleted it
+     and the list correctly returned to its empty state.
+   - Every feature above got `npm test` (7/7 unchanged) after each step;
+     lint/build still can't run locally (same sandbox binary-timeout issue
+     noted in item 2). Deployed via `vercel --prod`, then live-tested
+     directly in real Slack (not just code-read): hard-conversation modal
+     opened and saved (Topics count 0→1); career modal showed the correct
+     manager-side prompts with the employee's name substituted in, saved,
+     and "View career" read the saved answer back correctly; documents
+     modal opened and saved (Documents count 0→1); concerns opened
+     correctly showing the empty state (view-only, as built — no add-modal
+     in Slack by design). **Not verified: whether the Slack DM
+     notifications for hard-conversation (`kind: "oneOnOne"`) and career
+     (`kind: "career"`) actually land in the *other* partner's Slack — no
+     second Slack account was available to check this session. Worth a
+     quick check next time two accounts are both open.**
+   - **Item 5 (cold-start) and the uninstall-handling piece of 0h — both
+     closed, 2026-08-31, committed but not yet deployed.** Item 0f
+     (missing Slack add-form fields) is still untouched, not yet
+     prioritized — genuinely unscoped, left for later.
+     - **Cold-start keep-warm, built as a GitHub Actions cron, not Vercel
+       Cron.** The scoping note's plan was a scheduled ping via Vercel
+       Cron — checked (web search) before building and found Vercel's
+       Hobby plan caps cron jobs to once a day, which would make a
+       keep-warm ping useless (a submission can go cold at any point in
+       the other 23+ hours) with no way to confirm from here which plan
+       this project is on. `.github/workflows/keep-warm.yml` instead: a
+       GitHub Actions schedule (`*/10 * * * *`) POSTs to the real
+       `/api/slack/interactivity` endpoint every 10 minutes. The request
+       carries no valid Slack signature, so it's always rejected with 401
+       by `verifySlackSignature` before touching the database (see
+       `app/api/slack/interactivity/route.js`) — harmless, and it's the
+       right endpoint to ping since module load (not application logic)
+       is most of a cold start's cost, so even a request that gets
+       rejected immediately still pays for, and thus keeps warm, the same
+       cold-start path a real submission would hit. Caveat, not glossed
+       over: GitHub's own docs say scheduled workflow runs aren't
+       precisely timed and can be delayed during high platform load, and
+       a workflow with no other repo activity for 60 days gets
+       auto-disabled — neither breaks anything, just worth knowing if
+       cold starts come back after a long quiet stretch.
+     - **Uninstall handling, the "just log it" version scoped in 0h.**
+       `app/api/slack/events/route.js` gained a branch for
+       `app_uninstalled`/`tokens_revoked` events, logging a greppable
+       `[SLACK_APP_UNINSTALLED]` marker (same convention as
+       `lib/slack-api.js`'s `[SLACK_INTEGRATION_DOWN]`) — no token
+       revocation logic, since there's still no per-workspace token
+       stored to revoke at today's single-workspace scale, exactly as
+       scoped. **Won't actually fire yet**: Slack only sends these events
+       to a Request URL if "App Uninstalled" and "Tokens Revoked" are
+       checked under the app's Event Subscriptions → Subscribe to bot
+       events config at api.slack.com/apps — that's a dashboard toggle,
+       not something committable, and hasn't been confirmed on.
+     - `node --check` clean, `npm test` 7/7 unchanged. **Neither piece
+       deployed or live-tested yet** — the keep-warm cron needs nothing
+       from `vercel --prod` (it just needs to exist in the repo and start
+       firing on GitHub's own schedule), but the uninstall branch can't
+       be verified live without also toggling the two event checkboxes in
+       the Slack app config first.
 
 ## Scoped tonight (2026-08-30) — build plan for tomorrow
 (two of these — the rate-limit backoff and handbook links — got built the
@@ -182,20 +492,24 @@ here has changed since the 2026-08-29 audit:
   tonight** — bundled into tomorrow's `vercel --prod` with everything
   else, rather than a separate late-night trip to Terminal for one small
   fix.
-- **`app_uninstalled`/`tokens_revoked` handling** — `events/route.js`
-  still only branches on `app_home_opened`. At today's single-hardcoded-
-  workspace scale this is really just "log it," not "revoke a stored
-  token" (there's no per-workspace token stored to revoke yet). **~15-20
-  min, low value until the Marketplace-listing goal is actually picked
-  up** — worth doing only if you want it, not urgent.
+- ~~**`app_uninstalled`/`tokens_revoked` handling**~~ **Done, 2026-08-31 —
+  see item 5 in "What's left" above for the full writeup.** `events/route.js`
+  now logs a greppable marker on both event types instead of silently
+  ignoring them, "log it" not "revoke a stored token" exactly as scoped
+  here. Won't actually fire until the two event checkboxes are turned on
+  in the Slack app's own dashboard config, separate from anything
+  committable.
 - **Skip for now: the OAuth/multi-workspace install flow.** This is
   genuinely big — new schema fields, an `oauth.v2.access` call, a Slack
   app manifest — and only matters if the Marketplace-listing goal is being
   pursued soon. Not sized here; deserves its own scoping session if/when
   that goal moves up.
 
-**5. Cold-start submission timeout — needs one decision, then a small
-build.** Two real options, re-confirmed against the current code tonight:
+**5. Cold-start submission timeout.** ~~Needs one decision, then a small
+build.~~ **Done, 2026-08-31 — see item 5 in "What's left" above for the
+full writeup, including why this ended up on GitHub Actions instead of
+the Vercel Cron this section originally planned.** Two real options,
+re-confirmed against the current code tonight:
 - **Keep the function warm** — a scheduled ping (Vercel Cron hitting a
   tiny keep-alive route every few minutes) so a real submission rarely
   hits a cold start at all. Lower risk: no change to validation behavior,

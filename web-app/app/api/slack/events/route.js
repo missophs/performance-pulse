@@ -40,6 +40,14 @@ export async function POST(request) {
     } catch (err) {
       console.error("slack home publish failed:", err);
     }
+  } else if (event?.type === "app_uninstalled" || event?.type === "tokens_revoked") {
+    // SLACK_TODO.md item 0h: at today's single-hardcoded-workspace scale
+    // there's no per-workspace token stored to revoke, so this is just a
+    // greppable log signal (same [SLACK_INTEGRATION_DOWN]-style marker as
+    // lib/slack-api.js) instead of a silent no-op. Requires "App Uninstalled"
+    // and "Tokens Revoked" to be checked under Event Subscriptions ->
+    // Subscribe to bot events in the Slack app config — not on by default.
+    console.error(`[SLACK_APP_UNINSTALLED] event=${event.type} team=${body.team_id || "unknown"}`);
   }
 
   return Response.json({ ok: true });

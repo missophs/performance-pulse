@@ -16,6 +16,7 @@ import {
   editNameModal,
   addTopicModal,
   TOPIC_FIELDS,
+  addHardConvoModal,
   listTopicsModal,
   editTopicModal,
   addActionModal,
@@ -38,6 +39,13 @@ import {
   wrapUpModal,
   lastMeetingModal,
   listHandbookLinksModal,
+  listConcernsModal,
+  listDocumentsModal,
+  addDocumentModal,
+  listCareerModal,
+  addCareerModal,
+  listMySuggestionsModal,
+  addSuggestionModal,
   loadingModal,
   noticeModal,
 } from "@/lib/slack-views";
@@ -64,11 +72,20 @@ import {
   notify,
   listMeetings,
   listHandbookLinks,
+  listConcerns,
+  listDocuments,
+  addDocumentLink,
+  listCareerAnswers,
+  saveCareerAnswers,
+  listCustomSuggestions,
+  addCustomSuggestion,
+  deleteCustomSuggestion,
   updateProfile,
   getFormDraft,
   saveFormDraft,
   clearFormDraft,
 } from "@/lib/data";
+import { EMP_CAREER, MGR_CAREER } from "@/lib/career-content";
 
 // Slack's interactivity endpoint is one request/response — there's no
 // browser tab to hold state in like the website's topic-add batching. This
@@ -99,6 +116,14 @@ async function draftFor(admin, ctx, kind) {
   return row?.draft;
 }
 
+// Matches career/page.js's `prompts` derivation exactly — used both to build
+// the modal and to zip its q0/q1/... fields back up with real questions on
+// submit, so the two calls must stay in lockstep with the website's list.
+function careerPromptsFor(ctx) {
+  const employeeName = ctx.isMgr ? ctx.partnerName : ctx.myName;
+  return (ctx.isMgr ? MGR_CAREER : EMP_CAREER).map((q) => q.replace("{emp}", employeeName));
+}
+
 // Shared "does this Slack-supplied id belong to my pair" check — the exact
 // pattern CLAUDE.md's governance rule requires at every handler that reads
 // or writes a row using an id Slack handed back to us (action.value,
@@ -123,6 +148,25 @@ const OPENERS = {
   open_edit_name: { title: "Your name", build: async (admin, ctx) => editNameModal(ctx) },
   open_add_topic: { title: "Add a topic", build: async (admin, ctx) => addTopicModal(ctx, normalizeDraft(TOPIC_FIELDS, await draftFor(admin, ctx, "topic"))) },
   open_add_action: { title: "Add an action", build: async (admin, ctx) => addActionModal(ctx) },
+  open_add_hardconvo: { title: "Hard conversation", build: async () => addHardConvoModal() },
+  open_list_documents: { title: "Documents", build: async (admin, ctx) => listDocumentsModal(await listDocuments(admin, ctx.pairId)) },
+  open_add_document: { title: "Add a document link", build: async () => addDocumentModal() },
+  open_list_career: {
+    title: "Career",
+    build: async (admin, ctx) => {
+      const employeeName = ctx.isMgr ? ctx.partnerName : ctx.myName;
+      return listCareerModal(await listCareerAnswers(admin, ctx.pairId), employeeName);
+    },
+  },
+  open_add_career: {
+    title: "Career conversation",
+    build: async (admin, ctx) => {
+      const prompts = careerPromptsFor(ctx);
+      const existing = (await listCareerAnswers(admin, ctx.pairId)).filter((a) => a.role === ctx.role);
+      const answers = Object.fromEntries(existing.map((a) => [a.question, a.answer]));
+      return addCareerModal(prompts, answers);
+    },
+  },
   open_wrap_up: { title: "Wrap up", build: async (admin, ctx) => wrapUpModal((await loadHomeData(admin, ctx.pairId)).topics) },
   open_add_goal: { title: "Add a goal", build: async (admin, ctx) => addGoalModal(ctx, normalizeDraft(GOAL_FIELDS, await draftFor(admin, ctx, "goal"))) },
   open_add_devplan: {
@@ -171,6 +215,19 @@ const OPENERS = {
   },
   open_last_meeting: { title: "Last 1:1", build: async (admin, ctx) => lastMeetingModal(await listMeetings(admin, ctx.pairId)) },
   open_list_handbook: { title: "Handbook links", build: async (admin, ctx) => listHandbookLinksModal(await listHandbookLinks(admin, ctx.pairId)) },
+  // ctx.isMgr is derived from the verified Slack identity, not client input —
+  // checked here too (not just the Home tab button being hidden) in case a
+  // stale/replayed action reaches this handler for an account that's since
+  // become the employee side of a different pair.
+  open_list_concerns: {
+    title: "Concerns",
+    build: async (admin, ctx) => (ctx.isMgr ? listConcernsModal(await listConcerns(admin, ctx.pairId)) : noticeModal("Concerns", "This is manager-only.")),
+  },
+  open_list_suggestions: {
+    title: "My suggestions",
+    build: async (admin, ctx) => listMySuggestionsModal(await listCustomSuggestions(admin, ctx.pairId), ctx.role),
+  },
+  open_add_suggestion: { title: "Write my own suggestion", build: async (admin, ctx) => addSuggestionModal(ctx.role) },
 };
 
 // --------------------------------------------- save a draft mid-modal ------
@@ -312,6 +369,26 @@ const QUICK_ACTIONS = {
     },
     refreshList: (data) => listAchievementsModal(data.achievements),
   },
+  // Mirrors addFromSuggestion (page.js): creates a plain unsubmitted topic,
+  // no ping until Submit — same as adding one by hand. role, not just
+  // pair_id, is checked (extraCheck) since a saved suggestion is scoped to
+  // one side of the pair, same as the website's mine.filter(role) gate.
+  suggestion_add: {
+    run: async (admin, ctx, id) => {
+      const s = await verifyOwnedRow(admin, "custom_suggestions", "pair_id, role, text, category", id, ctx, (row) => row.role === ctx.role);
+      if (!s) return;
+      await addTopic(admin, ctx.pairId, { text: s.text, why: "", category: s.category, role: ctx.role, name: ctx.myName });
+    },
+    refreshList: (data, ctx) => listMySuggestionsModal(data.customSuggestions, ctx.role),
+  },
+  suggestion_delete: {
+    run: async (admin, ctx, id) => {
+      const s = await verifyOwnedRow(admin, "custom_suggestions", "pair_id, role", id, ctx, (row) => row.role === ctx.role);
+      if (!s) return;
+      await deleteCustomSuggestion(admin, id);
+    },
+    refreshList: (data, ctx) => listMySuggestionsModal(data.customSuggestions, ctx.role),
+  },
   // The explicit "close without answering" action (see listFeedbackModal) —
   // real, distinct product behavior from "Answer" (feedback_request_answer
   // below), matching the website's own Dismiss/Withdraw buttons
@@ -424,6 +501,53 @@ const SUBMISSIONS = {
     );
     await clearFormDraft(admin, ctx.pairId, ctx.role, "dev").catch(() => {});
     delayedNotify(admin, ctx.pairId, `${ctx.myName} added a development plan: ${area}`, ctx.role, ctx.otherRole, "development", "dev");
+  },
+  // Mirrors addFromHardConvo (app/(dashboard)/one-on-one/page.js) exactly:
+  // writes a submitted:true topic (Slack-silent — notify()'s kind is left
+  // undefined so it never earns a real DM, same as the website path) rather
+  // than a fresh "Add a topic" that would show a Submit button.
+  add_hardconvo: async (admin, ctx, v) => {
+    const outcome = fieldValV2(v, "outcome");
+    const facts = fieldValV2(v, "facts");
+    const theirView = fieldValV2(v, "theirView");
+    const ask = fieldValV2(v, "ask");
+    const body = [
+      outcome && `Outcome I want: ${outcome}`,
+      facts && `The facts: ${facts}`,
+      theirView && `How they might see it: ${theirView}`,
+      ask && `What I'm asking for: ${ask}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    await addTopic(admin, ctx.pairId, { text: outcome, why: body, category: "Other", role: ctx.role, name: ctx.myName, submitted: true });
+    await notify(admin, ctx.pairId, `${ctx.myName} added a topic to the agenda`, ctx.role, ctx.otherRole, "oneOnOne");
+  },
+  // No notification here at all, on either surface — the website's own
+  // document-add flow (app/(dashboard)/dashboard/page.js) doesn't send one
+  // either, so this matches it exactly rather than adding behavior the
+  // source feature doesn't have.
+  // Matches career/page.js's handleSave: a full diff-save across every
+  // prompt at once (saveCareerAnswers deletes now-blank answers, updates
+  // changed ones, inserts new ones) — not a single-field submit.
+  add_career: async (admin, ctx, v) => {
+    const prompts = careerPromptsFor(ctx);
+    const existing = await listCareerAnswers(admin, ctx.pairId);
+    const promptList = prompts.map((question, i) => ({ question, answer: fieldValV2(v, `q${i}`) || "" }));
+    await saveCareerAnswers(admin, ctx.pairId, ctx.role, ctx.myName, promptList, existing);
+    await notify(admin, ctx.pairId, `${ctx.myName} updated their career conversation`, ctx.role, ctx.otherRole, "career");
+  },
+  add_document: async (admin, ctx, v) => {
+    const name = fieldValV2(v, "name");
+    const url = fieldValV2(v, "url");
+    await addDocumentLink(admin, ctx.pairId, name, url, ctx.myName);
+  },
+  // Matches saveCustomSuggestion (page.js): no notify() call at all, same as
+  // the website — a saved suggestion is a private note-to-self, not
+  // something the partner is told about.
+  add_suggestion: async (admin, ctx, v) => {
+    const text = fieldValV2(v, "text");
+    const category = fieldValV2(v, "category");
+    await addCustomSuggestion(admin, ctx.pairId, ctx.role, text, category);
   },
   add_achievement: async (admin, ctx, v) => {
     // fieldValV2 — see add_goal above.

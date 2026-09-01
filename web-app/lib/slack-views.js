@@ -54,7 +54,7 @@ const inputBlock = (blockId, label, element, optional = false) => ({
 });
 const section = (md, accessory) => ({ type: "section", text: { type: "mrkdwn", text: md }, ...(accessory ? { accessory } : {}) });
 const context = (md) => ({ type: "context", elements: [{ type: "mrkdwn", text: md }] });
-const actions = (elements) => ({ type: "actions", elements });
+const actions = (elements, blockId) => ({ type: "actions", elements, ...(blockId ? { block_id: blockId } : {}) });
 const button = (text, actionId, value, style) => ({
   type: "button",
   text: { type: "plain_text", text, emoji: true },
@@ -110,15 +110,23 @@ export function homeView(ctx, d) {
     { type: "header", text: { type: "plain_text", text: "Performance Pulse", emoji: true } },
     ...(ctx.pairs.length > 1
       ? [
-          actions([
-            {
-              type: "static_select",
-              action_id: "switch_pair",
-              placeholder: { type: "plain_text", text: "Switch pairing" },
-              options: ctx.pairs.map((p) => opt(p.partnerName, p.id)),
-              initial_option: opt(ctx.partnerName, ctx.pairId),
-            },
-          ]),
+          actions(
+            [
+              {
+                type: "static_select",
+                action_id: "switch_pair",
+                placeholder: { type: "plain_text", text: "Switch pairing" },
+                options: ctx.pairs.map((p) => opt(p.partnerName, p.id)),
+                initial_option: opt(ctx.partnerName, ctx.pairId),
+              },
+            ],
+            // Slack's static_select can report a stale selected_option after
+            // a views.publish that reuses the same block_id (same platform
+            // quirk as addTopicModal's category/text "_v2" fields above) —
+            // keying the block_id to the current pair forces Slack to treat
+            // it as a fresh element on every switch instead of a cached one.
+            `pair_switch_${ctx.pairId}`
+          ),
         ]
       : []),
     section(`Your 1:1 partner: *${ctx.partnerName}* · you're the ${ctx.role}.`, button("Edit your name", "open_edit_name")),
@@ -131,7 +139,10 @@ export function homeView(ctx, d) {
       button("Add an action", "open_add_action"),
       button(`Actions (${openActions.length})`, "open_list_actions"),
       button("Wrap up a 1:1", "open_wrap_up"),
+      button("Prepare a hard conversation", "open_add_hardconvo"),
     ]),
+    section("*My suggestions*"),
+    actions([button("My suggestions", "open_list_suggestions"), button("Write my own suggestion", "open_add_suggestion")]),
     { type: "divider" },
     section(`*Goals* — ${d.goals.length} on record`),
     actions([button("View goals", "open_list_goals"), button("Add a goal", "open_add_goal")]),
@@ -145,8 +156,15 @@ export function homeView(ctx, d) {
       button("Give feedback", "open_add_feedback"),
       button("Ask for feedback", "open_add_feedback_request"),
     ]),
+    section("*Career*"),
+    actions([button("View career", "open_list_career"), button("Edit my answers", "open_add_career")]),
+    section(`*Documents* — ${d.documents.length}`),
+    actions([button("View documents", "open_list_documents"), button("Add a link", "open_add_document")]),
     section("*Handbook*"),
     actions([button("View links", "open_list_handbook")]),
+    ...(ctx.isMgr
+      ? [section("*Concerns*"), actions([button("View concerns", "open_list_concerns")])]
+      : []),
     { type: "divider" },
     context(":lock: Everything here is shared only between you and your 1:1 partner — never with HR."),
   ];
@@ -261,6 +279,49 @@ export function addTopicModal(ctx, draft, saved = false) {
     ],
     "Save"
   );
+}
+
+// Mirrors the website's "Help me prepare a hard conversation" tool
+// (components/one-on-one/SuggestionsCard.js's openHardConvo/saveHardConvo) —
+// same four prompts, same body format, same Slack-silent behavior (see
+// SUBMISSIONS.add_hardconvo in app/api/slack/interactivity/route.js).
+export function addHardConvoModal() {
+  return modal("add_hardconvo", "Hard conversation", [
+    inputBlock("outcome", "Outcome I want", plainInput("val", { multiline: true })),
+    inputBlock("facts", "The facts", plainInput("val", { multiline: true }), true),
+    inputBlock("theirView", "How they might see it", plainInput("val", { multiline: true }), true),
+    inputBlock("ask", "What I'm asking for", plainInput("val", { multiline: true }), true),
+  ]);
+}
+
+// Mirrors the website's "Write my own suggestion" tool
+// (components/one-on-one/SuggestionsCard.js) — a personal, role-scoped list
+// (each side only ever sees their own), filed under the same category
+// names as that role's fixed SUGGESTIONS library plus "Other". "Add to
+// agenda" mirrors addFromSuggestion (page.js): creates a plain unsubmitted
+// topic, same as adding one by hand — no ping until Submit.
+function mySuggestionCategories(role) {
+  return Object.keys(SUGGESTIONS[role] || {}).concat("Other");
+}
+
+export function listMySuggestionsModal(list, role) {
+  const mine = list.filter((s) => s.role === role);
+  const blocks = mine.length
+    ? mine.flatMap((s) => [
+        section(`*${s.text}*\n${s.category}`),
+        actions([button("Add to agenda", "suggestion_add", s.id), button("Remove", "suggestion_delete", s.id, "danger")]),
+      ])
+    : [section("Nothing saved yet. Write your own suggestion below and it'll live here.")];
+  blocks.push({ type: "divider" }, actions([button("Write my own suggestion", "open_add_suggestion")]));
+  return modal("view_suggestions", "My suggestions", blocks, "Close");
+}
+
+export function addSuggestionModal(role) {
+  const cats = mySuggestionCategories(role);
+  return modal("add_suggestion", "Write my own suggestion", [
+    inputBlock("text", "The question or topic", plainInput("val", { multiline: true, placeholder: "Something you want to remember to raise." })),
+    inputBlock("category", "File it under", staticSelect("val", cats, cats[0])),
+  ]);
 }
 
 // Shows the real topic text (changed at Melissa's request, 2026-08-28): the
@@ -512,6 +573,27 @@ export function listAchievementsModal(list) {
   return modal("view_achievements", "Achievements", blocks, "Close");
 }
 
+// Manager-only, read-only — per the decision recorded in SLACK_TODO.md item
+// 0g, this is not a new Slack write path (matches the website's mgrOnly
+// gate). The OPENERS build function checks ctx.isMgr before ever calling
+// listConcerns, same role-gate the Home tab button hides behind — belt and
+// suspenders, since a hidden button is still just UI.
+export function listConcernsModal(list) {
+  const blocks = list.length
+    ? list.flatMap((c) => [
+        section(`*${c.what}*${c.concern_date ? ` · ${c.concern_date}` : ""}`),
+        ...(c.expectation ? [context(`*Expectation:* ${c.expectation}`)] : []),
+        ...(c.communicated ? [context(`*Communicated:* ${c.communicated}`)] : []),
+        ...(c.previously ? [context(`*Discussed before:* ${c.previously}`)] : []),
+        ...(c.support ? [context(`*Support given:* ${c.support}`)] : []),
+        ...(c.outcome ? [context(`*Outcome sought:* ${c.outcome}`)] : []),
+        { type: "divider" },
+      ])
+    : [section("No concerns logged yet.")];
+  blocks.push(actions([openInApp("Open Performance in the app to log a concern")]));
+  return modal("view_concerns", "Concerns", blocks, "Close");
+}
+
 // ------------------------------------------------------------- feedback ----
 
 export const FEEDBACK_FIELDS = ["type", "text", "example"];
@@ -608,6 +690,65 @@ export function listHandbookLinksModal(links) {
     : [section("No handbook links yet. Add one from the Home tab.")];
   blocks.push({ type: "divider" }, actions([openInApp("Add or edit links in the app")]));
   return modal("view_handbook_links", "Handbook links", blocks, "Close");
+}
+
+// -------------------------------------------------------------- documents --
+
+// View + add-link only, per the item 0g decision — no raw file upload from
+// Slack (addDocumentLink, not uploadDocument). Same url-button pattern as
+// handbook links above, so opening one never round-trips through the
+// interactivity endpoint.
+export function listDocumentsModal(docs) {
+  const blocks = docs.length
+    ? docs.flatMap((d) => [
+        section(`*${d.name}*`),
+        actions([{ type: "button", text: { type: "plain_text", text: "Open", emoji: true }, url: d.url, action_id: "open_document_link" }]),
+      ])
+    : [section("No documents yet.")];
+  blocks.push({ type: "divider" }, actions([button("Add a link", "open_add_document")]));
+  return modal("view_documents", "Documents", blocks, "Close");
+}
+
+export function addDocumentModal() {
+  return modal("add_document", "Add a document link", [
+    inputBlock("name", "Name", plainInput("val")),
+    inputBlock("url", "Link", plainInput("val", { placeholder: "https://..." })),
+  ]);
+}
+
+// ----------------------------------------------------------------- career --
+
+// Not redacted between roles — mirrors the website (career/page.js: "Your
+// manager sees these"), unlike the manager-only concerns tracker above.
+export function listCareerModal(answers, employeeName) {
+  const byEmp = answers.filter((a) => a.role === "employee");
+  const byMgr = answers.filter((a) => a.role === "manager");
+  const blocks = [];
+  if (byEmp.length) {
+    blocks.push(section(`*${employeeName}'s answers*`));
+    byEmp.forEach((a) => blocks.push(context(`*${a.question}*\n${a.answer}`)));
+    blocks.push({ type: "divider" });
+  }
+  if (byMgr.length) {
+    blocks.push(section("*Manager's answers*"));
+    byMgr.forEach((a) => blocks.push(context(`*${a.question}*\n${a.answer}`)));
+    blocks.push({ type: "divider" });
+  }
+  if (!blocks.length) blocks.push(section("No career answers yet."));
+  blocks.push(actions([button("Edit my answers", "open_add_career"), openInApp("Open Career in the app")]));
+  return modal("view_career", "Career", blocks, "Close");
+}
+
+// prompts/answers are pre-resolved by the caller (role-specific list, "{emp}"
+// already substituted) — see open_add_career in
+// app/api/slack/interactivity/route.js, which re-derives the same ordered
+// list from ctx at submit time to zip back up with these q0/q1/... values.
+export function addCareerModal(prompts, answers) {
+  return modal(
+    "add_career",
+    "Career conversation",
+    prompts.map((q, i) => inputBlock(`q${i}`, q, plainInput("val", { multiline: true, initial: answers[q] || "" }), true))
+  );
 }
 
 export function lastMeetingModal(meetings) {
