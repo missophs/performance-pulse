@@ -129,7 +129,8 @@ export function homeView(ctx, d) {
           ),
         ]
       : []),
-    section(`Your 1:1 partner: *${ctx.partnerName}* · you're the ${ctx.role}.`, button("Edit your name", "open_edit_name")),
+    section(`Your 1:1 partner: *${ctx.partnerName}* · you're the ${ctx.role}.`),
+    section(`You appear as *${ctx.myName}* to ${ctx.partnerName}.`, button("Edit your own name", "open_edit_name")),
     context(`Next 1:1: ${next1on1}  ·  ${openTopics.length} open topic${openTopics.length === 1 ? "" : "s"}  ·  ${openActions.length} open action${openActions.length === 1 ? "" : "s"}`),
     { type: "divider" },
     section("*My 1:1*\nPrepare, talk, and wrap up — right here."),
@@ -162,9 +163,6 @@ export function homeView(ctx, d) {
     actions([button("View documents", "open_list_documents"), button("Add a link", "open_add_document")]),
     section("*Handbook*"),
     actions([button("View links", "open_list_handbook")]),
-    ...(ctx.isMgr
-      ? [section("*Concerns*"), actions([button("View concerns", "open_list_concerns")])]
-      : []),
     { type: "divider" },
     context(":lock: Everything here is shared only between you and your 1:1 partner — never with HR."),
   ];
@@ -577,27 +575,6 @@ export function listAchievementsModal(list) {
     : [section("Nothing logged yet. Add one from the Home tab.")];
   blocks.push({ type: "divider" }, actions([openInApp("Open achievements in the app for the full text")]));
   return modal("view_achievements", "Achievements", blocks, "Close");
-}
-
-// Manager-only, read-only — per the decision recorded in SLACK_TODO.md item
-// 0g, this is not a new Slack write path (matches the website's mgrOnly
-// gate). The OPENERS build function checks ctx.isMgr before ever calling
-// listConcerns, same role-gate the Home tab button hides behind — belt and
-// suspenders, since a hidden button is still just UI.
-export function listConcernsModal(list) {
-  const blocks = list.length
-    ? list.flatMap((c) => [
-        section(`*${c.what}*${c.concern_date ? ` · ${c.concern_date}` : ""}`),
-        ...(c.expectation ? [context(`*Expectation:* ${c.expectation}`)] : []),
-        ...(c.communicated ? [context(`*Communicated:* ${c.communicated}`)] : []),
-        ...(c.previously ? [context(`*Discussed before:* ${c.previously}`)] : []),
-        ...(c.support ? [context(`*Support given:* ${c.support}`)] : []),
-        ...(c.outcome ? [context(`*Outcome sought:* ${c.outcome}`)] : []),
-        { type: "divider" },
-      ])
-    : [section("No concerns logged yet.")];
-  blocks.push(actions([openInApp("Open Performance in the app to log a concern")]));
-  return modal("view_concerns", "Concerns", blocks, "Close");
 }
 
 // ------------------------------------------------------------- feedback ----

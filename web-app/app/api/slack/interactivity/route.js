@@ -39,7 +39,6 @@ import {
   wrapUpModal,
   lastMeetingModal,
   listHandbookLinksModal,
-  listConcernsModal,
   listDocumentsModal,
   addDocumentModal,
   listCareerModal,
@@ -72,7 +71,6 @@ import {
   notify,
   listMeetings,
   listHandbookLinks,
-  listConcerns,
   listDocuments,
   addDocumentLink,
   listCareerAnswers,
@@ -216,14 +214,6 @@ const OPENERS = {
   },
   open_last_meeting: { title: "Last 1:1", build: async (admin, ctx) => lastMeetingModal(await listMeetings(admin, ctx.pairId)) },
   open_list_handbook: { title: "Handbook links", build: async (admin, ctx) => listHandbookLinksModal(await listHandbookLinks(admin, ctx.pairId)) },
-  // ctx.isMgr is derived from the verified Slack identity, not client input —
-  // checked here too (not just the Home tab button being hidden) in case a
-  // stale/replayed action reaches this handler for an account that's since
-  // become the employee side of a different pair.
-  open_list_concerns: {
-    title: "Concerns",
-    build: async (admin, ctx) => (ctx.isMgr ? listConcernsModal(await listConcerns(admin, ctx.pairId)) : noticeModal("Concerns", "This is manager-only.")),
-  },
   open_list_suggestions: {
     title: "My suggestions",
     build: async (admin, ctx) => listMySuggestionsModal(await listCustomSuggestions(admin, ctx.pairId), ctx.role),
