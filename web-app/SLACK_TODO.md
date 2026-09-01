@@ -65,12 +65,48 @@ That's not "still in progress," that's finished.
    lint` and `npm run build` both actually ran this morning** (sandbox
    network was fine for once) — lint 34 errors, all the pre-existing
    baseline, none in the two changed files; build clean.
-   **Not verified:** nothing live. Needs `vercel --prod` (Melissa, real
-   terminal) and then a click-through in real Slack of: Add a development
-   plan (all fields, and Save-draft → reopen), Add an action with notes,
-   Edit an action and change its notes, and Wrap up with every new field
-   filled — then check the `meetings` row and `pairs.next_1on1_date` in
-   Supabase.
+   **Live-tested in real Slack, 2026-09-01 (two `vercel --prod` runs by
+   Melissa), every write read back from Supabase by id, not just trusted
+   from the screen:**
+   - Add a development plan: all three new fields rendered (support label
+     correctly named the manager) and `why`/`support`/`measure` landed in
+     the row.
+   - Add an action with notes: `notes` landed in the row.
+   - Edit an action: **found a real bug on the first pass** — the edit
+     opener (`action_edit` in `interactivity/route.js`) fetched every
+     column except `notes`, so the new Notes field opened empty and
+     "Save changes" would have overwritten real notes with blank. Fixed
+     (`25b0c3e`), redeployed, re-tested: Notes pre-fills, and changing it
+     persisted (`"original notes"` → `"EDITED notes"` in the row).
+   - Wrap-up: revisit, start/stop/keep, and the 90-day date all landed in
+     the `meetings` row; picking "Next conversation" updated
+     `pairs.next_1on1_date`; submitting with neither discussed nor agreed
+     showed the error on the "discussed" field. **Second small find:** the
+     Home tab republished right after the wrap-up still showed "Next 1:1:
+     not scheduled" because `ctx.pair` was loaded before `updatePair` ran.
+     Fixed (`4871380`) the same way `edit_name` already handles it —
+     **code-verified and deployed, not re-tested live** (would have meant
+     a third full wrap-up cycle; the change is one assignment).
+   - All test rows deleted afterwards and the pair's `next_1on1_date`
+     restored to null (it was null before). Nothing left behind.
+   - **Not verified:** Save-draft → reopen on the dev-plan modal with the
+     new fields (the `_v2` path was render-tested with a mock draft, not
+     clicked through). Also seen twice during testing, pre-existing and
+     unrelated to 0f: a submission on a freshly-deployed (cold) instance
+     hit Slack's 3s limit and showed "We had some trouble connecting" even
+     though the row saved — the item-5 cold-start problem, which the
+     keep-warm cron (pushed to GitHub only this morning) should reduce
+     now that it's actually running.
+
+   **Testing note for whoever drives Slack via browser automation next:**
+   Slack's web client doesn't register text typed by the automation into
+   a modal field until the field gets a real keystroke afterwards — every
+   required field showed "Please complete this required field" over
+   visibly-filled text. What worked, every time: click the field, `End`,
+   type ` x`, `Backspace` ×2, then click Save (clears the error), then
+   click Save again (submits). Also: never click Save a third time after
+   "trouble connecting" — the row usually already saved and a retry
+   duplicates it. Check the database instead.
 
 **Nothing else is open.** If it feels like this has been going longer than
 expected, that's tonight's actual list being larger than a normal
