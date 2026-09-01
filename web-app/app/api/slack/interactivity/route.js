@@ -855,7 +855,7 @@ async function handleInteraction(admin, slackUserId, payload) {
         await slackApi("views.push", { trigger_id: payload.trigger_id, view: editGoalModal(goal) }).catch((e) => console.error("edit goal push:", e));
       }
     } else if (action.action_id === "action_edit") {
-      const task = await verifyOwnedRow(admin, "actions", "id, pair_id, text, owner_label, due_date", action.value, ctx);
+      const task = await verifyOwnedRow(admin, "actions", "id, pair_id, text, owner_label, due_date, notes", action.value, ctx);
       if (task) {
         await slackApi("views.push", { trigger_id: payload.trigger_id, view: editActionModal(ctx, task) }).catch((e) => console.error("edit action push:", e));
       }
