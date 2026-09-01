@@ -730,7 +730,10 @@ const SUBMISSIONS = {
       ctx.myName
     );
     const next = fieldVal(v, "next");
-    if (next) await updatePair(admin, ctx.pairId, { next_1on1_date: next });
+    if (next) {
+      await updatePair(admin, ctx.pairId, { next_1on1_date: next });
+      ctx.pair.next_1on1_date = next; // so the Home-tab refresh right after this shows the new date (same as edit_name)
+    }
     await notify(admin, ctx.pairId, `1:1 summary saved by ${ctx.myName}`, ctx.role, ctx.otherRole, "oneOnOne", "wrap");
   },
 };
