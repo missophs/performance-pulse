@@ -1,5 +1,29 @@
 # Slack integration — status and what's left
 
+## Correction, 2026-09-01 evening: the keep-warm cron never actually ran
+
+The `.github/workflows/keep-warm.yml` file added in `677fc00` had an
+invalid YAML `run:` line — `curl ... -w "status: %{http_code}\n" ...`
+written as a plain scalar, which YAML's grammar disallows once a `: `
+appears unquoted inside it. GitHub could not parse the file at all, so
+**every run since it was added failed with zero jobs** (visible as
+`event: push`, `conclusion: failure`, 0 jobs on every commit pushed that
+day). This means the note above saying the cold-start keep-warm cron
+"should reduce [cold starts] now that it's actually running" was wrong
+at the time it was written — it was never running.
+
+**Fixed in `2c8368c`:** the `run:` line is now a block scalar (`run: |`),
+which sidesteps the colon-ambiguity issue. Verified live, not just by
+re-reading the YAML: triggered manually via `gh workflow run`, the run
+completed in 12s, GitHub now shows the correct workflow name (proof it
+parses), and the logged output was `status: 401` — the expected result,
+since the ping carries no real Slack signature and is only there to keep
+the serverless function warm.
+
+**How to apply:** the cold-start mitigation is only real starting now
+(2026-09-01 evening). Any earlier claim in this file that it was
+reducing cold starts should be read as aspirational, not verified.
+
 ## Where everything lives (as of 2026-09-01)
 
 - **Live website:** https://performance-pulse-lyart.vercel.app — sign in at
