@@ -85,18 +85,36 @@ That's not "still in progress," that's finished.
      Home tab republished right after the wrap-up still showed "Next 1:1:
      not scheduled" because `ctx.pair` was loaded before `updatePair` ran.
      Fixed (`4871380`) the same way `edit_name` already handles it —
-     **code-verified and deployed, not re-tested live** (would have meant
-     a third full wrap-up cycle; the change is one assignment).
-   - All test rows deleted afterwards and the pair's `next_1on1_date`
-     restored to null (it was null before). Nothing left behind.
-   - **Not verified:** Save-draft → reopen on the dev-plan modal with the
-     new fields (the `_v2` path was render-tested with a mock draft, not
-     clicked through). Also seen twice during testing, pre-existing and
-     unrelated to 0f: a submission on a freshly-deployed (cold) instance
-     hit Slack's 3s limit and showed "We had some trouble connecting" even
-     though the row saved — the item-5 cold-start problem, which the
-     keep-warm cron (pushed to GitHub only this morning) should reduce
-     now that it's actually running.
+     **re-tested live the same afternoon:** a wrap-up with "Next
+     conversation" = 2026-09-15 came back to a Home tab already reading
+     "Next 1:1: 2026-09-15", with the `meetings` row and
+     `pairs.next_1on1_date` both read back from Supabase.
+   - **Save-draft → reopen on the dev-plan modal — verified live the same
+     afternoon:** Area + "Why it matters" saved as a draft (`form_drafts`
+     row read back with `why` in the JSON), modal cancelled, "Add a plan"
+     clicked again, both fields pre-filled on the fresh modal.
+   - All test rows deleted afterwards (meeting, draft, and the earlier
+     action/dev-plan rows) and the pair's `next_1on1_date` restored to
+     null (it was null before). Nothing left behind.
+   - Also seen twice during testing, pre-existing and unrelated to 0f: a
+     submission on a freshly-deployed (cold) instance hit Slack's 3s limit
+     and showed "We had some trouble connecting" even though the row saved
+     — the item-5 cold-start problem, which the keep-warm cron (pushed to
+     GitHub only this morning) should reduce now that it's actually
+     running.
+
+   **False alarm, 2026-09-01 afternoon, worth knowing about:** for about
+   an hour every modal opener looked stuck on "Loading…" in production.
+   An hour of digging (Vercel logs, proxy, database timing, even a
+   rewrite of `openDeferred` to not use `after()` — deployed once, then
+   reverted, git is unchanged) ended with `document.hidden === true`: the
+   Chrome tab running Slack was behind another window, and Slack's web
+   client paints modal updates one step late in a hidden tab. The server
+   had filled every modal in correctly the whole time. The moment the tab
+   was brought to the front, everything rendered. Nothing in the app was
+   wrong. Production currently runs the inline-swap variant of
+   `openDeferred` (same behavior); the next `vercel --prod` puts the
+   committed `after()` version back.
 
    **Testing note for whoever drives Slack via browser automation next:**
    Slack's web client doesn't register text typed by the automation into
@@ -106,7 +124,10 @@ That's not "still in progress," that's finished.
    type ` x`, `Backspace` ×2, then click Save (clears the error), then
    click Save again (submits). Also: never click Save a third time after
    "trouble connecting" — the row usually already saved and a retry
-   duplicates it. Check the database instead.
+   duplicates it. Check the database instead. **And keep the Chrome
+   window with Slack in front** — in a hidden tab (`document.hidden`
+   true) modals sit on "Loading…" forever and every reading tool lags one
+   update behind; that is the tab, not the app.
 
 **Nothing else is open.** If it feels like this has been going longer than
 expected, that's tonight's actual list being larger than a normal
