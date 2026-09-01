@@ -1,5 +1,32 @@
 # Slack integration — status and what's left
 
+## Where everything lives (as of 2026-09-01)
+
+- **Live website:** https://performance-pulse-lyart.vercel.app — sign in at
+  `/login` with email + password (magic link is the backup option).
+- **Slack:** the "Performance Pulse" app is installed in Melissa's Slack
+  workspace. Open it from the Apps section of the Slack sidebar, then the
+  Home tab. It reads and writes the same database as the website.
+- **Code:** `~/Code/performance/web-app` (moved out of iCloud-synced
+  `~/Documents` on 2026-09-01). Everything else in the repo is old or
+  shelved — see the architecture note at the top of `web-app/CLAUDE.md`.
+- **Backup / source of truth:** GitHub, `missophs/performance-pulse`,
+  branch `main`. Remote name in git is `performance-pulse`, not `origin`.
+- **Hosting:** Vercel, project `performance-pulse`. `git push` does NOT
+  deploy; run `vercel --prod` from `web-app/` in a real terminal.
+- **Database:** Supabase. Migrations in `web-app/supabase/migrations/`
+  must be pasted into the Supabase SQL editor by hand to take effect.
+- **Secrets:** `web-app/.env.local` on this Mac (gitignored, on purpose)
+  and the Vercel project's environment variables. Not in the repo.
+
+## Next session (planned 2026-09-02): Slack walkthrough with Melissa
+
+Melissa has not yet seen the Slack side or the password sign-in flow
+with her own eyes; both were only described as tested. Plan: open the
+live site's `/login` and the Slack Home tab together, one click per
+step, covering sign-in, the Home tab, one add-form, one wrap-up, and
+confirming the result shows on the website. No code changes expected.
+
 ## What's actually left, total (as of 2026-08-31, night)
 
 **The original scoped work is done.** Everything that was on this list at
