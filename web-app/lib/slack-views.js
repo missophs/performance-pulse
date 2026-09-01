@@ -153,9 +153,9 @@ export function homeView(ctx, d) {
     actions([button("View achievements", "open_list_achievements"), button("Log one", "open_add_achievement")]),
     section(`*Feedback* — ${d.feedback.length} entries${openRequests.length ? `, ${openRequests.length} request${openRequests.length === 1 ? "" : "s"} waiting` : ""}`),
     actions([
-      button("View feedback", "open_list_feedback"),
       button("Give feedback", "open_add_feedback"),
       button("Ask for feedback", "open_add_feedback_request"),
+      button("View feedback in the app", "open_list_feedback"),
     ]),
     section("*Career*"),
     actions([button("View career", "open_list_career"), button("Edit my answers", "open_add_career")]),
@@ -309,8 +309,7 @@ export function listMySuggestionsModal(list, role) {
         section(`*${s.text}*\n${s.category}`),
         actions([button("Add to agenda", "suggestion_add", s.id), button("Remove", "suggestion_delete", s.id, "danger")]),
       ])
-    : [section("Nothing saved yet. Write your own suggestion below and it'll live here.")];
-  blocks.push({ type: "divider" }, actions([button("Write my own suggestion", "open_add_suggestion")]));
+    : [section("Nothing saved yet. Use \"Write my own suggestion\" on the Home tab.")];
   return modal("view_suggestions", "My suggestions", blocks, "Close");
 }
 
@@ -688,7 +687,6 @@ export function listDocumentsModal(docs) {
         actions([{ type: "button", text: { type: "plain_text", text: "Open", emoji: true }, url: d.url, action_id: "open_document_link" }]),
       ])
     : [section("No documents yet.")];
-  blocks.push({ type: "divider" }, actions([button("Add a link", "open_add_document")]));
   return modal("view_documents", "Documents", blocks, "Close");
 }
 
@@ -718,7 +716,7 @@ export function listCareerModal(answers, employeeName) {
     blocks.push({ type: "divider" });
   }
   if (!blocks.length) blocks.push(section("No career answers yet."));
-  blocks.push(actions([button("Edit my answers", "open_add_career"), openInApp("Open Career in the app")]));
+  blocks.push(actions([openInApp("Open Career in the app")]));
   return modal("view_career", "Career", blocks, "Close");
 }
 
