@@ -19,4 +19,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping interactivity endpoint
-        run: curl -s -o /dev/null -w "status: %{http_code}\n" -X POST https://performance-pulse-lyart.vercel.app/api/slack/interactivity
+        run: |
+          curl -s -o /dev/null -w "status: %{http_code}\n" -X POST https://performance-pulse-lyart.vercel.app/api/slack/interactivity
