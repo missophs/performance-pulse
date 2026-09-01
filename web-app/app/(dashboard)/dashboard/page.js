@@ -13,7 +13,6 @@ import {
   listCheckinsAll,
   listAchievements,
   listFeedback,
-  listConcerns,
   listCareerAnswers,
   buildHistory,
   listMessages,
@@ -62,7 +61,7 @@ export default function DashboardPage() {
 
   async function loadAll() {
     setLoading(true);
-    const [p, t, g, a, d, m, ci, ach, fb, cc, ca, msgs, docs, hb, notifs] = await Promise.all([
+    const [p, t, g, a, d, m, ci, ach, fb, ca, msgs, docs, hb, notifs] = await Promise.all([
       getPair(supabase, pairId),
       listTopics(supabase, pairId),
       listGoals(supabase, pairId),
@@ -72,7 +71,6 @@ export default function DashboardPage() {
       listCheckinsAll(supabase, pairId),
       listAchievements(supabase, pairId),
       listFeedback(supabase, pairId),
-      listConcerns(supabase, pairId),
       listCareerAnswers(supabase, pairId),
       listMessages(supabase, pairId),
       listDocuments(supabase, pairId),
@@ -84,7 +82,7 @@ export default function DashboardPage() {
     setGoals(g);
     setActions(a);
     setDevPlans(d);
-    setHistory(buildHistory({ meetings: m, checkins: ci, achievements: ach, feedback: fb, concerns: cc, goals: g, development: d, career: ca, actions: a }));
+    setHistory(buildHistory({ meetings: m, checkins: ci, achievements: ach, feedback: fb, goals: g, development: d, career: ca, actions: a }));
     setMessages(msgs);
     setDocuments(docs);
     setHandbook(hb);

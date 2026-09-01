@@ -473,36 +473,6 @@ export async function setFeedbackRequestStatus(supabase, id, status, ctx = {}) {
 
 // ------------------------------------------------------------- concerns ----
 
-export async function listConcerns(supabase, pairId) {
-  const { data, error } = await supabase
-    .from("concerns")
-    .select("*")
-    .eq("pair_id", pairId)
-    .order("created_at", { ascending: false });
-  if (error) throw error;
-  return data;
-}
-
-export async function addConcern(supabase, pairId, fields, name) {
-  const { data, error } = await supabase
-    .from("concerns")
-    .insert({
-      pair_id: pairId,
-      what: fields.what,
-      concern_date: fields.when || null,
-      expectation: fields.expectation || "",
-      communicated: fields.communicated || "",
-      previously: fields.previously || "",
-      support: fields.support || "",
-      outcome: fields.outcome || "",
-      created_by_name: name,
-    })
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
-}
-
 // ---------------------------------------------------------- review drafts --
 
 export async function getReviewDraft(supabase, pairId, role) {
@@ -1016,7 +986,7 @@ const CHANGE_TITLE = {
 };
 
 // `activity` defaults to empty so callers that don't pass it still work.
-export function buildHistory({ meetings, checkins, achievements, feedback, concerns, goals, development, career, actions, activity = [] }) {
+export function buildHistory({ meetings, checkins, achievements, feedback, goals, development, career, actions, activity = [] }) {
   const entries = [];
   for (const m of meetings) {
     entries.push({
@@ -1035,9 +1005,6 @@ export function buildHistory({ meetings, checkins, achievements, feedback, conce
   }
   for (const f of feedback) {
     entries.push({ cat: "Feedback", at: f.created_at, title: f.type, body: f.text, who: f.from_name });
-  }
-  for (const c of concerns) {
-    entries.push({ cat: "Performance", at: c.created_at, title: "Concern documented", body: c.what, who: c.created_by_name });
   }
   for (const g of goals) {
     entries.push({ cat: "Goals", at: g.created_at, title: g.text, body: g.why, who: g.created_by_name });

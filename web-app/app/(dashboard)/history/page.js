@@ -8,7 +8,6 @@ import {
   listCheckinsAll,
   listAchievements,
   listFeedback,
-  listConcerns,
   listGoals,
   listDevelopmentPlans,
   listCareerAnswers,
@@ -30,19 +29,18 @@ export default function HistoryPage() {
 
   async function loadAll() {
     setLoading(true);
-    const [m, ci, ach, fb, cc, g, d, ca, a, act] = await Promise.all([
+    const [m, ci, ach, fb, g, d, ca, a, act] = await Promise.all([
       listMeetings(supabase, pairId),
       listCheckinsAll(supabase, pairId),
       listAchievements(supabase, pairId),
       listFeedback(supabase, pairId),
-      listConcerns(supabase, pairId),
       listGoals(supabase, pairId),
       listDevelopmentPlans(supabase, pairId),
       listCareerAnswers(supabase, pairId),
       listActions(supabase, pairId),
       listActivity(supabase, pairId),
     ]);
-    setHistory(buildHistory({ meetings: m, checkins: ci, achievements: ach, feedback: fb, concerns: cc, goals: g, development: d, career: ca, actions: a, activity: act }));
+    setHistory(buildHistory({ meetings: m, checkins: ci, achievements: ach, feedback: fb, goals: g, development: d, career: ca, actions: a, activity: act }));
     setLoading(false);
   }
 

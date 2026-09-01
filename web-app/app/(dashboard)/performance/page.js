@@ -18,8 +18,6 @@ import {
   listFeedbackRequests,
   addFeedbackRequest,
   setFeedbackRequestStatus,
-  listConcerns,
-  addConcern,
   getReviewDraft,
   saveReviewDraft,
   getFormDraft,
@@ -37,12 +35,9 @@ const ACH_CATS = [
 ];
 const MGR_FB = ["Recognition", "Coaching", "Performance feedback", "Expectations", "Development feedback"];
 const EMP_FB = ["What's working", "What could improve", "Support I need", "What would help me succeed"];
-const COMM_OPTS = ["Yes, in writing", "Yes, verbally", "Partly", "No", "Not sure"];
-const PREV_OPTS = ["No, this is the first time", "Yes, once", "Yes, more than once"];
 const TABS = [
   { id: "achievements", label: "Achievements" },
   { id: "feedback", label: "Feedback" },
-  { id: "concerns", label: "Updates", mgrOnly: true },
   { id: "review", label: "Review prep" },
 ];
 
@@ -58,7 +53,6 @@ export default function PerformancePage() {
   const [achievements, setAchievements] = useState([]);
   const [feedback, setFeedback] = useState([]);
   const [feedbackRequests, setFeedbackRequests] = useState([]);
-  const [concerns, setConcerns] = useState([]);
   const [goals, setGoals] = useState([]);
   const [devPlans, setDevPlans] = useState([]);
   const [career, setCareer] = useState([]);
@@ -68,12 +62,11 @@ export default function PerformancePage() {
 
   async function loadAll() {
     setLoading(true);
-    const [p, ach, fb, fbReq, cc, g, dp, ca, rd] = await Promise.all([
+    const [p, ach, fb, fbReq, g, dp, ca, rd] = await Promise.all([
       getPair(supabase, pairId),
       listAchievements(supabase, pairId),
       listFeedback(supabase, pairId),
       listFeedbackRequests(supabase, pairId),
-      listConcerns(supabase, pairId),
       listGoals(supabase, pairId),
       listDevelopmentPlans(supabase, pairId),
       listCareerAnswers(supabase, pairId),
@@ -83,7 +76,6 @@ export default function PerformancePage() {
     setAchievements(ach);
     setFeedback(fb);
     setFeedbackRequests(fbReq);
-    setConcerns(cc);
     setGoals(g);
     setDevPlans(dp);
     setCareer(ca);
@@ -95,10 +87,6 @@ export default function PerformancePage() {
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pairId]);
-
-  useEffect(() => {
-    if (subTab === "concerns" && !isMgr) setSubTab("achievements");
-  }, [subTab, isMgr]);
 
   /* ------------------------------------------------------- achievements -- */
 
@@ -273,51 +261,6 @@ export default function PerformancePage() {
     loadAll();
   }
 
-  /* ------------------------------------------------------------ concerns - */
-
-  const [cnOpen, setCnOpen] = useState(false);
-  const [cnWhat, setCnWhat] = useState("");
-  const [cnWhen, setCnWhen] = useState(today());
-  const [cnExpect, setCnExpect] = useState("");
-  const [cnComm, setCnComm] = useState(COMM_OPTS[1]);
-  const [cnPrev, setCnPrev] = useState(PREV_OPTS[0]);
-  const [cnSupport, setCnSupport] = useState("");
-  const [cnOutcome, setCnOutcome] = useState("");
-  const [cnShowCoach, setCnShowCoach] = useState(false);
-  const cnWhatRef = useRef(null);
-
-  function openConcernModal() {
-    setCnWhat("");
-    setCnWhen(today());
-    setCnExpect("");
-    setCnComm(COMM_OPTS[1]);
-    setCnPrev(PREV_OPTS[0]);
-    setCnSupport("");
-    setCnOutcome("");
-    setCnShowCoach(false);
-    setCnOpen(true);
-  }
-
-  async function saveConcern(bypassCoach) {
-    const what = cnWhat.trim();
-    if (!what) {
-      cnWhatRef.current?.focus();
-      return;
-    }
-    if (!bypassCoach && assistOn && isVague(what)) {
-      setCnShowCoach(true);
-      return;
-    }
-    await addConcern(supabase, pairId, {
-      what, when: cnWhen || null, expectation: cnExpect.trim(), communicated: cnComm,
-      previously: cnPrev, support: cnSupport.trim(), outcome: cnOutcome.trim(),
-    }, myName);
-    setCnOpen(false);
-    await notify(supabase, pairId, "An update was added", role, otherRole, "performance");
-    toast("Saved", "Added to your updates.");
-    loadAll();
-  }
-
   /* -------------------------------------------------------------- review - */
 
   function buildDraftText() {
@@ -381,15 +324,6 @@ export default function PerformancePage() {
     if (obstacles.length) obstacles.forEach((g) => L.push(`• ${g.text}: ${g.obstacles}`));
     else L.push("• Nothing flagged.");
     L.push("");
-
-    if (isMgr && concerns.length) {
-      L.push("CONCERNS DISCUSSED DURING THE YEAR");
-      concerns.forEach((c) => {
-        L.push(`• ${c.concern_date ? c.concern_date + ": " : ""}${c.what}`);
-        if (c.outcome) L.push(`   Outcome sought: ${c.outcome}`);
-      });
-      L.push("");
-    }
 
     L.push("WHAT'S NEXT");
     L.push("• [Add the goals and focus areas you want for the next period.]");
@@ -522,40 +456,6 @@ export default function PerformancePage() {
         </div>
       )}
 
-      {subTab === "concerns" && isMgr && (
-        <div className="subview active">
-          <div className="card">
-            <div className="card-head">
-              <h2>Performance updates</h2>
-              <button className="btn sm" onClick={openConcernModal}>Add an update</button>
-            </div>
-            <p className="card-note">Manager-only notes. This stays between the two of you — it is not sent to HR and creates no formal record anywhere else. Stick to what happened and when.</p>
-            {concerns.length === 0 ? (
-              <div className="empty"><div className="big">Nothing documented</div>Notes here stay between you and {partnerName}.</div>
-            ) : (
-              <ul className="list">
-                {concerns.map((c) => (
-                  <li key={c.id}>
-                    <div className="item-body">
-                      <div className="item-text">{c.what}</div>
-                      <dl className="kv">
-                        {c.concern_date && (<><dt>When</dt><dd>{fmtDate(c.concern_date)}</dd></>)}
-                        {c.expectation && (<><dt>Expectation</dt><dd>{c.expectation}</dd></>)}
-                        {c.communicated && (<><dt>Communicated</dt><dd>{c.communicated}</dd></>)}
-                        {c.previously && (<><dt>Discussed before</dt><dd>{c.previously}</dd></>)}
-                        {c.support && (<><dt>Support given</dt><dd>{c.support}</dd></>)}
-                        {c.outcome && (<><dt>Outcome sought</dt><dd>{c.outcome}</dd></>)}
-                      </dl>
-                      <div className="item-meta"><span>Noted by {c.created_by_name} · {ago(c.created_at)}</span></div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </div>
-      )}
-
       {subTab === "review" && (
         <div className="subview active">
           <div className="card">
@@ -666,58 +566,6 @@ export default function PerformancePage() {
         </div>
       </Modal>
 
-      <Modal
-        open={cnOpen}
-        title="Add an update"
-        note="Stick to what happened and when. Describe behaviour, not intent — and skip conclusions about why."
-        onClose={() => setCnOpen(false)}
-        onSave={() => saveConcern(false)}
-        saveLabel="Save note"
-      >
-        <div className="field">
-          <label htmlFor="cnWhat">What happened?</label>
-          <textarea id="cnWhat" ref={cnWhatRef} value={cnWhat} onChange={(e) => { setCnWhat(e.target.value); setCnShowCoach(false); }} placeholder="The project was due August 5. It was submitted August 9 with no advance notice about the delay." />
-        </div>
-        <div className="field">
-          <label htmlFor="cnWhen">When did it happen?</label>
-          <input id="cnWhen" type="date" value={cnWhen} onChange={(e) => setCnWhen(e.target.value)} />
-        </div>
-        <div className="field">
-          <label htmlFor="cnExpect">What expectation wasn't met?</label>
-          <textarea id="cnExpect" value={cnExpect} onChange={(e) => setCnExpect(e.target.value)} placeholder="The expectation as it was set." />
-        </div>
-        <div className="field">
-          <label htmlFor="cnComm">Was that expectation communicated?</label>
-          <select id="cnComm" value={cnComm} onChange={(e) => setCnComm(e.target.value)}>
-            {COMM_OPTS.map((o) => <option key={o}>{o}</option>)}
-          </select>
-        </div>
-        <div className="field">
-          <label htmlFor="cnPrev">Has this been discussed before?</label>
-          <select id="cnPrev" value={cnPrev} onChange={(e) => setCnPrev(e.target.value)}>
-            {PREV_OPTS.map((o) => <option key={o}>{o}</option>)}
-          </select>
-        </div>
-        <div className="field">
-          <label htmlFor="cnSupport">What support has been provided so far?</label>
-          <textarea id="cnSupport" value={cnSupport} onChange={(e) => setCnSupport(e.target.value)} placeholder="Training, coaching, tools, cover, anything." />
-        </div>
-        <div className="field">
-          <label htmlFor="cnOutcome">What outcome are you looking for?</label>
-          <textarea id="cnOutcome" value={cnOutcome} onChange={(e) => setCnOutcome(e.target.value)} placeholder="What good looks like from here." />
-        </div>
-        {cnShowCoach && (
-          <div>
-            <div className="coach">
-              <strong>Try rewriting this</strong>
-              This describes intent or character rather than behaviour. Swap "they don't care about deadlines" for "the project was due August 5; it was submitted August 9 without advance notice."
-            </div>
-            <div className="btn-row" style={{ marginTop: 8 }}>
-              <button type="button" className="btn ghost sm" onClick={() => saveConcern(true)}>Save as written</button>
-            </div>
-          </div>
-        )}
-      </Modal>
     </section>
   );
 }

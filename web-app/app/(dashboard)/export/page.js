@@ -12,7 +12,6 @@ import {
   listFeedback,
   listCareerAnswers,
   listActions,
-  listConcerns,
   getPair,
   getReviewDraft,
   updatePair,
@@ -39,7 +38,6 @@ const SCOPE_FIELDS = [
   { id: "performance", label: "Achievements & feedback" },
   { id: "career", label: "Career conversations" },
   { id: "actions", label: "Action items" },
-  { id: "concerns", label: "Updates" },
   { id: "review", label: "Review & preparation — draft" },
 ];
 
@@ -63,7 +61,6 @@ export default function ExportPage() {
   const [feedback, setFeedback] = useState([]);
   const [career, setCareer] = useState([]);
   const [actions, setActions] = useState([]);
-  const [concerns, setConcerns] = useState([]);
   const [reviewDraft, setReviewDraft] = useState("");
 
   const [scopes, setScopes] = useState(emptyScopes());
@@ -73,7 +70,7 @@ export default function ExportPage() {
 
   async function loadAll() {
     setLoading(true);
-    const [p, t, ci, m, g, d, ach, fb, ca, a, cc, rd] = await Promise.all([
+    const [p, t, ci, m, g, d, ach, fb, ca, a, rd] = await Promise.all([
       getPair(supabase, pairId),
       listTopics(supabase, pairId),
       listCheckinsAll(supabase, pairId),
@@ -84,7 +81,6 @@ export default function ExportPage() {
       listFeedback(supabase, pairId),
       listCareerAnswers(supabase, pairId),
       listActions(supabase, pairId),
-      listConcerns(supabase, pairId),
       getReviewDraft(supabase, pairId, role),
     ]);
     setPair(p);
@@ -97,7 +93,6 @@ export default function ExportPage() {
     setFeedback(fb);
     setCareer(ca);
     setActions(a);
-    setConcerns(cc);
     setReviewDraft(rd?.draft || "");
     setLoading(false);
   }
@@ -146,7 +141,6 @@ export default function ExportPage() {
       feedback,
       career,
       actions,
-      concerns,
       reviewDraft,
       fmtDate,
       fmtTime,
@@ -251,7 +245,6 @@ export default function ExportPage() {
               <label className="checkline">
                 <input type="checkbox" checked={scopes[f.id]} onChange={() => toggleScope(f.id)} />
                 {f.label}
-                {f.id === "concerns" && <span style={{ color: "var(--faint)", fontSize: 12 }}>&nbsp;(manager notes)</span>}
               </label>
               {f.id === "past1on1s" && scopes.past1on1s && (
                 <div style={{ margin: "2px 0 10px 26px", paddingLeft: 12, borderLeft: "2px solid var(--border)" }}>
