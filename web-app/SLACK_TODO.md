@@ -16,9 +16,10 @@ That's not "still in progress," that's finished.
    `index-3.html` and `web-app/CLAUDE.md` → `web-app/CLAUDE-3.md` (both
    byte-identical to what was already committed — verified with `diff`
    against `git show HEAD:`). Renamed back, then committed everything
-   from 2026-08-31 as `677fc00` and pushed. The "move the repo out of
-   `~/Documents`" option below is still worth doing deliberately at some
-   point — this will recur.
+   from 2026-08-31 as `677fc00` and pushed. **Repo moved out of iCloud
+   the same afternoon (2026-09-01):** now lives at `~/Code/performance`,
+   so the conflict-rename problem can't recur. Deploys run from
+   `~/Code/performance/web-app`.
 2. ~~**Item 0f — missing fields on Slack's add-forms**~~ **Done,
    2026-09-01 — built, code-verified, NOT yet deployed or live-tested.**
    Two of the five pieces turned out not to be real gaps once checked
