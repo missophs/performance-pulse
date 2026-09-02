@@ -108,6 +108,17 @@ async function refreshHome(admin, ctx, data) {
   await slackApi("views.publish", { user_id: ctx.slackUserId, view }).catch((e) => console.error("home publish:", e));
 }
 
+// A successful view_submission just closes the modal — identical to what
+// Cancel does — so there was no way to tell a real save from nothing
+// happening. This pings the submitter's own DM with the app right after, the
+// same way refreshHome pings the Home tab. Runs via after() so it never
+// risks the 3s interaction window Slack drops the request after.
+async function confirmSaved(admin, ctx) {
+  const opened = await slackApi("conversations.open", { users: ctx.slackUserId }).catch((e) => console.error("confirm dm open:", e));
+  if (!opened?.channel?.id) return;
+  await slackApi("chat.postMessage", { channel: opened.channel.id, text: "✅ Saved in Performance Pulse." }).catch((e) => console.error("confirm dm send:", e));
+}
+
 // -------------------------------------------------------- open a modal -----
 
 async function draftFor(admin, ctx, kind) {
