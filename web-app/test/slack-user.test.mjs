@@ -32,6 +32,7 @@ function fakeAdmin(rows, selection) {
     select: () => builder,
     or: () => builder,
     eq: () => builder,
+    is: () => builder,
     order: () => Promise.resolve({ data: rows, error: null }),
     maybeSingle: () => Promise.resolve({ data: selection || null, error: null }),
   };

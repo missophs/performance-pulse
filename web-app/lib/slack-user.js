@@ -48,6 +48,7 @@ export async function resolveSlackUser(supabaseAdmin, slackUserId) {
     .from("pairs")
     .select("*, employee:profiles!employee_id(id, full_name), manager:profiles!manager_id(id, full_name)")
     .or(`employee_email.eq.${safeEmail},manager_email.eq.${safeEmail}`)
+    .is("closed_at", null)
     .order("created_at", { ascending: true });
   if (error) throw error;
   if (!pairs?.length) return null;

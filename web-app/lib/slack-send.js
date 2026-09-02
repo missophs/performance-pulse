@@ -8,7 +8,7 @@ import { BK_KINDS, buildBlockKit, buildDigestBlockKit } from "@/lib/block-kit";
 import { fmtDate } from "@/lib/format";
 import { slackApi } from "@/lib/slack-api";
 
-async function dmByEmail(email, payload) {
+export async function dmByEmail(email, payload) {
   const lookup = await slackApi("users.lookupByEmail", { email }).catch((e) => {
     throw new Error(`No Slack account for ${email}: ${e.message}`);
   });

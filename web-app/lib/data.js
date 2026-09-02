@@ -20,6 +20,7 @@ export async function listMyPairs(supabase, userId) {
     .from("pairs")
     .select("*")
     .or(`employee_id.eq.${userId},manager_id.eq.${userId}`)
+    .is("closed_at", null)
     .order("created_at", { ascending: true });
   if (error) throw error;
   return data;
@@ -48,6 +49,28 @@ export async function getProfile(supabase, userId) {
 
 export async function updatePair(supabase, pairId, fields) {
   const { data, error } = await supabase.from("pairs").update(fields).eq("id", pairId).select().single();
+  if (error) throw error;
+  return data;
+}
+
+// "Final wrap up for this conversation" -- ends a pairing, not a single
+// meeting (that's saveWrapUp below). Reopenable: closing again later just
+// overwrites the note, no history of past closes is kept.
+export async function closePair(supabase, pairId, note) {
+  return updatePair(supabase, pairId, { closed_at: new Date().toISOString(), closing_note: note || null });
+}
+
+export async function reopenPair(supabase, pairId) {
+  return updatePair(supabase, pairId, { closed_at: null });
+}
+
+export async function listClosedPairs(supabase, userId) {
+  const { data, error } = await supabase
+    .from("pairs")
+    .select("*")
+    .or(`employee_id.eq.${userId},manager_id.eq.${userId}`)
+    .not("closed_at", "is", null)
+    .order("closed_at", { ascending: false });
   if (error) throw error;
   return data;
 }

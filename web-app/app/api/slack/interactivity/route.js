@@ -37,6 +37,7 @@ import {
   addFeedbackRequestModal,
   listFeedbackModal,
   wrapUpModal,
+  closePairModal,
   lastMeetingModal,
   listHandbookLinksModal,
   listDocumentsModal,
@@ -68,6 +69,7 @@ import {
   addFeedback,
   addFeedbackRequest,
   saveWrapUp,
+  closePair,
   notify,
   listMeetings,
   listHandbookLinks,
@@ -85,6 +87,7 @@ import {
   clearFormDraft,
 } from "@/lib/data";
 import { EMP_CAREER, MGR_CAREER } from "@/lib/career-content";
+import { dmByEmail } from "@/lib/slack-send";
 
 // Slack's interactivity endpoint is one request/response — there's no
 // browser tab to hold state in like the website's topic-add batching. This
@@ -178,6 +181,7 @@ const OPENERS = {
     },
   },
   open_wrap_up: { title: "Wrap up", build: async (admin, ctx) => wrapUpModal((await loadHomeData(admin, ctx.pairId)).topics) },
+  open_close_pair: { title: "Final wrap up", build: async () => closePairModal() },
   open_add_goal: { title: "Add a goal", build: async (admin, ctx) => addGoalModal(ctx, normalizeDraft(GOAL_FIELDS, await draftFor(admin, ctx, "goal"))) },
   open_add_devplan: {
     title: "Add a development plan",
@@ -433,6 +437,18 @@ const SUBMISSIONS = {
     if (!name) return;
     await updateProfile(admin, ctx.profileId, { full_name: name });
     ctx.myName = name; // so the Home-tab refresh right after this shows the new name immediately
+  },
+  // Ends the pairing, not one meeting -- wrap_up (below) is unchanged. The
+  // submitter gets the standard confirmSaved DM from the shared dispatcher;
+  // this handles telling the OTHER side directly, by email (not a Slack
+  // action they took), since resolveSlackUser is about to stop finding this
+  // pair for either of them the next time their Home tab opens.
+  close_pair: async (admin, ctx, v) => {
+    const note = (fieldVal(v, "note") || "").trim();
+    await closePair(admin, ctx.pairId, note);
+    const otherEmail = ctx.isMgr ? ctx.pair.employee_email : ctx.pair.manager_email;
+    const text = `${ctx.myName} closed out this 1:1 pairing with a final wrap up.${note ? `\n\nClosing note: ${note}` : ""}`;
+    await dmByEmail(otherEmail, { text }).catch((e) => console.error("close pair notify:", e));
   },
   add_topic: async (admin, ctx, v) => {
     // "text" is a required field (see addTopicModal, lib/slack-views.js), so

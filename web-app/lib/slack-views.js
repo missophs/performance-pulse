@@ -166,6 +166,9 @@ export function homeView(ctx, d) {
     section("*History*\nEverything past — meetings, goals, feedback, all of it — lives in the app."),
     actions([openInApp("Open History in the app", "/history")]),
     { type: "divider" },
+    section("Ending this pairing, for good, not just today's conversation:"),
+    actions([button("Final wrap up for this conversation", "open_close_pair", "", "danger")]),
+    { type: "divider" },
     context(":lock: Everything here is shared only between you and your 1:1 partner — never with HR."),
   ];
   return { type: "home", blocks };
@@ -762,4 +765,23 @@ export function wrapUpModal(topics) {
     inputBlock("next", "Next conversation", datePicker("val"), true),
     inputBlock("checkin90", "We will check in with you in 90 days — on", datePicker("val"), true),
   ]);
+}
+
+// -------------------------------------------------- close this pairing -----
+
+// Ends the whole manager-employee pairing, not one meeting -- that's
+// wrapUpModal above, and it's unchanged. Reopenable (see reopenPair in
+// lib/data.js), so this is a serious step but not an irreversible one.
+export function closePairModal() {
+  return modal(
+    "close_pair",
+    "Final wrap up",
+    [
+      section(
+        "This ends the working relationship for this pairing — both of you will be told, and it drops out of your active list. Nothing is deleted; every goal, topic, and note stays reachable in History, and this can be reopened later if needed."
+      ),
+      inputBlock("note", "Anything worth noting as this closes", plainInput("val", { multiline: true, placeholder: "Optional — a closing note for the record." }), false),
+    ],
+    "End this pairing"
+  );
 }
