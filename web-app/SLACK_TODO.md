@@ -10,9 +10,31 @@ tonight's "Slack walkthrough with Melissa" section below is now live:
 Concerns removed, the name-button fix, the three duplicate-button fixes,
 Feedback reordered, the save-confirmation DM, History added to Slack,
 and the new "Final wrap up for this conversation" pairing close-out
-with reopen support on the website's History page.
+with reopen support on the website's History page. **Live-checked by
+Melissa in her own Slack after a forced tab refresh** (Slack's Home tab
+only redraws when it's told to, not just from being looked at — a
+click to DMs and back to Home forces it) — confirmed working, not just
+deployed.
 
-**Not done yet, carried to next session:** adding a new employee from
+**New from tonight, not yet built — next session, needs one decision
+first:** Melissa found the name display genuinely confusing live
+("You appear as melissa to melissa" — her test data has both sides
+named the same, which is what made this jump out) and wants the
+manager to be able to set the employee's name instead of the employee
+setting their own. Real design fork before writing any code: today
+`profiles.full_name` is one value tied to the whole account, shown to
+every manager that person has — not scoped to one pairing. So "manager
+picks the employee's name" needs to mean one of two different things:
+**(a)** the manager renames the employee's account, everywhere, for
+every pairing they're in, or **(b)** a label scoped to just this
+manager's view of them, leaving the employee's actual account name
+alone. (b) is very likely the right one — it doesn't reopen the
+"each person owns their own account" rule from earlier tonight — but
+Melissa hasn't confirmed it, and this shouldn't be built on a guess.
+**First thing next session: get that one answer, then scope and build
+it.**
+
+**Also carried to next session:** adding a new employee from
 Slack (needs its own database function, scoped in the walkthrough
 section below); the silent-click-failure fix for Slack buttons (Goals
 Edit and others can click and do nothing on an expired `trigger_id`,
