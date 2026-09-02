@@ -14,18 +14,35 @@ import {
   listActions,
   listActivity,
   buildHistory,
+  listClosedPairs,
+  reopenPair,
 } from "@/lib/data";
 import { ago } from "@/lib/format";
 
 const FILTERS = ["All", "1:1", "Performance", "Goals", "Development", "Career", "Feedback", "Actions", "Changes"];
 
 export default function HistoryPage() {
-  const { pairId, supabase } = usePulse();
+  const { pairId, userId, supabase } = usePulse();
 
   const [loading, setLoading] = useState(true);
   const [history, setHistory] = useState([]);
   const [filter, setFilter] = useState("All");
   const [query, setQuery] = useState("");
+  const [closedPairs, setClosedPairs] = useState([]);
+
+  async function loadClosedPairs() {
+    setClosedPairs(await listClosedPairs(supabase, userId));
+  }
+
+  async function reopen(id) {
+    await reopenPair(supabase, id);
+    loadClosedPairs();
+  }
+
+  useEffect(() => {
+    loadClosedPairs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
 
   async function loadAll() {
     setLoading(true);
@@ -66,6 +83,27 @@ export default function HistoryPage() {
     <section>
       <h1>History</h1>
       <p className="subtitle">Every meaningful conversation, in order. Search it, filter it, export any of it.</p>
+
+      {closedPairs.length > 0 && (
+        <div className="card">
+          <div className="card-head">
+            <h2>Closed pairings</h2>
+          </div>
+          <p className="card-note">Ended, not deleted — everything they contain still exists. Reopen one to make it active again.</p>
+          <ul className="list">
+            {closedPairs.map((p) => (
+              <li key={p.id}>
+                <div className="item-body">
+                  <div className="item-text">{p.employee_email === p.manager_email ? p.id : `${p.employee_email} / ${p.manager_email}`}</div>
+                  {p.closing_note && <div className="item-sub">{p.closing_note}</div>}
+                  <div className="item-meta"><span>Closed {ago(p.closed_at)}</span></div>
+                </div>
+                <button className="btn sm" onClick={() => reopen(p.id)}>Reopen</button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="card">
         <div className="field">

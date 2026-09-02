@@ -57,6 +57,7 @@ export default async function DashboardLayout({ children }) {
   };
 
   const ctx = {
+    userId: user.id,
     pairId: pair.id,
     pairs: pairOptions,
     role,
