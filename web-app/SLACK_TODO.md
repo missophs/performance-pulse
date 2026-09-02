@@ -1,5 +1,26 @@
 # Slack integration — status and what's left
 
+## Session closeout (2026-09-01, night): pairing close-out is live
+
+Melissa ran `supabase/migrations/0012_pair_close.sql` by hand in the SQL
+editor (succeeded) and redeployed with `vercel --prod` (succeeded —
+verified via `vercel ls`: a fresh Production deployment, 34s old at the
+time of checking, matching local HEAD `aaa35ef`). Everything logged in
+tonight's "Slack walkthrough with Melissa" section below is now live:
+Concerns removed, the name-button fix, the three duplicate-button fixes,
+Feedback reordered, the save-confirmation DM, History added to Slack,
+and the new "Final wrap up for this conversation" pairing close-out
+with reopen support on the website's History page.
+
+**Not done yet, carried to next session:** adding a new employee from
+Slack (needs its own database function, scoped in the walkthrough
+section below); the silent-click-failure fix for Slack buttons (Goals
+Edit and others can click and do nothing on an expired `trigger_id`,
+diagnosed but not fixed); Handbook's website-side edit permission
+(still open to anyone, no real HR role exists to restrict it to).
+Melissa hasn't tried the new "Final wrap up" button live yet — worth
+doing together next time, same as the rest of tonight's walkthrough.
+
 ## Correction, 2026-09-01 evening: the keep-warm cron never actually ran
 
 The `.github/workflows/keep-warm.yml` file added in `677fc00` had an
