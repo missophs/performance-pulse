@@ -43,13 +43,105 @@ reducing cold starts should be read as aspirational, not verified.
 - **Secrets:** `web-app/.env.local` on this Mac (gitignored, on purpose)
   and the Vercel project's environment variables. Not in the repo.
 
-## Next session (planned 2026-09-02): Slack walkthrough with Melissa
+## Slack walkthrough with Melissa, 2026-09-01 evening — live, in her own Slack
 
-Melissa has not yet seen the Slack side or the password sign-in flow
-with her own eyes; both were only described as tested. Plan: open the
-live site's `/login` and the Slack Home tab together, one click per
-step, covering sign-in, the Home tab, one add-form, one wrap-up, and
-confirming the result shows on the website. No code changes expected.
+Ran the planned walkthrough. Not a quiet click-through — she drove her own
+real Slack window while I read the code and checked findings live in
+production, and it surfaced a real backlog. Deploy status matters here:
+one `vercel --prod` run happened partway through (confirmed live via her
+own screenshot: the Home tab showed "Edit your own name") — that covers
+everything through commit `afb8650`. **Three more commits landed after
+that deploy and are pushed but NOT live yet** — `82be5b5`, `62bf9d4`,
+`de8ced6`. Another `vercel --prod` is needed before any of the fixes
+below the line show up for her.
+
+**Removed entirely, Slack + website (deployed):**
+- **Concerns.** Manager-only, invisible to the employee, no response
+  path — confirmed dead-end in the code (no `add_concern` handler ever
+  existed in Slack; the website tab redirected employees away from it on
+  sight). Melissa's call after walking through what it actually did:
+  "remove all concerns from app and slack." Removed from both, including
+  its references in History/Export/the review-draft builder. The
+  database table and its RLS policy are untouched — nothing was dropped,
+  just the app-layer access to it. Commits `964ce65` (Slack) and
+  `afb8650` (website).
+
+**Fixed, live-verified against her real screen (deployed):**
+- The "Edit your name" button used to sit on the same line as "Your 1:1
+  partner: [name]," reading like it edited the partner. Now its own line:
+  "You appear as **[name]** to [partner] — Edit your own name."
+  Confirmed this really was the bug and really is fixed, both by reading
+  her live screen before and after.
+
+**Fixed, pushed (`82be5b5`, `62bf9d4`, `de8ced6`) — NOT deployed yet:**
+- **Three duplicate buttons.** Career, Documents, and Suggestions each
+  had the identical action twice — once on the Home tab, once again
+  inside their own "View" popup. Removed the redundant inner one in all
+  three.
+- **Feedback reordered and relabeled.** Give feedback / Ask for feedback
+  now come before View feedback, which is now labeled "View feedback in
+  the app" so it's clear that one's app-only.
+- **Save/submit confirmation.** A successful Slack submission used to
+  just close the modal — identical to Cancel, no way to tell a save
+  happened from nothing happening. Every Save now triggers a DM
+  ("✅ Saved in Performance Pulse.") right after, added at the single
+  shared `view_submission` dispatch point so it covers every form at
+  once rather than 20 separate handler edits.
+- **History, added to Slack.** New section on the Home tab linking
+  straight to `/history` on the website. `openInApp` can now take a
+  path instead of always pointing at the homepage — every other
+  "open in app" button still points at the homepage unchanged.
+
+**Diagnosed, not yet fixed — needs a real decision, not a quick edit:**
+- **Silent failures on Slack button clicks.** Goals' "Edit" button (and
+  likely others) can click and visibly do nothing: opening a nested
+  modal needs a Slack `trigger_id` that's single-use and expires 3
+  seconds after issue; if a cold serverless start eats that window, the
+  failure is caught and only `console.error`'d — the user sees nothing.
+  Found the same silent-catch pattern in 15 places in
+  `app/api/slack/interactivity/route.js`. Not fixed tonight — it's a
+  real feature (visible errors on failure), not a one-line change.
+  Melissa wants it; scope it properly next session.
+- **Handbook edit permission.** Confirmed live: the website's "HR only:
+  add the link" button has no actual enforcement — any signed-in
+  manager or employee can click it today, and there's no HR account
+  type in this app to restrict it to. Decision from Melissa: Slack stays
+  view-only for Handbook, permanently — no Slack-side add, ever. The
+  website side (tightening "HR only" to something real) is still
+  unresolved and **not implemented** — nothing changed in code for this
+  yet.
+
+**Scoped but not started — real schema work, needs Melissa's answer on one
+question before writing the migration:**
+- **Ending a manager-employee pairing ("Final wrap up for this
+  conversation").** Today every pairing anyone creates stays in the
+  Slack switcher forever — confirmed in `listMyPairs`, no closed/active
+  concept exists at all. Plan, agreed with Melissa: keep the existing
+  "Wrap up a 1:1" exactly as it is (that's per-meeting notes, stays);
+  add a **separate**, new "Final wrap up for this conversation" button
+  at the bottom of the Home tab (next to History) that ends the whole
+  pairing — both sides are told, the pairing drops out of the active
+  switcher, and its data stays fully reachable in History/Export,
+  nothing deleted. Needs a new `closed_at` (+ closing note) column on
+  `pairs`, a migration Melissa has to paste into Supabase's SQL editor
+  by hand, same as every schema change here. **Blocked on one open
+  question: can a closed pairing ever be reopened, or is this meant to
+  be permanent?** Don't write the migration until that's answered — it
+  changes the shape (a single timestamp vs. a small open/close history).
+- **Adding a new employee from Slack.** The website already has this
+  ("Add another pairing," `/onboarding/add`, linked from
+  `components/AppShell.js` — a real, working, existing feature Melissa
+  didn't know was there). Slack has no equivalent. Can't just reuse the
+  website's `create_pair` database function — it identifies "who's
+  doing this" from `auth.uid()`, which only exists in a browser session;
+  Slack's handlers run as the service-role admin client with no such
+  session (see the governance note in `web-app/CLAUDE.md` about why
+  Slack handlers can't lean on auth the way the website does). Needs a
+  new, separate database function written with the same identity-safety
+  care as everything else here. Scoped to be built alongside the
+  pairing close-out above, since they're two halves of the same "starts
+  fresh with someone new" story.
+
 
 ## What's actually left, total (as of 2026-08-31, night)
 
