@@ -111,24 +111,34 @@ below the line show up for her.
   unresolved and **not implemented** — nothing changed in code for this
   yet.
 
-**Scoped but not started — real schema work, needs Melissa's answer on one
-question before writing the migration:**
+**Built and pushed (`4130b01`, `6778adb`) — needs the migration run AND a
+redeploy before any of it is live:**
 - **Ending a manager-employee pairing ("Final wrap up for this
-  conversation").** Today every pairing anyone creates stays in the
-  Slack switcher forever — confirmed in `listMyPairs`, no closed/active
-  concept exists at all. Plan, agreed with Melissa: keep the existing
-  "Wrap up a 1:1" exactly as it is (that's per-meeting notes, stays);
-  add a **separate**, new "Final wrap up for this conversation" button
-  at the bottom of the Home tab (next to History) that ends the whole
-  pairing — both sides are told, the pairing drops out of the active
-  switcher, and its data stays fully reachable in History/Export,
-  nothing deleted. Needs a new `closed_at` (+ closing note) column on
-  `pairs`, a migration Melissa has to paste into Supabase's SQL editor
-  by hand, same as every schema change here. **Blocked on one open
-  question: can a closed pairing ever be reopened, or is this meant to
-  be permanent?** Don't write the migration until that's answered — it
-  changes the shape (a single timestamp vs. a small open/close history).
-- **Adding a new employee from Slack.** The website already has this
+  conversation").** Melissa answered the one open question — reopenable,
+  not permanent — so this is now built to that shape. New
+  `supabase/migrations/0012_pair_close.sql` adds `closed_at` +
+  `closing_note` to `pairs`; **this file has to be pasted into
+  Supabase's SQL editor by hand before any of the rest of this works** —
+  writing it isn't the same as applying it, same as every schema change
+  in this project. The existing "Wrap up a 1:1" is untouched (per-meeting
+  notes, stays); a new, separate "Final wrap up for this conversation"
+  button sits at the bottom of the Slack Home tab, next to History. On
+  submit: the pairing is marked closed, the submitter gets the normal
+  save-confirmation DM, and the other side gets a direct, specific DM by
+  email (`dmByEmail`, now exported from `lib/slack-send.js`) rather than
+  going through the batched notification digest, so a change this
+  significant can't get folded into a generic count. Closed pairings
+  drop out of the Slack switcher and the website dashboard — both now
+  filtered at the source (`resolveSlackUser`'s query and `listMyPairs`
+  itself) — but every row that references that `pair_id` is untouched;
+  History and Export still reach all of it. **Reopening** lives on the
+  website's History page: a new "Closed pairings" card lists them (only
+  shows up if you have any) with a Reopen button that just clears
+  `closed_at` — instantly active again, nothing else changes. Needed
+  threading `userId` through the dashboard layout's `ctx` to make that
+  page's query possible; every other page's `ctx` shape is unchanged.
+- **Adding a new employee from Slack.** Not built yet — still real,
+  separate work. The website already has this
   ("Add another pairing," `/onboarding/add`, linked from
   `components/AppShell.js` — a real, working, existing feature Melissa
   didn't know was there). Slack has no equivalent. Can't just reuse the
