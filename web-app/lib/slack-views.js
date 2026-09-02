@@ -62,7 +62,7 @@ const button = (text, actionId, value, style) => ({
   ...(value !== undefined && value !== "" ? { value: String(value) } : {}),
   ...(style ? { style } : {}),
 });
-const openInApp = (label = "Open in app") => ({ type: "button", text: { type: "plain_text", text: label, emoji: true }, url: APP_URL, action_id: "open_app" });
+const openInApp = (label = "Open in app", path = "") => ({ type: "button", text: { type: "plain_text", text: label, emoji: true }, url: `${APP_URL}${path}`, action_id: "open_app" });
 const datePicker = (actionId, initial) => ({ type: "datepicker", action_id: actionId, ...(initial ? { initial_date: initial } : {}) });
 const modal = (callbackId, title, blocks, submit = "Save", privateMetadata) => ({
   type: "modal",
@@ -163,6 +163,8 @@ export function homeView(ctx, d) {
     actions([button("View documents", "open_list_documents"), button("Add a link", "open_add_document")]),
     section("*Handbook*"),
     actions([button("View links", "open_list_handbook")]),
+    section("*History*\nEverything past — meetings, goals, feedback, all of it — lives in the app."),
+    actions([openInApp("Open History in the app", "/history")]),
     { type: "divider" },
     context(":lock: Everything here is shared only between you and your 1:1 partner — never with HR."),
   ];
