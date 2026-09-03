@@ -11,6 +11,7 @@ import { verifySlackSignature } from "@/lib/slack-verify";
 import { resolveSlackUser, setSlackPairSelection } from "@/lib/slack-user";
 import { slackApi } from "@/lib/slack-api";
 import { loadHomeData } from "@/lib/slack-home-data";
+import { LD_RULES } from "@/lib/development-content";
 import {
   homeView,
   editNameModal,
@@ -37,7 +38,8 @@ import {
   addFeedbackRequestModal,
   listFeedbackModal,
   wrapUpModal,
-  closePairModal,
+  wrapUpConversationModal,
+  addEmployeeModal,
   lastMeetingModal,
   listHandbookLinksModal,
   listDocumentsModal,
@@ -69,7 +71,8 @@ import {
   addFeedback,
   addFeedbackRequest,
   saveWrapUp,
-  closePair,
+  wrapUpConversation,
+  createPairForSlack,
   notify,
   listMeetings,
   listHandbookLinks,
@@ -181,7 +184,15 @@ const OPENERS = {
     },
   },
   open_wrap_up: { title: "Wrap up", build: async (admin, ctx) => wrapUpModal((await loadHomeData(admin, ctx.pairId)).topics) },
-  open_close_pair: { title: "Final wrap up", build: async () => closePairModal() },
+  open_close_pair: { title: "Final wrap up", build: async () => wrapUpConversationModal() },
+  // Button is manager-only in homeView too — this re-checks server-side in
+  // case of a stale/replayed action, same defense-in-depth as every other
+  // role-gated opener here.
+  open_add_employee: {
+    title: "Add a new employee",
+    build: async (admin, ctx) =>
+      ctx.isMgr ? addEmployeeModal() : noticeModal("Add a new employee", "Only managers can add a new employee."),
+  },
   open_add_goal: { title: "Add a goal", build: async (admin, ctx) => addGoalModal(ctx, normalizeDraft(GOAL_FIELDS, await draftFor(admin, ctx, "goal"))) },
   open_add_devplan: {
     title: "Add a development plan",
@@ -228,7 +239,7 @@ const OPENERS = {
     },
   },
   open_last_meeting: { title: "Last 1:1", build: async (admin, ctx) => lastMeetingModal(await listMeetings(admin, ctx.pairId)) },
-  open_list_handbook: { title: "Handbook links", build: async (admin, ctx) => listHandbookLinksModal(await listHandbookLinks(admin, ctx.pairId)) },
+  open_list_handbook: { title: "Handbook links", build: async (admin) => listHandbookLinksModal(await listHandbookLinks(admin)) },
   open_list_suggestions: {
     title: "My suggestions",
     build: async (admin, ctx) => listMySuggestionsModal(await listCustomSuggestions(admin, ctx.pairId), ctx.role),
@@ -438,17 +449,43 @@ const SUBMISSIONS = {
     await updateProfile(admin, ctx.profileId, { full_name: name });
     ctx.myName = name; // so the Home-tab refresh right after this shows the new name immediately
   },
-  // Ends the pairing, not one meeting -- wrap_up (below) is unchanged. The
-  // submitter gets the standard confirmSaved DM from the shared dispatcher;
-  // this handles telling the OTHER side directly, by email (not a Slack
-  // action they took), since resolveSlackUser is about to stop finding this
-  // pair for either of them the next time their Home tab opens.
-  close_pair: async (admin, ctx, v) => {
+  // Closes out open topics/goals/actions for the pair (see wrapUpConversation
+  // in lib/data.js) -- the pairing itself is never touched, unlike the old
+  // behavior this replaced. The submitter gets the standard confirmSaved DM
+  // from the shared dispatcher; this handles telling the OTHER side
+  // directly, by email, since nothing about their Home tab data changes on
+  // its own without a fresh open.
+  wrap_up_conversation: async (admin, ctx, v) => {
     const note = (fieldVal(v, "note") || "").trim();
-    await closePair(admin, ctx.pairId, note);
+    const { topics, goals, actions } = await wrapUpConversation(admin, ctx.pairId);
     const otherEmail = ctx.isMgr ? ctx.pair.employee_email : ctx.pair.manager_email;
-    const text = `${ctx.myName} closed out this 1:1 pairing with a final wrap up.${note ? `\n\nClosing note: ${note}` : ""}`;
-    await dmByEmail(otherEmail, { text }).catch((e) => console.error("close pair notify:", e));
+    const text = `${ctx.myName} did a final wrap up on your 1:1 conversation -- ${topics} topic(s), ${goals} goal(s), and ${actions} action(s) closed out. Your pairing is unaffected.${note ? `\n\nNote: ${note}` : ""}`;
+    await dmByEmail(otherEmail, { text }).catch((e) => console.error("wrap up conversation notify:", e));
+  },
+  // Manager-only (also gated in OPENERS above). createPairForSlack takes
+  // ctx.profileId/ctx.email -- the caller's own already-verified Slack
+  // identity -- never anything from the submitted form, so there's no way to
+  // create a pair naming someone other than yourself as manager. The new
+  // pair doesn't show up in ctx.pairs until the Home tab is next reopened
+  // (resolveSlackUser re-runs fresh then) -- same lazy staleness close_pair
+  // already accepts for the other side of an ended pairing.
+  add_employee: async (admin, ctx, v) => {
+    if (!ctx.isMgr) return;
+    const email = (fieldVal(v, "email") || "").trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return { error: { blockId: "email", message: "That doesn't look like a valid email." } };
+    }
+    if (email === ctx.email) {
+      return { error: { blockId: "email", message: "That's your own email." } };
+    }
+    try {
+      await createPairForSlack(admin, ctx.profileId, ctx.email, email);
+    } catch (e) {
+      return { error: { blockId: "email", message: e.message } };
+    }
+    await dmByEmail(email, { text: `${ctx.myName} added you as their direct report on Performance Pulse. Open the app to say hello.` }).catch((e) =>
+      console.error("add employee notify:", e)
+    );
   },
   add_topic: async (admin, ctx, v) => {
     // "text" is a required field (see addTopicModal, lib/slack-views.js), so
@@ -934,6 +971,22 @@ async function handleInteraction(admin, slackUserId, payload) {
         await slackApi("views.update", { view_id: payload.view.id, view: addGoalModal(ctx, { text, why, measure, target, status }) }).catch((e) =>
           console.error("goal suggestion prefill view update:", e)
         );
+      }
+    } else if (action.action_id === "devplan_suggested_pick") {
+      // Same section+accessory reasoning as suggested_pick/goal_suggested_pick
+      // above. Value is "ruleIndex::pickIndex" (see devSuggestionOptionGroups,
+      // lib/slack-views.js) — looked back up against LD_RULES rather than
+      // carried in the option itself, since a rule's why/support/measure
+      // don't fit in a select value.
+      const [ruleIdx, pickIdx] = (action.selected_option?.value || "").split("::").map(Number);
+      const rule = LD_RULES[ruleIdx];
+      const pick = rule?.picks[pickIdx];
+      if (rule && pick && payload.view?.id) {
+        const target = fieldValV2(payload.view?.state?.values, "target");
+        await slackApi("views.update", {
+          view_id: payload.view.id,
+          view: addDevPlanModal(ctx, { area: rule.area, why: rule.why, type: pick[0], activity: pick[1], support: rule.support, measure: rule.measure, target }),
+        }).catch((e) => console.error("devplan suggestion prefill view update:", e));
       }
     } else if (action.action_id === "switch_pair") {
       const chosenId = action.selected_option?.value;

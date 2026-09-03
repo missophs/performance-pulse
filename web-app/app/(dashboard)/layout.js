@@ -34,11 +34,16 @@ export default async function DashboardLayout({ children }) {
   ]);
   const partnerNameById = new Map(uniquePartnerIds.map((id, i) => [id, partnerProfiles[i]?.full_name || partnerProfiles[i]?.email || null]));
 
+  // employee_label is a manager-only, per-pairing display name -- it never
+  // touches the employee's real profiles.full_name, and it only applies
+  // when the current account is the manager side of this specific pair.
   const pairOptions = pairs.map((p) => {
     const r = p.employee_id === user.id ? "employee" : "manager";
+    const realPartnerName = partnerNameById.get(partnerIdOf(p)) || (r === "employee" ? "Your manager" : "Your employee");
     return {
       id: p.id,
-      partnerName: partnerNameById.get(partnerIdOf(p)) || (r === "employee" ? "Your manager" : "Your employee"),
+      partnerName: r === "manager" && p.employee_label ? p.employee_label : realPartnerName,
+      employeeLabel: r === "manager" ? p.employee_label || "" : "",
     };
   });
 
@@ -63,6 +68,7 @@ export default async function DashboardLayout({ children }) {
     role,
     myName: myProfile?.full_name || myProfile?.email || "",
     partnerName: pairOptions.find((p) => p.id === pair.id)?.partnerName || (role === "employee" ? "Your manager" : "Your employee"),
+    employeeLabel: pairOptions.find((p) => p.id === pair.id)?.employeeLabel || "",
     email: user.email,
   };
 

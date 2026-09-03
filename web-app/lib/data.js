@@ -41,6 +41,32 @@ export async function createPair(supabase, myRole, partnerEmail) {
   return data;
 }
 
+// Slack-only equivalent of create_pair's RPC. The RPC resolves "who's doing
+// this" from auth.uid(), which only exists in a browser session -- Slack's
+// handlers run as the admin client with no such session (see the governance
+// note in web-app/CLAUDE.md), so managerId/managerEmail must come from the
+// caller's already-verified Slack identity (resolveSlackUser), never from
+// anything in the interaction payload itself. Scoped to manager-adds-employee
+// only, matching the one real request this exists for (SLACK_TODO.md).
+export async function createPairForSlack(admin, managerId, managerEmail, employeeEmail) {
+  const { data: employeeProfile } = await admin.from("profiles").select("id").eq("email", employeeEmail).maybeSingle();
+  const { data, error } = await admin
+    .from("pairs")
+    .insert({
+      manager_id: managerId,
+      manager_email: managerEmail,
+      employee_id: employeeProfile?.id || null,
+      employee_email: employeeEmail,
+    })
+    .select()
+    .single();
+  if (error) {
+    if (error.code === "23505") throw new Error("You're already paired with this person.");
+    throw error;
+  }
+  return data;
+}
+
 export async function getProfile(supabase, userId) {
   const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
   if (error) throw error;
@@ -439,6 +465,14 @@ export async function addFeedback(supabase, pairId, { giverRole, fromName, toNam
   return data;
 }
 
+export async function respondToFeedback(supabase, feedbackId, response) {
+  const { error } = await supabase
+    .from("feedback_entries")
+    .update({ response, responded_at: new Date().toISOString() })
+    .eq("id", feedbackId);
+  if (error) throw error;
+}
+
 export async function listFeedbackRequests(supabase, pairId) {
   const { data, error } = await supabase
     .from("feedback_requests")
@@ -748,6 +782,35 @@ export async function deleteAction(supabase, id) {
   if (error) throw error;
 }
 
+// ---------------------------------------------------- final wrap up --------
+
+/**
+ * "Final wrap up for this conversation" (Slack). Closes out everything
+ * currently in flight -- open topics, in-progress goals, open actions -- so
+ * the Home tab doesn't sit there looking stuck, without touching the pairing
+ * itself. Nothing is deleted: each row just moves to its own "closed"
+ * status, same as ticking it off by hand, and stays visible in History.
+ * Topics marked Parking Lot and goals marked Deferred are left alone --
+ * those were deliberately set aside, not forgotten.
+ */
+export async function wrapUpConversation(supabase, pairId) {
+  const now = new Date().toISOString();
+  const [topics, goals, actions] = await Promise.all([
+    supabase.from("topics").update({ status: "Discussed", updated_at: now }).eq("pair_id", pairId).eq("status", "Open").select("id"),
+    supabase
+      .from("goals")
+      .update({ status: "Complete", updated_at: now })
+      .eq("pair_id", pairId)
+      .in("status", ["Not Started", "In Progress", "At Risk"])
+      .select("id"),
+    supabase.from("actions").update({ status: "Done", updated_at: now }).eq("pair_id", pairId).eq("status", "Open").select("id"),
+  ]);
+  if (topics.error) throw topics.error;
+  if (goals.error) throw goals.error;
+  if (actions.error) throw actions.error;
+  return { topics: topics.data?.length ?? 0, goals: goals.data?.length ?? 0, actions: actions.data?.length ?? 0 };
+}
+
 // ------------------------------------------------------- activity log ------
 // Everything else here records only *creation*, so marking a topic discussed
 // or ticking an action done used to leave no trace of who did it or when.
@@ -957,24 +1020,61 @@ export async function deleteDocument(supabase, doc) {
 
 // ------------------------------------------------------------- handbook ----
 
-export async function listHandbookLinks(supabase, pairId) {
+// Company-wide, not pair-scoped -- every employee sees the same handbook
+// regardless of who their manager is. Writes are RLS-gated to HR (see
+// migration 0013_global_handbook.sql); this function doesn't need to know
+// who's calling, the database enforces it.
+export async function listHandbookLinks(supabase) {
   const { data, error } = await supabase
     .from("handbook_links")
     .select("*")
-    .eq("pair_id", pairId)
     .order("created_at", { ascending: false });
   if (error) throw error;
   return data;
 }
 
-export async function addHandbookLink(supabase, pairId, title, url) {
+export async function addHandbookLink(supabase, title, url) {
   const { data, error } = await supabase
     .from("handbook_links")
-    .insert({ pair_id: pairId, title, url })
+    .insert({ title, url })
     .select()
     .single();
   if (error) throw error;
   return data;
+}
+
+const HANDBOOK_SIZE_LIMIT = 15 * 1024 * 1024;
+
+export async function uploadHandbookFile(supabase, file) {
+  if (file.size > HANDBOOK_SIZE_LIMIT) {
+    throw new Error("File is larger than 15MB. Share a link instead.");
+  }
+  const path = `${crypto.randomUUID()}-${file.name}`;
+  const { error: uploadErr } = await supabase.storage.from("handbook").upload(path, file);
+  if (uploadErr) throw uploadErr;
+
+  const { data, error } = await supabase
+    .from("handbook_links")
+    .insert({ title: file.name, storage_path: path, size: file.size, mime_type: file.type })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function getHandbookFileUrl(supabase, link) {
+  if (link.url) return link.url;
+  const { data, error } = await supabase.storage.from("handbook").createSignedUrl(link.storage_path, 3600);
+  if (error) throw error;
+  return data.signedUrl;
+}
+
+export async function deleteHandbookLink(supabase, link) {
+  if (link.storage_path) {
+    await supabase.storage.from("handbook").remove([link.storage_path]);
+  }
+  const { error } = await supabase.from("handbook_links").delete().eq("id", link.id);
+  if (error) throw error;
 }
 
 // ------------------------------------------------------------- messages ----

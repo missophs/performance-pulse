@@ -207,14 +207,14 @@ function DevelopmentPageInner() {
 
       <div className="card">
         <div className="card-head">
-          <h2>Development plans</h2>
-          <button className="btn sm" onClick={openAddDev}>Add a development plan</button>
+          <h2>Learning &amp; development plans</h2>
+          <button className="btn sm" onClick={openAddDev}>Add a learning &amp; development plan</button>
         </div>
         {loading ? (
           <p className="card-note">Loading…</p>
         ) : devPlans.length === 0 ? (
           <div className="empty">
-            <div className="big">No development plans yet</div>
+            <div className="big">No learning &amp; development plans yet</div>
             {isMgr ? `Recommend something that stretches ${employeeName} a little.` : "Ask for what would help you grow."}
           </div>
         ) : (
@@ -304,7 +304,7 @@ function DevelopmentPageInner() {
 
       <Modal
         open={devModalOpen}
-        title={editingDev ? "Edit development plan" : isMgr ? "Recommend development" : "Request development"}
+        title={editingDev ? "Edit learning & development plan" : isMgr ? "Recommend learning & development" : "Request learning & development"}
         note={editingDev ? undefined : isMgr ? "A good recommendation says what to build, how, and what you'll do to help." : "Ask for what would help you grow. Your manager sees this straight away."}
         onClose={closeDevModal}
         onSave={handleSaveDev}

@@ -13,6 +13,7 @@
 import { isOpenTopic, ago } from "@/lib/format";
 import { TOPIC_CATEGORIES, SUGGESTIONS } from "@/lib/one-on-one-content";
 import { GOAL_SUGGESTIONS, SMART_GOAL_HELP, EMPLOYEE_GOAL_PROMPT } from "@/lib/goals-content";
+import { LD_RULES } from "@/lib/development-content";
 import { fieldBlockId } from "@/lib/slack-form-fields";
 
 const APP_URL = "https://performance-pulse-lyart.vercel.app";
@@ -130,7 +131,8 @@ export function homeView(ctx, d) {
         ]
       : []),
     section(`Your 1:1 partner: *${ctx.partnerName}* · you're the ${ctx.role}.`),
-    section(`You appear as *${ctx.myName}* to ${ctx.partnerName}.`, button("Edit your own name", "open_edit_name")),
+    section(`You appear as *${ctx.myName}* to ${ctx.partnerName}.`),
+    ...(ctx.isMgr ? [actions([button("Add a new employee", "open_add_employee")])] : []),
     context(`Next 1:1: ${next1on1}  ·  ${openTopics.length} open topic${openTopics.length === 1 ? "" : "s"}  ·  ${openActions.length} open action${openActions.length === 1 ? "" : "s"}`),
     { type: "divider" },
     section("*My 1:1*\nPrepare, talk, and wrap up — right here."),
@@ -146,11 +148,11 @@ export function homeView(ctx, d) {
     actions([button("My suggestions", "open_list_suggestions"), button("Write my own suggestion", "open_add_suggestion")]),
     { type: "divider" },
     section(`*Goals* — ${d.goals.length} on record`),
-    actions([button("View goals", "open_list_goals"), button("Add a goal", "open_add_goal")]),
-    section(`*Development* — ${d.devPlans.length} plan${d.devPlans.length === 1 ? "" : "s"}`),
-    actions([button("View plans", "open_list_devplans"), button("Add a plan", "open_add_devplan")]),
+    actions([button("Add a goal", "open_add_goal"), button("View goals", "open_list_goals")]),
+    section(`*Learning & development* — ${d.devPlans.length} plan${d.devPlans.length === 1 ? "" : "s"}`),
+    actions([button("Add a plan", "open_add_devplan"), button("View plans", "open_list_devplans")]),
     section(`*Achievements* — ${d.achievements.length} logged`),
-    actions([button("View achievements", "open_list_achievements"), button("Log one", "open_add_achievement")]),
+    actions([button("Log one", "open_add_achievement"), button("View achievements", "open_list_achievements")]),
     section(`*Feedback* — ${d.feedback.length} entries${openRequests.length ? `, ${openRequests.length} request${openRequests.length === 1 ? "" : "s"} waiting` : ""}`),
     actions([
       button("Give feedback", "open_add_feedback"),
@@ -160,13 +162,13 @@ export function homeView(ctx, d) {
     section("*Career*"),
     actions([button("View career", "open_list_career"), button("Edit my answers", "open_add_career")]),
     section(`*Documents* — ${d.documents.length}`),
-    actions([button("View documents", "open_list_documents"), button("Add a link", "open_add_document")]),
+    actions([button("Add a document", "open_add_document"), button("View documents", "open_list_documents")]),
     section("*Handbook*"),
     actions([button("View links", "open_list_handbook")]),
     section("*History*\nEverything past — meetings, goals, feedback, all of it — lives in the app."),
     actions([openInApp("Open History in the app", "/history")]),
     { type: "divider" },
-    section("Ending this pairing, for good, not just today's conversation:"),
+    section("Clear out open topics, goals, and actions so this doesn't sit stuck — the pairing stays:"),
     actions([button("Final wrap up for this conversation", "open_close_pair", "", "danger")]),
     { type: "divider" },
     context(":lock: Everything here is shared only between you and your 1:1 partner — never with HR."),
@@ -438,6 +440,18 @@ function goalSuggestionOptionGroups() {
   }));
 }
 
+// Same picker pattern, matched against lib/development-content.js's fixed,
+// hand-written LD_RULES (see that file — "not a language model"). Each rule
+// becomes one option group (its area), each of its picks one option, encoded
+// as "ruleIndex::pickIndex" so devplan_suggested_pick (route.js) can look the
+// whole rule back up without re-matching anything.
+function devSuggestionOptionGroups() {
+  return LD_RULES.map((r, ri) => ({
+    label: { type: "plain_text", text: r.area.slice(0, 75) },
+    options: r.picks.map((p, pi) => opt(`${p[0]}: ${p[1]}`, `${ri}::${pi}`)),
+  }));
+}
+
 const SMART_GOAL_CONTEXT = [SMART_GOAL_HELP.intro, ...SMART_GOAL_HELP.criteria.map(([k, v]) => `*${k}:* ${v}`)].join("\n");
 
 export function addGoalModal(ctx, draft, saved = false) {
@@ -514,9 +528,13 @@ export function addDevPlanModal(ctx, draft, saved = false) {
   const managerName = ctx.isMgr ? ctx.myName : ctx.partnerName;
   return modal(
     "add_devplan",
-    "Add a development plan",
+    "Add a plan",
     [
       ...draftControls("save_draft_devplan", saved),
+      section(
+        "*Pick a suggestion (optional)*",
+        { type: "static_select", action_id: "devplan_suggested_pick", option_groups: devSuggestionOptionGroups(), placeholder: { type: "plain_text", text: "Get a suggestion" } }
+      ),
       inputBlock(id("area"), "Area", plainInput("val", { placeholder: "e.g. Executive presentation skills", initial: draft?.area })),
       inputBlock(id("why"), "Why it matters", plainInput("val", { multiline: true, placeholder: "e.g. Increase effectiveness presenting to senior stakeholders", initial: draft?.why }), true),
       inputBlock(id("type"), "Type", staticSelect("val", DEV_TYPES, draft?.type || DEV_TYPES[0])),
@@ -541,7 +559,7 @@ export function listDevPlansModal(plans) {
       ])
     : [section("No development plans yet. Add one from the Home tab.")];
   blocks.push({ type: "divider" }, actions([openInApp("Open plans in the app for the full text")]));
-  return modal("view_devplans", "Development plans", blocks, "Close");
+  return modal("view_devplans", "Learning plans", blocks, "Close");
 }
 
 // ---------------------------------------------------------- achievements ---
@@ -696,7 +714,7 @@ export function listDocumentsModal(docs) {
 }
 
 export function addDocumentModal() {
-  return modal("add_document", "Add a document link", [
+  return modal("add_document", "Add a document", [
     inputBlock("name", "Name", plainInput("val")),
     inputBlock("url", "Link", plainInput("val", { placeholder: "https://..." })),
   ]);
@@ -772,16 +790,36 @@ export function wrapUpModal(topics) {
 // Ends the whole manager-employee pairing, not one meeting -- that's
 // wrapUpModal above, and it's unchanged. Reopenable (see reopenPair in
 // lib/data.js), so this is a serious step but not an irreversible one.
-export function closePairModal() {
+// -------------------------------------------------- add a new employee -----
+
+// Manager-only, mirrors the website's "Add another pairing" (/onboarding/add)
+// but scoped to manager-adds-employee, the one real request this exists for
+// (SLACK_TODO.md) -- see createPairForSlack (lib/data.js) for why this can't
+// just reuse the website's create_pair RPC.
+export function addEmployeeModal() {
   return modal(
-    "close_pair",
+    "add_employee",
+    "Add a new employee",
+    [
+      section(
+        "Starts a new 1:1 pairing with you as their manager. If they already use Performance Pulse it links right away — otherwise it's ready the moment they sign up with this email."
+      ),
+      inputBlock("email", "Their work email", plainInput("val", { placeholder: "name@company.com" }), true),
+    ],
+    "Add employee"
+  );
+}
+
+export function wrapUpConversationModal() {
+  return modal(
+    "wrap_up_conversation",
     "Final wrap up",
     [
       section(
-        "This ends the working relationship for this pairing — both of you will be told, and it drops out of your active list. Nothing is deleted; every goal, topic, and note stays reachable in History, and this can be reopened later if needed."
+        "This closes out any open topics, goals, and actions — marking them Discussed / Complete / Done — so your Home tab starts fresh. Nothing is deleted, and your pairing itself is not affected; you'll keep working together exactly as before."
       ),
-      inputBlock("note", "Anything worth noting as this closes", plainInput("val", { multiline: true, placeholder: "Optional — a closing note for the record." }), false),
+      inputBlock("note", "Anything worth noting as this closes", plainInput("val", { multiline: true, placeholder: "Optional — goes in the note to your partner." }), false),
     ],
-    "End this pairing"
+    "Close out this conversation"
   );
 }

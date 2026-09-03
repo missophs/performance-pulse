@@ -71,7 +71,7 @@ async function burstFor(supabaseAdmin, notification) {
 async function loadPairContext(supabaseAdmin, pairId) {
   const { data: pair, error: pairErr } = await supabaseAdmin
     .from("pairs")
-    .select("employee_id, manager_id, employee_email, manager_email, next_1on1_date")
+    .select("employee_id, manager_id, employee_email, manager_email, employee_label, next_1on1_date")
     .eq("id", pairId)
     .single();
   if (pairErr) throw pairErr;

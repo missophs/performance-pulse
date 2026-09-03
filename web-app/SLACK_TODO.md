@@ -1,5 +1,92 @@
 # Slack integration — status and what's left
 
+## Session closeout (2026-09-02): website wording/behavior fixes + add-employee-from-Slack shipped
+
+All built, deployed (`vercel --prod`), and code-verified today (build
+clean, lint unchanged from baseline, `npm test` 7/7). Website-side items
+below were live-checked in the browser after deploy; the one Slack-side
+item was code-verified but not yet click-tested by Melissa in her actual
+Slack (see its own note).
+
+**Website wording/behavior, all live:**
+- Manager check-in prep questions (`lib/one-on-one-content.js`'s
+  `MGR_Q`) rewritten from confusing third-person to direct second-person,
+  per Melissa's dictated rewrite, plus the intro sentence above them
+  (`components/one-on-one/CheckinCard.js`).
+- **Real bug found and fixed:** clicking "Add topic" gave zero visible
+  confirmation — the form just cleared with no feedback. Melissa clicked
+  it four times over ~30 seconds, each one silently saving a duplicate
+  ("dd" x4 in the database, since deleted). Fixed in
+  `app/(dashboard)/one-on-one/page.js`: button disables and shows
+  "Adding…" while saving, then a confirmation toast after
+  ("Added — [name] will see it under Talk").
+- Goals: "Why it matters" field relabeled to "What's the plan to
+  accomplish this?" (placeholder "Concretely, how you'll get there."),
+  and a standing note added near the Add-a-goal button — "You have the
+  opportunity to add a goal of your own below, too." — so employees are
+  invited to add their own goals without the manager having to
+  personally ask (Melissa's explicit call: "I don't want managers to
+  have to ask"). `app/(dashboard)/goals/page.js`.
+- "Development" renamed to "Learning & development" everywhere on that
+  page — section header, Add button, empty state, both modal titles
+  (`app/(dashboard)/development/page.js`). Melissa's reasoning: the bare
+  word read like a performance-improvement-plan euphemism ("looks like
+  the person sucks at their job"), not a growth feature.
+- **Feedback is now manager-only to give; employee can respond
+  instead.** Employees no longer see "Give feedback" (manager-only
+  button now, `app/(dashboard)/performance/page.js`). Employees get a
+  "Respond" action on each feedback entry — inline reply box, saved via
+  a new `respondToFeedback()` in `lib/data.js`, shown to both sides once
+  saved. Needed one small migration,
+  `supabase/migrations/0017_feedback_response.sql` (`response` text +
+  `responded_at` timestamptz on `feedback_entries`) — **run live in the
+  Supabase SQL editor this session**, columns confirmed present via a
+  direct REST query afterward.
+  - Also demoed and confirmed still working as designed: the
+    off-by-default "Let the app comment while I write" assist toggle
+    (word-matched, not AI) stops a vague/judgment-y feedback save
+    ("not a team player") with a "Save it as is" override — verified
+    live in Melissa's own Monte pairing, then discarded (never actually
+    saved).
+
+**Slack:**
+- ~~Adding a new employee from Slack~~ **Done, 2026-09-02.** New
+  manager-only "Add a new employee" button on the Home tab
+  (`lib/slack-views.js`'s `homeView`, gated on `ctx.isMgr`) opens a modal
+  for the new employee's email (`addEmployeeModal`). On submit
+  (`add_employee` in `app/api/slack/interactivity/route.js`), the pair is
+  created via a new `createPairForSlack()` (`lib/data.js`) — deliberately
+  **not** a reuse of the website's `create_pair` RPC, because that
+  function resolves "who's doing this" from `auth.uid()`, which doesn't
+  exist in a Slack request; `createPairForSlack` instead takes the
+  caller's manager id/email straight from `resolveSlackUser`'s
+  already-verified Slack identity, never from anything in the submitted
+  form, so there's no way to create a pair naming someone else as
+  manager. Gated manager-only in three places (button visibility, the
+  opener, and the submission handler itself) — same defense-in-depth
+  pattern as every other role-gated Slack action in this file. On
+  success, DMs the new employee if they're already on Slack (best
+  effort, swallowed if not). No migration needed — writes straight to
+  the existing `pairs` table, so it shows up on the website
+  automatically, same shared database as everything else here.
+  **Not yet click-tested in real Slack** — code-verified (build, lint,
+  tests) and deployed, but Melissa didn't have a chance to open Slack
+  and actually press the button this session.
+
+**Newly outstanding, found while doing the above (not yet decided or
+built):**
+- **Slack's own screens are now out of sync with the website's wording
+  and access rules.** Slack's "Add a goal" modal still says "Why it
+  matters" (not updated to match). Slack's Home tab still shows "Give
+  feedback" to both roles — not restricted to managers the way the
+  website now is. Flagged to Melissa; she moved on to scope
+  add-employee-from-Slack instead of deciding, so this is still open,
+  not declined.
+- The employee side of the new "Respond to feedback" UI was never
+  visually verified — Melissa's test pairing's employee side is a real
+  second account (`dhwconsulting3@gmail.com`), which the assistant has
+  no login access to. Code-reviewed only.
+
 ## Session closeout (2026-09-01, night): pairing close-out is live
 
 Melissa ran `supabase/migrations/0012_pair_close.sql` by hand in the SQL
@@ -180,20 +267,11 @@ redeploy before any of it is live:**
   `closed_at` — instantly active again, nothing else changes. Needed
   threading `userId` through the dashboard layout's `ctx` to make that
   page's query possible; every other page's `ctx` shape is unchanged.
-- **Adding a new employee from Slack.** Not built yet — still real,
-  separate work. The website already has this
-  ("Add another pairing," `/onboarding/add`, linked from
-  `components/AppShell.js` — a real, working, existing feature Melissa
-  didn't know was there). Slack has no equivalent. Can't just reuse the
-  website's `create_pair` database function — it identifies "who's
-  doing this" from `auth.uid()`, which only exists in a browser session;
-  Slack's handlers run as the service-role admin client with no such
-  session (see the governance note in `web-app/CLAUDE.md` about why
-  Slack handlers can't lean on auth the way the website does). Needs a
-  new, separate database function written with the same identity-safety
-  care as everything else here. Scoped to be built alongside the
-  pairing close-out above, since they're two halves of the same "starts
-  fresh with someone new" story.
+- ~~**Adding a new employee from Slack.**~~ **Done, 2026-09-02 — built,
+  deployed, code-verified; Melissa hasn't yet clicked the actual Slack
+  button herself.** Full detail in tonight's closeout section at the top
+  of this file. Kept as a one-line stub for the same reason as item 6
+  below.
 
 
 ## What's actually left, total (as of 2026-08-31, night)

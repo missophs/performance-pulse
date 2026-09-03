@@ -146,6 +146,7 @@ export default function GoalsPage() {
           <h2>Goals</h2>
           <button className="btn sm" onClick={openAdd}>Add a goal</button>
         </div>
+        <p className="card-note">You have the opportunity to add a goal of your own below, too.</p>
         {loading ? (
           <p className="card-note">Loading…</p>
         ) : goals.length === 0 ? (
@@ -159,7 +160,7 @@ export default function GoalsPage() {
                 <li key={g.id}>
                   <div className="item-body">
                     <div className="item-text">{g.text}</div>
-                    {g.why && <div className="item-sub"><strong>Why:</strong> {g.why}</div>}
+                    {g.why && <div className="item-sub"><strong>Plan:</strong> {g.why}</div>}
                     {g.measure && <div className="item-sub"><strong>Success looks like:</strong> {g.measure}</div>}
                     {g.obstacles && <div className="item-sub"><strong>In the way:</strong> {g.obstacles}</div>}
                     {g.support && <div className="item-sub"><strong>Support needed:</strong> {g.support}</div>}
@@ -239,8 +240,8 @@ export default function GoalsPage() {
           <input id="glText" type="text" placeholder="e.g. Cut onboarding time for new customers to under 10 days" value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} />
         </div>
         <div className="field">
-          <label htmlFor="glWhy">Why it matters</label>
-          <textarea id="glWhy" placeholder="What changes if this lands." value={form.why} onChange={(e) => setForm({ ...form, why: e.target.value })} />
+          <label htmlFor="glWhy">What's the plan to accomplish this?</label>
+          <textarea id="glWhy" placeholder="Concretely, how you'll get there." value={form.why} onChange={(e) => setForm({ ...form, why: e.target.value })} />
         </div>
         <div className="field">
           <label htmlFor="glMeasure">How we'll know it worked</label>

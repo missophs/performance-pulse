@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { PulseProvider, usePulse } from "@/components/PulseContext";
 import { createClient } from "@/lib/supabase/client";
 import { initials } from "@/lib/format";
-import { updateProfile } from "@/lib/data";
+import { updateProfile, updatePair } from "@/lib/data";
 import { setCurrentPair } from "@/lib/actions";
 import NotificationBell from "@/components/NotificationBell";
 import Modal from "@/components/ui/Modal";
@@ -33,7 +33,7 @@ export default function AppShell({ ctx, counts, children }) {
 }
 
 function ShellBody({ counts, children }) {
-  const { pairId, pairs, role, myName, isMgr, supabase } = usePulse();
+  const { pairId, pairs, role, myName, partnerName, employeeLabel, isMgr, supabase } = usePulse();
   const pathname = usePathname();
   const router = useRouter();
 
@@ -41,6 +41,9 @@ function ShellBody({ counts, children }) {
   const [nameInput, setNameInput] = useState(myName);
   const [savingName, setSavingName] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const [editingLabel, setEditingLabel] = useState(false);
+  const [labelInput, setLabelInput] = useState(employeeLabel);
+  const [savingLabel, setSavingLabel] = useState(false);
 
   async function signOut() {
     const supabase = createClient();
@@ -72,6 +75,19 @@ function ShellBody({ counts, children }) {
     await updateProfile(supabase, user.id, { full_name: trimmed });
     setSavingName(false);
     setEditingName(false);
+    router.refresh();
+  }
+
+  function openLabelEdit() {
+    setLabelInput(employeeLabel);
+    setEditingLabel(true);
+  }
+
+  async function saveLabel() {
+    setSavingLabel(true);
+    await updatePair(supabase, pairId, { employee_label: labelInput.trim() || null });
+    setSavingLabel(false);
+    setEditingLabel(false);
     router.refresh();
   }
 
@@ -125,9 +141,13 @@ function ShellBody({ counts, children }) {
             <Link href="/onboarding/add" className="btn ghost sm" title="Set up a 1:1 with someone else">
               + Add pairing
             </Link>
-            <span className="badge b-purple" title="Your role in this 1:1">
-              {isMgr ? "Manager" : "Employee"}
-            </span>
+            {isMgr ? (
+              <button className="btn ghost sm" onClick={openLabelEdit} title="Click to change the name you see for this employee">
+                You manage {partnerName}
+              </button>
+            ) : (
+              <span className="badge b-purple" title="Your role in this 1:1">Employee</span>
+            )}
             <NotificationBell />
             <div className={`avatar ${isMgr ? "mgr" : "emp"}`}>{initials(myName)}</div>
             <button className="who" onClick={openNameEdit} style={{ background: "none", border: "none", cursor: "pointer", font: "inherit", color: "inherit" }} title="Change your display name">
@@ -159,6 +179,27 @@ function ShellBody({ counts, children }) {
             value={nameInput}
             onChange={(e) => setNameInput(e.target.value)}
             placeholder="e.g. Melissa Weiss"
+          />
+        </div>
+      </Modal>
+
+      <Modal
+        open={editingLabel}
+        title="Employee name (just for you)"
+        note="This only changes what you call them here, in this pairing. Their own account name is unchanged, and no one else -- not them, not any other manager they have -- sees this label. Leave it blank to go back to their real name."
+        onClose={() => setEditingLabel(false)}
+        onSave={saveLabel}
+        saveLabel={savingLabel ? "Saving…" : "Save"}
+        saveDisabled={savingLabel}
+      >
+        <div className="field">
+          <label htmlFor="employeeLabel">Name to show you</label>
+          <input
+            id="employeeLabel"
+            type="text"
+            value={labelInput}
+            onChange={(e) => setLabelInput(e.target.value)}
+            placeholder="e.g. Monte"
           />
         </div>
       </Modal>

@@ -9,12 +9,15 @@ function pairRoleFields(pair, email) {
   const isMgr = pair.manager_email?.toLowerCase() === email;
   const employeeName = pair.employee?.full_name || pair.employee_email;
   const managerName = pair.manager?.full_name || pair.manager_email;
+  // employee_label is a manager-only, per-pairing display name (see
+  // migration 0015) -- only used for what the MANAGER calls the employee,
+  // never for the employee's own myName.
   return {
     isMgr,
     role: isMgr ? "manager" : "employee",
     otherRole: isMgr ? "employee" : "manager",
     myName: isMgr ? managerName : employeeName,
-    partnerName: isMgr ? employeeName : managerName,
+    partnerName: isMgr ? pair.employee_label || employeeName : managerName,
   };
 }
 

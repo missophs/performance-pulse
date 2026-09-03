@@ -33,15 +33,16 @@ export const EMP_Q = [
 ];
 
 export const MGR_Q = [
-  { id: "well", q: "What is this person doing particularly well?" },
-  { id: "impact", q: "What impact are they having?" },
-  { id: "continue", q: "What should they keep doing?" },
-  { id: "improve", q: "Where could they improve?" },
-  { id: "examples", q: "What specific examples support that?" },
-  { id: "support", q: "What support can you provide?" },
-  { id: "clear", q: "Are expectations clear? What might not be landing?" },
-  { id: "skills", q: "What skills could they build next?" },
-  { id: "stretch", q: "Is there a stretch assignment that would grow them?" },
+  { id: "personal", q: "How are you doing, specifically on a personal level?" },
+  { id: "impact", q: "Do you feel you're making an impact — for yourself and the team?" },
+  { id: "continue", q: "What do you think you should keep doing?" },
+  { id: "improve", q: "Are there things you feel you could improve on?" },
+  { id: "examples", q: "Do you have specific examples of work you'd like assistance with?" },
+  { id: "blocked", q: "Are there any roadblocks in your way?" },
+  { id: "support", q: "Are you getting the support you need from me? If not, what can I do to help?" },
+  { id: "clear", q: "Are your expectations clear? What might not be landing?" },
+  { id: "skills", q: "What skills do you want to build, or what do you want to learn?" },
+  { id: "stretch", q: "Is there a stretch assignment you'd find valuable, or one I could suggest for you?" },
   { id: "other", q: "Other — anything at all that's on your mind?" },
 ];
 

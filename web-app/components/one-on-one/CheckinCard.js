@@ -22,7 +22,7 @@ export default function CheckinCard({
 
   const title = isMgr ? "Your prep for this conversation" : "Your check-in";
   const note = isMgr
-    ? "A few questions to get you to specific, observable feedback before you sit down."
+    ? "Here are some questions to give some thought to before our 1:1. Please be honest and try to come up with answers to these before we talk."
     : "A short conversation instead of a long form. It adapts to what you say.";
 
   const [resuming, setResuming] = useState(false);

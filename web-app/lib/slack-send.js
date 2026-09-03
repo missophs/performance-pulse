@@ -30,9 +30,12 @@ function recipientsFor(toRole, pair) {
   // the employee's ping names the manager and vice versa.
   const managerName = pair.manager_name || pair.manager_email;
   const employeeName = pair.employee_name || pair.employee_email;
+  // employee_label is a manager-only, per-pairing display name (see
+  // migration 0015) -- only affects the manager's ping, never the
+  // employee's own.
   return [
     toEmployee && { email: pair.employee_email, isMgr: false, partnerName: managerName },
-    toManager && { email: pair.manager_email, isMgr: true, partnerName: employeeName },
+    toManager && { email: pair.manager_email, isMgr: true, partnerName: pair.employee_label || employeeName },
   ].filter(Boolean);
 }
 

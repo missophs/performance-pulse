@@ -64,6 +64,7 @@ export default function OneOnOnePage() {
   const [topicText, setTopicText] = useState("");
   const [topicCat, setTopicCat] = useState(TOPIC_CATEGORIES[0]);
   const [topicWhy, setTopicWhy] = useState("");
+  const [savingTopic, setSavingTopic] = useState(false);
 
   const [ciModalOpen, setCiModalOpen] = useState(false);
   const [ciPick, setCiPick] = useState(0);
@@ -185,12 +186,18 @@ export default function OneOnOnePage() {
 
   async function submitTopicForm() {
     const text = topicText.trim();
-    if (!text) return;
-    await addTopicRow(text, topicWhy.trim(), topicCat);
-    setTopicText("");
-    setTopicCat(TOPIC_CATEGORIES[0]);
-    setTopicWhy("");
-    await clearFormDraft(supabase, pairId, role, "topic").catch(() => {});
+    if (!text || savingTopic) return;
+    setSavingTopic(true);
+    try {
+      await addTopicRow(text, topicWhy.trim(), topicCat);
+      setTopicText("");
+      setTopicCat(TOPIC_CATEGORIES[0]);
+      setTopicWhy("");
+      await clearFormDraft(supabase, pairId, role, "topic").catch(() => {});
+      toast("Added", `"${text}" is on the agenda — ${partnerName} will see it under Talk.`);
+    } finally {
+      setSavingTopic(false);
+    }
   }
 
   async function discardTopicDraft() {
@@ -491,8 +498,8 @@ export default function OneOnOnePage() {
               <textarea id="topicWhy" value={topicWhy} onChange={(e) => setTopicWhy(e.target.value)} placeholder="A sentence of context so the conversation starts warm." />
             </div>
             <div className="row" style={{ gap: 8 }}>
-              <button className="btn" onClick={submitTopicForm}>
-                Add topic
+              <button className="btn" onClick={submitTopicForm} disabled={savingTopic}>
+                {savingTopic ? "Adding…" : "Add topic"}
               </button>
               {(topicText.trim() || topicWhy.trim() || topicCat !== TOPIC_CATEGORIES[0]) && (
                 <button className="btn ghost" onClick={discardTopicDraft}>

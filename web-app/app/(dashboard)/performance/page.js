@@ -15,6 +15,7 @@ import {
   deleteAchievement,
   listFeedback,
   addFeedback,
+  respondToFeedback,
   listFeedbackRequests,
   addFeedbackRequest,
   setFeedbackRequestStatus,
@@ -159,6 +160,25 @@ export default function PerformancePage() {
   const [fbExample, setFbExample] = useState("");
   const [fbShowCoach, setFbShowCoach] = useState(false);
   const fbTextRef = useRef(null);
+
+  const [respondingId, setRespondingId] = useState(null);
+  const [responseText, setResponseText] = useState("");
+
+  function openRespond(f) {
+    setRespondingId(f.id);
+    setResponseText(f.response || "");
+  }
+
+  async function submitResponse(f) {
+    const text = responseText.trim();
+    if (!text) return;
+    await respondToFeedback(supabase, f.id, text);
+    setRespondingId(null);
+    setResponseText("");
+    await notify(supabase, pairId, `${myName} responded to your feedback`, role, otherRole, "performance", "feedback");
+    toast("Sent", `${partnerName} can see your response.`);
+    loadAll();
+  }
 
   async function openGiveFeedback() {
     setFbMode("give");
@@ -404,13 +424,13 @@ export default function PerformancePage() {
               <h2>Feedback</h2>
               <div className="btn-row">
                 <button className="btn ghost sm" onClick={openRequestModal}>Ask for feedback</button>
-                <button className="btn sm" onClick={openGiveFeedback}>Give feedback</button>
+                {isMgr && <button className="btn sm" onClick={openGiveFeedback}>Give feedback</button>}
               </div>
             </div>
             <p className="card-note">
               {isMgr
-                ? `Feedback runs both ways here. What you write is visible to ${partnerName} straight away.`
-                : `You can give your manager feedback too. What you write is visible to ${partnerName} straight away.`}
+                ? `What you write is visible to ${partnerName} straight away.`
+                : `Feedback from ${partnerName} shows up here. You can respond to any of it below.`}
             </p>
 
             {openRequests.length > 0 && (
@@ -435,7 +455,7 @@ export default function PerformancePage() {
             )}
 
             {feedback.length === 0 ? (
-              <div className="empty"><div className="big">No feedback yet</div>Both of you can start this — recognition counts as feedback too.</div>
+              <div className="empty"><div className="big">No feedback yet</div>{isMgr ? "Recognition counts as feedback too." : `You'll see it here as soon as ${partnerName} gives you some.`}</div>
             ) : (
               <ul className="list">
                 {feedback.map((f) => (
@@ -447,6 +467,29 @@ export default function PerformancePage() {
                         <Badge cls={roleBadge(f.giver_role)}>{f.type}</Badge>
                         <span>{f.from_name} → {f.to_name} · {ago(f.created_at)}</span>
                       </div>
+                      {f.response && (
+                        <div className="item-sub"><strong>Response:</strong> {f.response}</div>
+                      )}
+                      {!isMgr && (
+                        respondingId === f.id ? (
+                          <div style={{ marginTop: 8 }}>
+                            <textarea
+                              value={responseText}
+                              onChange={(e) => setResponseText(e.target.value)}
+                              placeholder="Say what you think, or how you'll act on it."
+                              autoFocus
+                            />
+                            <div className="btn-row" style={{ marginTop: 6 }}>
+                              <button className="btn sm" onClick={() => submitResponse(f)}>Send response</button>
+                              <button className="btn ghost sm" onClick={() => setRespondingId(null)}>Cancel</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button className="btn ghost sm" style={{ marginTop: 6 }} onClick={() => openRespond(f)}>
+                            {f.response ? "Edit your response" : "Respond"}
+                          </button>
+                        )
+                      )}
                     </div>
                   </li>
                 ))}
