@@ -1,5 +1,128 @@
 # Slack integration — status and what's left
 
+## Session closeout (2026-09-03): Final wrap up rebuilt and actually fixed, code review, pilot-readiness pass
+
+Long session. Melissa's framing at the end: this app is about to become a
+**pilot** — real managers and employees testing it in both Slack and web,
+giving feedback, on a free-tier budget. Everything below is either shipped
+and live-verified, or explicitly flagged as needing her decision/action
+before the 3-day pilot window.
+
+**Final wrap up — redesigned per Melissa's explicit correction.** Her own
+words: "The wrap up one to one is the one on one conversation. That's
+all it is. The wrap up at the bottom is supposed to close it all out but
+keep the pairing." Old behavior actually ended the pairing (the bug she'd
+just hit firsthand testing it — see "real bugs found" below, this is why
+her real pairing showed "not linked" mid-session). Rebuilt
+`wrapUpConversation()` (`lib/data.js`) to bulk-close open topics/goals/
+actions (Discussed/Complete/Done) and leave `pairs.closed_at` untouched.
+Slack copy, modal, and callback_id renamed to match
+(`wrapUpConversationModal`, `wrap_up_conversation`).
+
+**Migrations 0013–0017 confirmed applied live** (global Handbook + HR
+gating, Handbook upload, `employee_label`, `suggested_1on1_*`, feedback
+`response`) — diagnosed via read-only queries first since git tracked
+them as "pending" but several were already live from earlier
+undocumented work. Only 0016 actually needed running this session.
+
+**Real bugs found via live testing (not just code review) — worth
+remembering the pattern, not just the fix:**
+- **Final wrap up silently closed zero topics.** `wrapUpConversation`
+  filtered topics on `status = "Open"` (capital O); the real default
+  topic status is lowercase `"open"` (`TOPIC_STATES[0]`,
+  `lib/one-on-one-content.js`). Goals/actions really do use capitalized
+  statuses, so this one case reads correctly by analogy and is wrong in
+  practice — a reminder to check the actual stored literal, not assume
+  consistency across tables.
+- **Final wrap up modal stuck on "Loading…" forever, un-cancelable.**
+  Root cause: its submit button label ("Close out this conversation",
+  27 chars) exceeds Slack's 24-char hard limit for modal submit text.
+  `views.update` was silently rejected and swallowed by the existing
+  `.catch(console.error)`, so the loading placeholder never got replaced
+  — invisible from the code, only caught by actually clicking the
+  button live. Fixed at the root: `modal()` now truncates `submit` the
+  same way it already truncated `title`.
+- Both of the above were **only found by live-clicking the real button**
+  after the code review passed — the code review (8-angle, high-recall)
+  caught 8 other real findings but missed both of these, since neither
+  is visible from reading the diff. Live-testing every changed
+  interactive path before calling something done is not optional for
+  this app.
+
+**Code review (8 findings, 6 fixed, 2 flagged for later):**
+Fixed: the two bugs above, the missing `logActivity` trail on bulk
+wrap-up closes (now logs one entry per closed row, so History shows the
+same trail as closing items one at a time), the broken Handbook link
+for files uploaded via the newer upload feature (needed a real signed
+URL resolved before rendering, not just `l.url`), the missing "Edit
+your own name" button (dropped from the Home tab during a rewrite, no
+compensating entry point), `add_employee` blocking Slack's response on
+a synchronous DM send (now deferred via `after()`), and `topic_edit`
+skipping the shared `verifyOwnedRow` governance check its three
+siblings use. **Flagged, not fixed:** the HR email is hardcoded in two
+unconnected places (JS `isHr` check + the `is_hr()` SQL function) with
+no shared source of truth — real fix needs a migration, didn't want to
+touch the DB again same-session without Melissa deciding it's worth it.
+
+**Restored: a way to actually end a pairing.** `closePair()` had zero
+callers left after the wrap-up rebuild — no UI anywhere could end a
+pairing (someone leaving the company, say), so History's "Closed
+pairings"/Reopen section could never gain a new entry. Added an "End
+this pairing" card to the History page (confirm → optional note →
+`closePair`), reversible via the existing Reopen. **Found live, same
+night:** Melissa's own real pairing (`dhwconsulting3@gmail.com` /
+`melissaw212@gmail.com`) was already closed — leftover fallout from
+testing the *old*, buggy wrap-up button earlier that same day, before
+the rebuild. Reopened via one SQL statement she ran herself (writes to
+prod are blocked for Claude by design — see CLAUDE.md).
+
+**Live-tested end to end, not just code-reviewed, all confirmed
+working:** Final wrap up (3 real topics → Discussed, 0 left open, 3
+activity_log entries, `closed_at` still NULL — checked in the database,
+not just the UI), Add-a-new-employee-from-Slack (validation errors and
+successful pair creation both confirmed, test data cleaned up after),
+Goals modal wording, "Give feedback" manager-gating shown correctly for
+a manager account.
+
+**Explicitly NOT a bug, checked and ruled out:** a fresh-account test
+using `melissahr212@gmail.com` (an old self-paired test fixture —
+`manager_email` and `employee_email` are literally the same address)
+showed a role mismatch between Slack ("you're the manager") and the
+website ("EMPLOYEE" badge) for the same pairing. Traced to two
+role-derivation code paths (`lib/slack-user.js`'s `pairRoleFields` vs.
+`app/(dashboard)/layout.js`'s `role` line) that check manager-vs-employee
+in opposite order — only ambiguous when manager_email === employee_email,
+which can't happen for any real two-person pairing. Confirmed via
+direct code read, not guessed. Not worth fixing; the self-paired test
+row is safe to ignore or delete.
+
+**Open items for the 3-day pilot window, in Melissa's stated priority
+(bugs first, cosmetic tweaks after, persistence already confirmed
+real):**
+1. **Manager-switch reassignment** (an employee changes managers, or
+   becomes a manager themself) — needs Melissa's decision on who can
+   initiate it (HR only? the outgoing manager?) and what happens to any
+   currently-open topics/goals/actions in the old pairing before this
+   gets built. Confirmed the underlying architecture already supports
+   it safely (every table is scoped by `pair_id`, never by person, and
+   the multi-pair switcher already lets one account hold multiple
+   pairs) — the one thing that MUST be built correctly: always close
+   the old pair and create a brand-new one, never mutate
+   `manager_email` in place on an existing pair (that would leak the
+   old pairing's history to the new manager).
+2. **Slack Documents real file upload** — needs Melissa to add a
+   `files:read` OAuth scope in the Slack app dashboard and reinstall
+   the app before any code changes are useful. Not started.
+3. **HR email hardcoded in two places** (see code review above) — low
+   priority, needs a migration to truly fix.
+4. **Supabase free tier has no automated backups.** Real data (real
+   1:1s, feedback, goals) is about to start accumulating from pilot
+   testers with zero backup safety net. Melissa can't afford the paid
+   tier right now — next session should look at a free DIY option
+   (e.g. a `pg_dump` script against the existing connection string,
+   run manually or on a free schedule) rather than assuming Pro-tier
+   backups are coming.
+
 ## Session closeout (2026-09-02): website wording/behavior fixes + add-employee-from-Slack shipped
 
 All built, deployed (`vercel --prod`), and code-verified today (build
