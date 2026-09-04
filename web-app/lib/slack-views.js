@@ -69,7 +69,12 @@ const modal = (callbackId, title, blocks, submit = "Save", privateMetadata) => (
   type: "modal",
   callback_id: callbackId,
   title: { type: "plain_text", text: title.slice(0, 24) },
-  submit: { type: "plain_text", text: submit },
+  // Slack hard-caps submit button text at 24 chars too (same as title) and
+  // rejects the whole views.update if it's longer -- silently, from this
+  // repo's own perspective, since the caller only sees a caught/logged
+  // error while the modal stays stuck on "Loading..." forever. Found live:
+  // wrapUpConversationModal's original 27-char label did exactly this.
+  submit: { type: "plain_text", text: submit.slice(0, 24) },
   close: { type: "plain_text", text: "Cancel" },
   blocks,
   ...(privateMetadata ? { private_metadata: privateMetadata } : {}),
@@ -820,6 +825,6 @@ export function wrapUpConversationModal() {
       ),
       inputBlock("note", "Anything worth noting as this closes", plainInput("val", { multiline: true, placeholder: "Optional — goes in the note to your partner." }), false),
     ],
-    "Close out this conversation"
+    "Close out conversation"
   );
 }
