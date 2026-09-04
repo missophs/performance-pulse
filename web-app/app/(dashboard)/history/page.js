@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { usePulse } from "@/components/PulseContext";
+import { useToast } from "@/components/ui/ToastProvider";
 import Badge from "@/components/ui/Badge";
 import {
   listMeetings,
@@ -15,6 +17,7 @@ import {
   listActivity,
   buildHistory,
   listClosedPairs,
+  closePair,
   reopenPair,
 } from "@/lib/data";
 import { ago } from "@/lib/format";
@@ -22,7 +25,9 @@ import { ago } from "@/lib/format";
 const FILTERS = ["All", "1:1", "Performance", "Goals", "Development", "Career", "Feedback", "Actions", "Changes"];
 
 export default function HistoryPage() {
-  const { pairId, userId, supabase } = usePulse();
+  const { pairId, userId, partnerName, supabase } = usePulse();
+  const router = useRouter();
+  const toast = useToast();
 
   const [loading, setLoading] = useState(true);
   const [history, setHistory] = useState([]);
@@ -37,6 +42,18 @@ export default function HistoryPage() {
   async function reopen(id) {
     await reopenPair(supabase, id);
     loadClosedPairs();
+  }
+
+  // Ends the pairing itself (e.g. someone left the company) -- distinct from
+  // "Final wrap up," which only closes out open topics/goals/actions and
+  // deliberately leaves the pairing running (Melissa's call, 2026-09-03).
+  // Reversible via Reopen above, same as it's always been.
+  async function endPairing() {
+    if (!window.confirm(`End this pairing with ${partnerName}? It moves to Closed pairings below -- nothing is deleted, and it can be reopened anytime.`)) return;
+    const note = window.prompt("Optional note for the record (why, or leave blank):") || "";
+    await closePair(supabase, pairId, note.trim() || null);
+    toast("Pairing ended", `${partnerName} is unaffected until they open the app again.`);
+    router.refresh();
   }
 
   useEffect(() => {
@@ -83,6 +100,14 @@ export default function HistoryPage() {
     <section>
       <h1>History</h1>
       <p className="subtitle">Every meaningful conversation, in order. Search it, filter it, export any of it.</p>
+
+      <div className="card">
+        <div className="card-head">
+          <h2>This pairing</h2>
+        </div>
+        <p className="card-note">If {partnerName} has left, or this pairing is over for any other reason, end it here.</p>
+        <button className="btn ghost sm" onClick={endPairing}>End this pairing</button>
+      </div>
 
       {closedPairs.length > 0 && (
         <div className="card">

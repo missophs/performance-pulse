@@ -40,6 +40,12 @@ const MSG_KINDS = ["Question", "Concern", "Heads-up", "Idea", "Other"];
 
 export default function DashboardPage() {
   const { pairId, role, isMgr, myName, partnerName, supabase, email } = usePulse();
+  // UI-only gate for the Handbook upload/remove buttons -- the real
+  // enforcement is the is_hr() Postgres function (supabase/migrations/
+  // 0013_global_handbook.sql), which hardcodes this same email for RLS.
+  // The two are NOT wired together (no shared constant reaches SQL migration
+  // text), so a change to who counts as HR must be made in both places or
+  // this check and the database gate will disagree.
   const isHr = (email || "").toLowerCase() === "melissaw212@gmail.com";
   const toast = useToast();
   const router = useRouter();

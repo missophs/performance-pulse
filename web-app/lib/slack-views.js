@@ -131,7 +131,7 @@ export function homeView(ctx, d) {
         ]
       : []),
     section(`Your 1:1 partner: *${ctx.partnerName}* · you're the ${ctx.role}.`),
-    section(`You appear as *${ctx.myName}* to ${ctx.partnerName}.`),
+    section(`You appear as *${ctx.myName}* to ${ctx.partnerName}.`, button("Edit your own name", "open_edit_name")),
     ...(ctx.isMgr ? [actions([button("Add a new employee", "open_add_employee")])] : []),
     context(`Next 1:1: ${next1on1}  ·  ${openTopics.length} open topic${openTopics.length === 1 ? "" : "s"}  ·  ${openActions.length} open action${openActions.length === 1 ? "" : "s"}`),
     { type: "divider" },

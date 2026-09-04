@@ -793,22 +793,41 @@ export async function deleteAction(supabase, id) {
  * Topics marked Parking Lot and goals marked Deferred are left alone --
  * those were deliberately set aside, not forgotten.
  */
-export async function wrapUpConversation(supabase, pairId) {
+// ctx as in setTopicStatus. Reads the open rows first (not just their count)
+// so each one can get a real logActivity entry with its own label and old
+// status, same as closing them one at a time would -- a bulk action
+// shouldn't leave a thinner trail in History than doing it by hand.
+export async function wrapUpConversation(supabase, pairId, ctx = {}) {
   const now = new Date().toISOString();
-  const [topics, goals, actions] = await Promise.all([
-    supabase.from("topics").update({ status: "Discussed", updated_at: now }).eq("pair_id", pairId).eq("status", "Open").select("id"),
-    supabase
-      .from("goals")
-      .update({ status: "Complete", updated_at: now })
-      .eq("pair_id", pairId)
-      .in("status", ["Not Started", "In Progress", "At Risk"])
-      .select("id"),
-    supabase.from("actions").update({ status: "Done", updated_at: now }).eq("pair_id", pairId).eq("status", "Open").select("id"),
+  // Topics' open/default status is lowercase "open" (see TOPIC_STATES,
+  // lib/one-on-one-content.js) -- unlike actions, whose open status really is
+  // "Open". Easy to get backwards; this comment is here so it doesn't happen
+  // again.
+  const [{ data: openTopics }, { data: openGoals }, { data: openActions }] = await Promise.all([
+    supabase.from("topics").select("id, text, status").eq("pair_id", pairId).eq("status", "open"),
+    supabase.from("goals").select("id, text, status").eq("pair_id", pairId).in("status", ["Not Started", "In Progress", "At Risk"]),
+    supabase.from("actions").select("id, text, status").eq("pair_id", pairId).eq("status", "Open"),
   ]);
-  if (topics.error) throw topics.error;
-  if (goals.error) throw goals.error;
-  if (actions.error) throw actions.error;
-  return { topics: topics.data?.length ?? 0, goals: goals.data?.length ?? 0, actions: actions.data?.length ?? 0 };
+  const topicIds = (openTopics || []).map((t) => t.id);
+  const goalIds = (openGoals || []).map((g) => g.id);
+  const actionIds = (openActions || []).map((a) => a.id);
+
+  const [topicsRes, goalsRes, actionsRes] = await Promise.all([
+    topicIds.length ? supabase.from("topics").update({ status: "Discussed", updated_at: now }).in("id", topicIds) : { error: null },
+    goalIds.length ? supabase.from("goals").update({ status: "Complete", updated_at: now }).in("id", goalIds) : { error: null },
+    actionIds.length ? supabase.from("actions").update({ status: "Done", updated_at: now }).in("id", actionIds) : { error: null },
+  ]);
+  if (topicsRes.error) throw topicsRes.error;
+  if (goalsRes.error) throw goalsRes.error;
+  if (actionsRes.error) throw actionsRes.error;
+
+  await Promise.all([
+    ...(openTopics || []).map((t) => logActivity(supabase, pairId, { entity: "topic", entityId: t.id, label: t.text, oldValue: t.status, newValue: "Discussed", ...ctx })),
+    ...(openGoals || []).map((g) => logActivity(supabase, pairId, { entity: "goal", entityId: g.id, label: g.text, oldValue: g.status, newValue: "Complete", ...ctx })),
+    ...(openActions || []).map((a) => logActivity(supabase, pairId, { entity: "action", entityId: a.id, label: a.text, oldValue: a.status, newValue: "Done", ...ctx })),
+  ]);
+
+  return { topics: topicIds.length, goals: goalIds.length, actions: actionIds.length };
 }
 
 // ------------------------------------------------------- activity log ------

@@ -76,6 +76,7 @@ import {
   notify,
   listMeetings,
   listHandbookLinks,
+  getHandbookFileUrl,
   listDocuments,
   addDocumentLink,
   listCareerAnswers,
@@ -246,7 +247,18 @@ const OPENERS = {
     },
   },
   open_last_meeting: { title: "Last 1:1", build: async (admin, ctx) => lastMeetingModal(await listMeetings(admin, ctx.pairId)) },
-  open_list_handbook: { title: "Handbook links", build: async (admin) => listHandbookLinksModal(await listHandbookLinks(admin)) },
+  // A link added via the old "paste a link" flow already has l.url; one
+  // uploaded via the newer HR upload feature (uploadHandbookFile, lib/data.js)
+  // only has a storage_path, so the Slack button needs a real (signed) url
+  // resolved before it can render as a link -- see getHandbookFileUrl.
+  open_list_handbook: {
+    title: "Handbook links",
+    build: async (admin) => {
+      const links = await listHandbookLinks(admin);
+      const resolved = await Promise.all(links.map(async (l) => ({ ...l, url: await getHandbookFileUrl(admin, l).catch(() => null) })));
+      return listHandbookLinksModal(resolved);
+    },
+  },
   open_list_suggestions: {
     title: "My suggestions",
     build: async (admin, ctx) => listMySuggestionsModal(await listCustomSuggestions(admin, ctx.pairId), ctx.role),
@@ -266,14 +278,14 @@ const PUSH_ACTIONS = {
   topic_edit: {
     title: "Edit topic",
     build: async (admin, ctx, value) => {
-      // pair_id checked here, not just created_by_role: action.value is a
-      // plain string in the interaction payload with no server-side
-      // ownership check otherwise — this admin client bypasses RLS
-      // entirely, so without this check a tampered value could push
-      // another pair's real topic text into this modal. See the
-      // governance note in CLAUDE.md.
-      const { data: topic } = await admin.from("topics").select("id, pair_id, text, why, category, created_by_role").eq("id", value).maybeSingle();
-      return topic && topic.pair_id === ctx.pairId && topic.created_by_role === ctx.role ? editTopicModal(topic) : null;
+      // action.value is a plain string in the interaction payload with no
+      // server-side ownership check otherwise — this admin client bypasses
+      // RLS entirely, so verifyOwnedRow's pair_id check (plus the
+      // created_by_role extraCheck, same as SUBMISSIONS.edit_topic) is what
+      // stops a tampered value from pushing another pair's real topic text
+      // into this modal. See the governance note in CLAUDE.md.
+      const topic = await verifyOwnedRow(admin, "topics", "id, pair_id, text, why, category, created_by_role", value, ctx, (row) => row.created_by_role === ctx.role);
+      return topic ? editTopicModal(topic) : null;
     },
   },
   goal_edit: {
@@ -520,7 +532,7 @@ const SUBMISSIONS = {
   // its own without a fresh open.
   wrap_up_conversation: async (admin, ctx, v) => {
     const note = (fieldVal(v, "note") || "").trim();
-    const { topics, goals, actions } = await wrapUpConversation(admin, ctx.pairId);
+    const { topics, goals, actions } = await wrapUpConversation(admin, ctx.pairId, fromSlack(ctx));
     const otherEmail = ctx.isMgr ? ctx.pair.employee_email : ctx.pair.manager_email;
     const text = `${ctx.myName} did a final wrap up on your 1:1 conversation -- ${topics} topic(s), ${goals} goal(s), and ${actions} action(s) closed out. Your pairing is unaffected.${note ? `\n\nNote: ${note}` : ""}`;
     await dmByEmail(otherEmail, { text }).catch((e) => console.error("wrap up conversation notify:", e));
@@ -530,8 +542,8 @@ const SUBMISSIONS = {
   // identity -- never anything from the submitted form, so there's no way to
   // create a pair naming someone other than yourself as manager. The new
   // pair doesn't show up in ctx.pairs until the Home tab is next reopened
-  // (resolveSlackUser re-runs fresh then) -- same lazy staleness close_pair
-  // already accepts for the other side of an ended pairing.
+  // (resolveSlackUser re-runs fresh then) -- same lazy staleness a reopened
+  // pairing already accepts for the other side.
   add_employee: async (admin, ctx, v) => {
     if (!ctx.isMgr) return;
     const email = (fieldVal(v, "email") || "").trim().toLowerCase();
@@ -546,8 +558,14 @@ const SUBMISSIONS = {
     } catch (e) {
       return { error: { blockId: "email", message: e.message } };
     }
-    await dmByEmail(email, { text: `${ctx.myName} added you as their direct report on Performance Pulse. Open the app to say hello.` }).catch((e) =>
-      console.error("add employee notify:", e)
+    // Deferred, not awaited here -- the pair is already created; a slow DM
+    // send shouldn't risk pushing the view_submission response past Slack's
+    // ack window, same reasoning as every other post-write side effect in
+    // this file (see refreshHome below).
+    after(() =>
+      dmByEmail(email, { text: `${ctx.myName} added you as their direct report on Performance Pulse. Open the app to say hello.` }).catch((e) =>
+        console.error("add employee notify:", e)
+      )
     );
   },
   add_topic: async (admin, ctx, v) => {
