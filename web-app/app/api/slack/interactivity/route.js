@@ -254,6 +254,62 @@ const OPENERS = {
   open_add_suggestion: { title: "Write my own suggestion", build: async (admin, ctx) => addSuggestionModal(ctx.role) },
 };
 
+// "Edit" buttons clicked from inside an already-open list modal. Same
+// trigger_id deadline as OPENERS above, but views.push (not views.open) —
+// this used to run inline in handleInteraction's block_actions branch, doing
+// resolveSlackUser plus a row lookup before ever touching Slack, which a cold
+// start could push past the 3s window with the click then just silently
+// doing nothing. Routed through deferredModal now so the placeholder goes up
+// first, same as every OPENERS entry. build returning null (row missing,
+// wrong pair, already closed, etc.) falls back to deferredModal's own notice.
+const PUSH_ACTIONS = {
+  topic_edit: {
+    title: "Edit topic",
+    build: async (admin, ctx, value) => {
+      // pair_id checked here, not just created_by_role: action.value is a
+      // plain string in the interaction payload with no server-side
+      // ownership check otherwise — this admin client bypasses RLS
+      // entirely, so without this check a tampered value could push
+      // another pair's real topic text into this modal. See the
+      // governance note in CLAUDE.md.
+      const { data: topic } = await admin.from("topics").select("id, pair_id, text, why, category, created_by_role").eq("id", value).maybeSingle();
+      return topic && topic.pair_id === ctx.pairId && topic.created_by_role === ctx.role ? editTopicModal(topic) : null;
+    },
+  },
+  goal_edit: {
+    title: "Edit goal",
+    build: async (admin, ctx, value) => {
+      // Open to both partners (unlike topic_edit) — Goals no longer has a
+      // creator-restricted concept now owner is always the employee. Same
+      // pair_id check as topic_edit, for the same governance reason.
+      const goal = await verifyOwnedRow(admin, "goals", "id, pair_id, text, why, measure, target_date, status", value, ctx);
+      return goal ? editGoalModal(goal) : null;
+    },
+  },
+  action_edit: {
+    title: "Edit action",
+    build: async (admin, ctx, value) => {
+      const task = await verifyOwnedRow(admin, "actions", "id, pair_id, text, owner_label, due_date, notes", value, ctx);
+      return task ? editActionModal(ctx, task) : null;
+    },
+  },
+  feedback_request_answer: {
+    title: "Give feedback",
+    build: async (admin, ctx, value) => {
+      // action.value is a plain string in the interaction payload with no
+      // server-side ownership check otherwise — pair_id is checked here
+      // before threading the id into the modal's private_metadata, same
+      // pattern as topic_edit above. Also checked: status === "open", and
+      // from_role !== ctx.role — a requester can't answer their own
+      // request (listFeedbackModal already hides this button for them;
+      // this is the hard guard behind it, since a hidden button on its
+      // own isn't enough — see the governance note in CLAUDE.md).
+      const request = await verifyOwnedRow(admin, "feedback_requests", "id, pair_id, from_role, status", value, ctx, (row) => row.status === "open" && row.from_role !== ctx.role);
+      return request ? addFeedbackModal(ctx, undefined, false, request.id) : null;
+    },
+  },
+};
+
 // --------------------------------------------- save a draft mid-modal ------
 
 // Slack's view_closed event drops plain_text_input values (confirmed live —
@@ -814,12 +870,14 @@ export async function POST(request) {
   const form = new URLSearchParams(rawBody);
   const payload = JSON.parse(form.get("payload") || "{}");
 
-  // Opening a modal is the one path with a hard deadline: Slack expires the
-  // trigger_id 3s after the click, and a cold start plus a Supabase round trip
-  // can miss it. So openers get a fast path that reaches views.open without
-  // touching the database at all — see openDeferred.
-  const opener = payload.type === "block_actions" ? OPENERS[payload.actions?.[0]?.action_id] : null;
-  if (opener) return await openDeferred(opener, payload);
+  // Opening (or pushing) a modal is the one path with a hard deadline: Slack
+  // expires the trigger_id 3s after the click, and a cold start plus a
+  // Supabase round trip can miss it. So both kinds of modal-launch get a fast
+  // path that reaches Slack without touching the database at all — see
+  // deferredModal.
+  const actionId = payload.type === "block_actions" ? payload.actions?.[0]?.action_id : null;
+  if (actionId && OPENERS[actionId]) return await deferredModal("views.open", OPENERS[actionId], payload);
+  if (actionId && PUSH_ACTIONS[actionId]) return await deferredModal("views.push", PUSH_ACTIONS[actionId], payload);
 
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
   const slackUserId = payload.user?.id;
@@ -835,16 +893,19 @@ export async function POST(request) {
   }
 }
 
-// Publish a placeholder modal immediately, then fill it in once the data is
-// loaded. views.update takes a view_id rather than a trigger_id, so the slow
-// half has no deadline. Every exit path replaces the placeholder with
-// something, so a click can't leave "Loading…" on screen forever.
-async function openDeferred(opener, payload) {
-  const opened = await slackApi("views.open", {
+// Publish a placeholder modal immediately (views.open for a fresh modal,
+// views.push when landing on top of one already open), then fill it in once
+// the data is loaded. views.update takes a view_id rather than a trigger_id,
+// so the slow half has no deadline. Every exit path replaces the placeholder
+// with something — including opener.build returning null/undefined, which
+// falls back to the "no longer available" notice below — so a click can't
+// leave "Loading…" on screen forever.
+async function deferredModal(method, opener, payload) {
+  const opened = await slackApi(method, {
     trigger_id: payload.trigger_id,
     view: loadingModal(opener.title),
   }).catch((e) => {
-    console.error("loading modal open:", e);
+    console.error(`loading modal ${method}:`, e);
     return null;
   });
   if (!opened?.view?.id) return Response.json({ ok: true });
@@ -859,7 +920,8 @@ async function openDeferred(opener, payload) {
         await swap(noticeModal(opener.title, "We couldn't match your Slack account to a Performance Pulse profile. Open the app once to link it, then try again."));
         return;
       }
-      await swap(await opener.build(admin, ctx, payload.actions?.[0]?.value));
+      const view = await opener.build(admin, ctx, payload.actions?.[0]?.value);
+      await swap(view || noticeModal(opener.title, "That's no longer available. Close and try again from the list."));
     } catch (err) {
       console.error("opener build failed:", err);
       await swap(noticeModal(opener.title, "Something went wrong loading this. Please close and try again."));
@@ -902,51 +964,6 @@ async function handleInteraction(admin, slackUserId, payload) {
         await slackApi("views.update", { view_id: payload.view.id, view: spec.refreshList(data, ctx) }).catch((e) => console.error("view update:", e));
       }
       after(() => refreshHome(admin, ctx, data));
-    } else if (action.action_id === "topic_edit") {
-      // Pushed on top of the open topics-list modal (views.push, not
-      // views.open) so Cancel/Save both return to that list rather than the
-      // Home tab. A single-row lookup is cheap enough to stay inside
-      // Slack's 3s window without the loading-placeholder dance OPENERS uses.
-      // pair_id is checked here, not just created_by_role: action.value is a
-      // plain string in the interaction payload with no server-side ownership
-      // check otherwise — this admin client bypasses RLS entirely, so without
-      // this check a tampered value could push another pair's real topic
-      // text into this modal. See the governance note in CLAUDE.md.
-      const { data: topic } = await admin.from("topics").select("id, pair_id, text, why, category, created_by_role").eq("id", action.value).maybeSingle();
-      if (topic && topic.pair_id === ctx.pairId && topic.created_by_role === ctx.role) {
-        await slackApi("views.push", { trigger_id: payload.trigger_id, view: editTopicModal(topic) }).catch((e) => console.error("edit topic push:", e));
-      }
-    } else if (action.action_id === "goal_edit") {
-      // Open to both partners (unlike topic_edit) — Goals no longer has a
-      // creator-restricted concept now owner is always the employee. Same
-      // pair_id check as topic_edit, for the same governance reason.
-      const goal = await verifyOwnedRow(admin, "goals", "id, pair_id, text, why, measure, target_date, status", action.value, ctx);
-      if (goal) {
-        await slackApi("views.push", { trigger_id: payload.trigger_id, view: editGoalModal(goal) }).catch((e) => console.error("edit goal push:", e));
-      }
-    } else if (action.action_id === "action_edit") {
-      const task = await verifyOwnedRow(admin, "actions", "id, pair_id, text, owner_label, due_date, notes", action.value, ctx);
-      if (task) {
-        await slackApi("views.push", { trigger_id: payload.trigger_id, view: editActionModal(ctx, task) }).catch((e) => console.error("edit action push:", e));
-      }
-    } else if (action.action_id === "feedback_request_answer") {
-      // Clicked from the "Open feedback" list modal (listFeedbackModal) —
-      // pushed on top of it (views.push, not views.open) so Cancel/Save
-      // both return to that list. action.value is a plain string in the
-      // interaction payload with no server-side ownership check otherwise —
-      // this admin client bypasses RLS entirely, so pair_id is checked here
-      // before threading the id into the modal's private_metadata, same
-      // pattern as topic_edit above. Also checked: status === "open", and
-      // from_role !== ctx.role — a requester can't answer their own
-      // request (listFeedbackModal already hides this button for them; this
-      // is the hard guard behind it, since a hidden button on its own isn't
-      // enough — see the governance note in CLAUDE.md).
-      const request = await verifyOwnedRow(admin, "feedback_requests", "id, pair_id, from_role, status", action.value, ctx, (row) => row.status === "open" && row.from_role !== ctx.role);
-      if (request) {
-        await slackApi("views.push", { trigger_id: payload.trigger_id, view: addFeedbackModal(ctx, undefined, false, request.id) }).catch((e) =>
-          console.error("answer feedback request push:", e)
-        );
-      }
     } else if (action.action_id === "suggested_pick") {
       // Lives in a section block (see addTopicModal, lib/slack-views.js),
       // not an input block — only section/actions-block elements dispatch
