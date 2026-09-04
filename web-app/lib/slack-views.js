@@ -474,7 +474,7 @@ export function addGoalModal(ctx, draft, saved = false) {
         { type: "static_select", action_id: "goal_suggested_pick", option_groups: goalSuggestionOptionGroups(), placeholder: { type: "plain_text", text: "Browse suggested goals" } }
       ),
       inputBlock(id("text"), "Goal", plainInput("val", { initial: draft?.text })),
-      inputBlock(id("why"), "Why it matters", plainInput("val", { multiline: true, initial: draft?.why }), true),
+      inputBlock(id("why"), "What's the plan to accomplish this?", plainInput("val", { multiline: true, initial: draft?.why }), true),
       inputBlock(id("measure"), "How you'll know it's met", plainInput("val", { initial: draft?.measure }), true),
       inputBlock(id("target"), "Target date", datePicker("val", draft?.target), true),
       inputBlock(id("status"), "Status", staticSelect("val", GOAL_STATES, draft?.status || GOAL_STATES[0])),
@@ -505,7 +505,7 @@ export function editGoalModal(goal) {
     "Edit goal",
     [
       inputBlock("text", "Goal", plainInput("val", { initial: goal.text })),
-      inputBlock("why", "Why it matters", plainInput("val", { multiline: true, initial: goal.why }), true),
+      inputBlock("why", "What's the plan to accomplish this?", plainInput("val", { multiline: true, initial: goal.why }), true),
       inputBlock("measure", "How you'll know it's met", plainInput("val", { initial: goal.measure }), true),
       inputBlock("target", "Target date", datePicker("val", goal.target_date), true),
       inputBlock("status", "Status", staticSelect("val", GOAL_STATES, goal.status)),
