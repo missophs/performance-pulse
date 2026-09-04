@@ -155,7 +155,7 @@ export function homeView(ctx, d) {
     actions([button("Log one", "open_add_achievement"), button("View achievements", "open_list_achievements")]),
     section(`*Feedback* — ${d.feedback.length} entries${openRequests.length ? `, ${openRequests.length} request${openRequests.length === 1 ? "" : "s"} waiting` : ""}`),
     actions([
-      button("Give feedback", "open_add_feedback"),
+      ...(ctx.isMgr ? [button("Give feedback", "open_add_feedback")] : []),
       button("Ask for feedback", "open_add_feedback_request"),
       button("View feedback in the app", "open_list_feedback"),
     ]),

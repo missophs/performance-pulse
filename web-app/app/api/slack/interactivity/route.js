@@ -202,9 +202,16 @@ const OPENERS = {
     title: "Log an achievement",
     build: async (admin, ctx) => addAchievementModal(normalizeDraft(ACHIEVEMENT_FIELDS, await draftFor(admin, ctx, "achievement"))),
   },
+  // Button is manager-only in homeView too — this re-checks server-side in
+  // case of a stale/replayed action, same defense-in-depth as open_add_employee.
+  // Employees still give feedback by answering a request — see
+  // open_answer_feedback_request below, which this does not touch.
   open_add_feedback: {
     title: "Give feedback",
-    build: async (admin, ctx) => addFeedbackModal(ctx, normalizeDraft(FEEDBACK_FIELDS, await draftFor(admin, ctx, "feedback"))),
+    build: async (admin, ctx) =>
+      ctx.isMgr
+        ? addFeedbackModal(ctx, normalizeDraft(FEEDBACK_FIELDS, await draftFor(admin, ctx, "feedback")))
+        : noticeModal("Give feedback", "Only managers can give feedback this way. Ask for feedback, or answer a request from your partner."),
   },
   open_add_feedback_request: { title: "Ask for feedback", build: async () => addFeedbackRequestModal() },
   // Opened from the digest DM's "Answer it" button (kind "request", see
@@ -652,6 +659,12 @@ const SUBMISSIONS = {
     const request = requestId
       ? await verifyOwnedRow(admin, "feedback_requests", "id, pair_id, from_role, status", requestId, ctx, (row) => row.status === "open" && row.from_role !== ctx.role)
       : null;
+    // Standalone giving (no verified request behind it) is manager-only,
+    // same as open_add_feedback above and add_employee's !ctx.isMgr guard —
+    // the Home tab button being hidden isn't enough on its own (governance
+    // note in CLAUDE.md). An employee answering a real request still passes,
+    // since `request` is truthy for them.
+    if (!request && !ctx.isMgr) return;
     // fieldValV2 — see add_goal above.
     await addFeedback(admin, ctx.pairId, {
       giverRole: ctx.role,
