@@ -1,0 +1,58 @@
+name: Daily database backup
+
+# The Supabase project is on the free tier, which has no automated
+# backups (Pro tier gets a rolling 7 days; that costs $25/mo, not
+# something this pilot needs to spend yet). This is Supabase's own
+# documented free alternative: dump the database with the CLI and
+# commit it here. https://supabase.com/docs/guides/deployment/ci/backups
+#
+# Dated subfolder per run (not overwriting the same 3 files every day)
+# so a bad write/delete that happens the same day a backup runs doesn't
+# wipe out yesterday's copy along with it -- the whole point is a safety
+# net, so keeping a few days of history is worth the repo growth.
+# ponytail: unbounded growth over months, prune old db-backups/ folders
+# if this repo starts feeling heavy.
+#
+# This repo is private -- Supabase's own docs are explicit that this
+# approach must never be used on a public repo, since the dump is real
+# production data (real 1:1 conversations, feedback, goals).
+#
+# Setup required (one-time, in the GitHub repo's own settings, not
+# here): Settings -> Secrets and variables -> Actions -> New repository
+# secret, named SUPABASE_DB_URL, value from the Supabase dashboard
+# (Project Settings -> Database -> Connection string -> URI, with the
+# password filled in). Never paste that value into a chat, a commit, or
+# anywhere outside that one GitHub secret field.
+
+on:
+  schedule:
+    - cron: "0 9 * * *" # 9am UTC daily
+  workflow_dispatch: {}
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      supabase_db_url: ${{ secrets.SUPABASE_DB_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Make today's backup folder
+        run: |
+          echo "BACKUP_DIR=db-backups/$(date -u +%Y-%m-%d)" >> "$GITHUB_ENV"
+      - name: Backup roles
+        run: |
+          mkdir -p "$BACKUP_DIR"
+          supabase db dump --db-url "$supabase_db_url" -f "$BACKUP_DIR/roles.sql" --role-only
+      - name: Backup schema
+        run: supabase db dump --db-url "$supabase_db_url" -f "$BACKUP_DIR/schema.sql"
+      - name: Backup data
+        run: supabase db dump --db-url "$supabase_db_url" -f "$BACKUP_DIR/data.sql" --data-only --use-copy
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Daily database backup"
+          commit_user_name: "Database Backup Bot"
