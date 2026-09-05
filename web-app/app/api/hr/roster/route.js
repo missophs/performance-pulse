@@ -44,7 +44,9 @@ export async function POST(req) {
   const sheet = workbook.worksheets[0];
   if (!sheet) return Response.json({ error: "That file has no sheet." }, { status: 400 });
 
-  const header = (sheet.getRow(1).values || []).map((v) => String(v || "").trim().toLowerCase());
+  const headerRow = sheet.getRow(1);
+  const header = [];
+  for (let i = 1; i <= headerRow.cellCount; i++) header[i] = (headerRow.getCell(i).text || "").trim().toLowerCase();
   const empCol = header.findIndex((h) => h === "employee");
   const mgrCol = header.findIndex((h) => h === "manager");
   const emailCol = header.findIndex((h) => h === "email");
@@ -57,33 +59,63 @@ export async function POST(req) {
   // still resolves to their real address, not a placeholder -- including a
   // no-manager row (the top of the org chart), which never forms a pair of
   // its own but still needs to be in this map for their reports' rows.
+  // `.text` (not `.value`) is ExcelJS's own display-string getter -- it
+  // already unwraps a hyperlink cell's {text, hyperlink}, a formula cell's
+  // {formula, result}, and rich text, so cells stay correct even if Excel
+  // auto-linked a typed email address (found live: a hand-rolled version of
+  // this unwrapping missed a rich-text-display-inside-a-hyperlink case and
+  // silently produced an empty string, 2026-09-05).
+  const norm = (s) => s.trim().toLowerCase().replace(/\s+/g, " ");
   const allRows = [];
   const nameToEmail = new Map();
+  // Two different employees sharing a (normalized) name would otherwise
+  // silently cross-assign: whichever row's email Map.set() ran last wins the
+  // shared key, and anyone who references that name as a manager gets
+  // paired to whichever email happened to win -- found in review 2026-09-05.
+  // Surface the collision instead of resolving it silently.
+  const nameCollisions = new Set();
   sheet.eachRow((row, rowNumber) => {
     if (rowNumber === 1) return;
-    const employee = String(row.values[empCol] || "").trim();
-    const manager = String(row.values[mgrCol] || "").trim();
-    const email = emailCol === -1 ? "" : String(row.values[emailCol] || "").trim();
+    const employee = (row.getCell(empCol).text || "").trim();
+    const manager = (row.getCell(mgrCol).text || "").trim();
+    const email = emailCol === -1 ? "" : (row.getCell(emailCol).text || "").trim();
     if (!employee) return;
-    if (email) nameToEmail.set(employee, email);
+    if (email) {
+      const key = norm(employee);
+      if (nameToEmail.has(key) && nameToEmail.get(key) !== email) nameCollisions.add(employee);
+      nameToEmail.set(key, email);
+    }
     allRows.push({ employee, manager });
   });
 
   const rows = allRows.filter((r) => r.manager);
-  const emailFor = (name) => nameToEmail.get(name) || placeholderEmail(name);
+  const emailFor = (name) => nameToEmail.get(norm(name)) || placeholderEmail(name);
+
+  // A manager name that doesn't match ANY name in the Employee column is
+  // almost always a typo (a stray character from copy/paste or retyping a
+  // cell) rather than someone genuinely missing from the sheet -- caught
+  // live when "Melissa Weiss" was actually stored as "mmelissa Weiss" from
+  // a rich-text editing artifact invisible at normal zoom, so every row
+  // that referenced her as manager silently got a dead-end placeholder
+  // forever instead of a clear error, 2026-09-05. Surface it instead of
+  // letting it fail silently.
+  const employeeNames = new Set(allRows.map((r) => norm(r.employee)));
+  const unmatchedManagers = [...new Set(rows.map((r) => r.manager))].filter((m) => !employeeNames.has(norm(m)));
 
   let added = 0;
+  let corrected = 0;
   let skipped = 0;
   const failed = [];
   for (const { employee, manager } of rows) {
     try {
-      const result = await createPairFromRoster(a, emailFor(employee), emailFor(manager));
-      if (result.skipped) skipped++;
+      const result = await createPairFromRoster(a, emailFor(employee), emailFor(manager), placeholderEmail(manager), employee);
+      if (result.updated) corrected++;
+      else if (result.skipped) skipped++;
       else added++;
     } catch (err) {
       failed.push(`${employee} / ${manager}: ${err.message || "failed"}`);
     }
   }
 
-  return Response.json({ total: rows.length, added, skipped, failed });
+  return Response.json({ total: rows.length, added, corrected, skipped, failed, unmatchedManagers, nameCollisions: [...nameCollisions] });
 }

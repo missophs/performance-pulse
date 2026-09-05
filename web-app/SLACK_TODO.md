@@ -1,5 +1,279 @@
 # Slack integration — status and what's left
 
+## Session closeout (2026-09-05): Google OAuth published for real, self-serve onboarding removed everywhere, HR roster importer's real bug finally found (it was a corrupted cell, not code), HR org-chart view built, full code review — deploy confirmed live, git NOT yet committed as this was written
+
+**Deploy: confirmed live** — last `vercel --prod` landed and was verified via
+`vercel ls --prod` right before this entry was written. **Git: NOT
+committed yet** — everything below is real, deployed, working code sitting
+uncommitted in the working tree; committing and pushing is the literal next
+step after this log entry, same session. If a future session finds this
+still uncommitted, that means something interrupted the closeout — check
+`git status` first thing.
+
+**Where roster testing stood when this was written:** Melissa was mid-way
+through re-testing her own real 10-person `roster.xlsx` after the final
+round of fixes below. The importer itself is verified correct (see the
+"actual root cause" section) but her live account's pairing state at the
+literal end of this session was not re-confirmed after that last upload —
+**check `pairs` for `manager_email = 'melissaw212@gmail.com'` /
+`employee_email = 'melissaw212@gmail.com'` before assuming anything about
+her current pairings.**
+
+### Google OAuth: moved from "Testing" to fully Published
+
+Resolves 2026-09-04's item 1. Added Melissa's own account as a test user
+first (to unblock her uploading/testing immediately), then went the rest of
+the way: added the required OAuth scopes (`userinfo.email`,
+`userinfo.profile`, `openid`) on the Data Access page (was blocking Publish
+with zero scopes declared), built the privacy page (next section) and
+entered its URL plus the homepage URL, added the live Vercel domain as an
+Authorized domain, then clicked Publish. **Any Google account can now sign
+in — no more per-person test-user allowlist maintenance.**
+
+### Privacy policy page — built, with real governance attached
+
+`app/privacy/page.js` (new): plain-language page covering what's collected,
+where it lives (Supabase + a private daily backup), who can see it (pair
+members only, not HR), what sign-in scopes are requested, what the app
+doesn't do (no selling/sharing/ads), and a contact line. This is the actual
+URL entered as the OAuth consent screen's privacy policy link above — Google
+reads it, and so will real employees.
+- `proxy.js`: added `/privacy` to `PUBLIC_PATHS` — without this, signed-out
+  visitors (including Google's own reviewing bot) got bounced to `/login`
+  before ever seeing the page. Regression-checked: `/dashboard` still
+  correctly requires sign-in.
+- `web-app/CLAUDE.md`: added a permanent governance rule — any future
+  change to what data this app collects/shares/signs in with must update
+  this page in the *same* change, not as a follow-up.
+- **That rule caught a real gap the same session:** the roster importer
+  (below) can link an employee's account to a real email *before they've
+  ever signed in themselves* — the privacy page didn't say so. Added a line
+  disclosing it, same session, per the rule it's obeying.
+
+### Self-serve onboarding removed entirely — both places it existed
+
+Melissa's explicit call, stated and re-stated several times: **"I don't
+want employees choosing anything... the names are getting uploaded
+anyway."** Two separate screens had to go, found one at a time as she
+actually used the app:
+- **First pairing** (`/onboarding`, for an account with zero pairings):
+  used to show `OnboardingForm` (self-declare Employee vs. Manager, type in
+  a manager's email). Replaced with `components/NotPairedYet.js` (new) — a
+  plain "you haven't been paired yet, check with HR" message, plus an
+  HR-passcode-gated roster importer so HR can reach the upload tool without
+  needing a pairing of their own. Nobody self-declares anything to get
+  their first pairing anymore.
+- **A second/later pairing** (`/onboarding/add`, "Add another pairing," for
+  an account that already has one): this one was missed in the first pass
+  — it still had the full `OnboardingForm` (Employee/Manager toggle, name
+  autocomplete showing other people's names while typing, an untested
+  "Upload a list (CSV)" option) and Melissa found it live, mid-session:
+  *"I don't want this page showing up."* Replaced with a static "ask HR to
+  update the roster" message, same pattern as the first screen.
+- **`components/OnboardingForm.js` deleted entirely** — confirmed zero
+  remaining imports before removing it, not just unlinked.
+- Net effect: there is now no path anywhere in the app for a person to
+  self-declare a role or pick a manager/employee by name. The roster upload
+  (or Slack's manager-only "add employee," which got its own fix this
+  session — see below) is the only way a pairing gets created.
+
+### HR roster (.xlsx) importer — the actual multi-hour bug hunt of the session
+
+This was the bulk of tonight. Short version: **every code fix made along
+the way was individually correct, verified, and still deployed — the thing
+that actually broke Melissa's real test file was a corrupted cell in her
+own spreadsheet, invisible at normal zoom, found only by unzipping the
+`.xlsx` and reading its raw XML.** Recording the whole chain because each
+step *was* a real, separate, confirmed bug worth having fixed regardless.
+
+**1. Real emails from an "Email" column, and no-manager top-of-org rows.**
+The importer previously always generated a placeholder email for everyone,
+ignoring any Email column entirely, and silently dropped any row with no
+Manager value (including the top-of-org row, which has no manager but still
+needs its own real email registered so *its reports* can resolve to it).
+Fixed via a two-pass parse: pass one builds a name→email map from every row
+that has a real email (including no-manager rows); pass two resolves both
+sides of each employee/manager pair through that map, falling back to a
+deterministic `name@placeholder.test` only when nothing real is known yet.
+
+**2. `[object Object]` landing in the database.** ExcelJS returns a
+hyperlinked cell (Excel auto-links a typed email address) as
+`{text, hyperlink}`, not a plain string — raw `String()` on it produced the
+literal text "[object Object]" in real rows. First fix was a hand-rolled
+unwrapping helper; a code review then found that helper still missed a
+rich-text-inside-a-hyperlink case and could silently produce an empty
+string. **Real fix: deleted the hand-rolled helper, switched every cell
+read to ExcelJS's own `Cell.prototype.text` getter**, which already
+correctly unwraps hyperlinks, formulas, and rich text — reusing the
+library's own logic instead of reimplementing a piece of it.
+
+**3. Case/whitespace-insensitive name matching.** Manager names are typed
+by hand and won't always match an Employee cell byte-for-byte ("Melissa
+Weiss" vs. "melissa Weiss", or a double space). Added a `norm()` step
+(trim, lowercase, collapse internal whitespace) applied to both sides of
+every name lookup.
+
+**4. The actual root cause, found only by reading the file's raw bytes.**
+Even after all three fixes above, deployed and confirmed live, Melissa's
+own real email still wouldn't resolve when other rows referenced her by
+name as their manager — repeatedly, across several redeploys, looking like
+the fixes weren't taking effect. They were. **Unzipped her actual uploaded
+`roster-2.xlsx` and read `xl/sharedStrings.xml` directly:** her Employee
+cell for row 2 wasn't the string "Melissa Weiss" at all — it was stored as
+two concatenated rich-text runs reading **"mmelissa Weiss"** (a duplicated
+leading letter from retyping the cell, rendered indistinguishably from
+"Melissa Weiss" at normal screen zoom). No code was ever going to match
+that against "Melissa Weiss" typed correctly elsewhere, because the two
+strings were genuinely different. A second, same-shape mismatch was found
+the same way: "monte.montoya" (dotted, lowercase) as one row's Employee
+name vs. "Monte Montoya" everywhere he's referenced as manager. Both fixed
+directly in a corrected copy of her file (`roster-2-fixed.xlsx`, sent to
+her); **`unmatchedManagers` detection (next item) exists specifically so
+this class of bug is never invisible again.**
+
+**5. `unmatchedManagers` + `nameCollisions` — new, permanent guardrails.**
+Added directly to the upload response so a typo like #4 is caught the
+moment it's uploaded instead of silently producing a dead-end placeholder
+pairing forever: any Manager name with zero match in the Employee column is
+now listed back to HR by name, and any Employee name that appears more than
+once with two different real emails (which would otherwise silently
+cross-assign one person's email to a different person sharing their name)
+is flagged too.
+
+**6. Re-upload dedup/self-heal — went through three shapes before landing
+correctly, each caught by testing the previous one, not by inspection:**
+   - *Original:* dedup on the exact `(employee_email, manager_email)` pair.
+     Broke re-uploads after any of the fixes above — a row created with a
+     wrong/placeholder manager email before a fix was live never got
+     corrected by a later, fixed re-upload, because the newly-computed row
+     just didn't match the old one and inserted a second row instead.
+   - *First attempt at a fix:* self-heal *any* existing row for that
+     employee whose manager was still a placeholder. This actively broke
+     two things in production, found live: it silently overwrote an
+     unrelated old test pairing that happened to share an employee email
+     from a completely different testing thread, and (per a code-review
+     finding, confirmed by direct trace) it would have merged a
+     legitimately different second pending manager relationship
+     (dotted-line/multi-manager reporting) into one row instead of creating
+     a second pair.
+   - *Landed version:* self-heal only the row whose manager email exactly
+     matches the specific placeholder that *this manager's name* would
+     generate — computed in `route.js` and passed into
+     `createPairFromRoster` as a 4th argument, rather than matched by a
+     generic "any `@placeholder.test`" pattern hardcoded a second time in
+     `lib/data.js`. Also fixed a rehire gap in the same pass: the
+     exact-match dedup check didn't exclude closed pairings, so a
+     previously-offboarded-and-rehired employee re-paired with the same
+     manager was silently skipped forever — now excludes `closed_at`.
+     Regression-tested end-to-end against the live database with disposable
+     test rows (insert → exact-match skip → self-heal → post-heal
+     exact-match skip), all four steps confirmed correct, test rows cleaned
+     up after.
+
+**7. `employee_label` now set from the roster.** The importer computed
+emails from the spreadsheet's names but never stored the names themselves —
+so anyone without a real signed-in profile just showed as generic "Your
+employee" in the dashboard switcher, losing real roster data that was right
+there. Now stored on insert (never overwritten by a later self-heal update,
+so a manager's manual rename via "Click to change the name" is never
+clobbered by a re-upload).
+
+**8. Added vs. corrected, finally distinguished.** The upload summary used
+to count a self-healed correction identically to a brand-new pairing under
+"added" — now returns a separate `corrected` count, shown on both HR-upload
+surfaces (`NotPairedYet.js` and the dashboard's own HR strip — these two
+still duplicate the same fetch/render logic, flagged, not consolidated).
+
+**9. The "stuck on this page" reports were a real, separate UI bug, not a
+data problem.** `/onboarding`'s "not paired yet" vs. "go to dashboard"
+decision is made once, server-side, at page load — a client-side roster
+upload that successfully pairs the *current* uploader never updates that
+decision, so a successful upload could look identical to a silent failure.
+Fixed by calling Next's `router.refresh()` after a successful upload, which
+re-runs the server-side check and redirects automatically.
+
+**10. Efficiency, same file, same session:** `createPairFromRoster` had
+grown to 4 sequential database round-trips per row across all the fixes
+above. Merged the exact-match and self-heal lookups into one query (both
+only ever needed non-closed rows for the same `employee_email`), and moved
+the employee-profile lookup to only run on the path that actually inserts a
+new row — a self-heal or skip no longer pays for a fetch it doesn't use.
+
+### New: HR org-chart view (read-only)
+
+Melissa's ask, mid-session: *"I have more employees reporting to me... some
+report to Monte, some report to Ann, then they all go to me"* — she wanted
+to see the whole downstream org, not just her direct reports. Built:
+- `lib/data.js`: new `getOrgChart(admin)` — reads all non-closed pairs,
+  groups by manager, resolves each person's best-known display name (real
+  profile name if they've signed in, else the roster's `employee_label`,
+  else the bare email).
+- `app/api/hr/org-chart/route.js` (new): passcode-gated the same way as
+  every other HR admin action in this app.
+- Dashboard: new "View org chart (HR)" button next to the existing HR
+  controls, toggles a grouped manager→reports list inline.
+- Verified directly against the live database (read-only) before calling it
+  done — correctly grouped Melissa's own 6-person test roster by manager.
+
+### Slack "add employee" — given the same one-manager guard, and a real bug found while testing it
+
+`createPairForSlack` had no equivalent to the roster importer's "one active
+manager per employee" protection — a manager could add someone via Slack
+who already had a different active manager elsewhere, silently giving that
+person two managers at once. Added a check before insert. **Testing this
+fix found a second, pre-existing, unrelated bug:** re-adding the *same*
+already-paired person relied entirely on the database's
+`(employee_id, manager_id)` unique index, which never fires for someone
+with no profile yet (`employee_id` is `NULL` on every such row, and
+Postgres treats `NULL` as distinct from `NULL`) — so a manager re-adding a
+not-yet-signed-up person silently created a duplicate row instead of
+getting the intended "you're already paired with this person" error. Fixed
+by checking directly instead of relying on the DB constraint.
+Regression-tested against the live database: fresh add, same-manager
+re-add, different-manager add — all three now behave correctly, confirmed
+exactly one row exists afterward, test data cleaned up.
+
+### Google sign-in: "not letting me sign in with another Google email"
+
+Real bug, quick fix — `signInWithOAuth` never passed
+`prompt: "select_account"`, so Google silently reused whichever Google
+account was already active in the browser instead of showing the account
+picker, even after signing out of the app itself. Added the missing option
+in `app/login/page.js`.
+
+### Full multi-angle code review run, same session
+
+Ran the repo's `/code-review` skill (8 finder angles + independent
+verification pass) against the day's full diff. All 10 confirmed findings
+were addressed same session — the roster dedup/self-heal fixes, the
+`employee_label` fix, the org-chart's read-only design, the
+`createPairForSlack` guard, and the privacy-page disclosure above all trace
+back to specific findings from that review, not separate ad-hoc requests.
+
+### Still open, not decided or built
+
+1. **Roster upload's final confirmed state, this session** — see the note
+   at the top of this entry. Verify before trusting any specific pairing.
+2. **Placeholder-email swap-in for roster-imported pairs** — carried over
+   from 2026-09-04, still not built: no flow lets HR or an employee replace
+   a placeholder email with a real one on an existing pending pair outside
+   of a full re-upload.
+3. **`NotPairedYet.js` and the dashboard page still duplicate the same
+   HR-unlock / roster-upload / summary-rendering logic** — flagged by the
+   code review, not consolidated into a shared component/hook this session.
+4. **Concurrent/double-submit uploads** — `createPairFromRoster` still has
+   no transaction across its read-then-write; two overlapping uploads for
+   the same new employee could still both insert. Lower priority: the
+   upload button now disables itself mid-request (this session), which
+   closes the most likely real-world trigger (an impatient double-click),
+   just not a genuinely concurrent second request.
+5. Every carried-over item from 2026-09-04's list below that wasn't
+   mentioned above is still exactly as it was: onboarding/add's missing
+   Cancel/back link, "My suggestions" parity + two-way Slack notes (still
+   an explicit pause, not a decision), "End this pairing" being UI-only not
+   RLS-enforced, no real HR account role, and the old test/`+alias`
+   Supabase accounts still sitting in the users list.
+
 ## Session closeout (2026-09-04, night): Google SSO, HR roster import, contrast fixes — git AND deploy both confirmed, session ended clean
 
 **Everything below is live.** Deploy status was genuinely unclear for part

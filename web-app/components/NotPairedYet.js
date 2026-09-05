@@ -1,17 +1,22 @@
 "use client";
 
-// Shown at /onboarding to anyone signed in with zero pairings. Nobody
-// self-declares a role or manager here anymore -- pairings only come from
-// HR's roster upload (or Slack's manager-only "add employee"). This screen
-// exists so HR can also reach the roster importer without needing a
-// pairing of their own, and so anyone else just sees a plain status
-// message instead of a form (Melissa's call, 2026-09-05).
+// Shown at /onboarding to anyone signed in with zero pairings -- their
+// FIRST pairing. Nobody self-declares a role or manager to get their first
+// one anymore; that only comes from HR's roster upload (or Slack's
+// manager-only "add employee"). A second/later pairing is a separate,
+// untouched flow (/onboarding/add's OnboardingForm) for someone who already
+// has one. This screen exists so HR can also reach the roster importer
+// without needing a pairing of their own, and so anyone else just sees a
+// plain status message instead of a form (Melissa's call, 2026-09-05).
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 
 export default function NotPairedYet() {
+  const router = useRouter();
   const [hrPasscode, setHrPasscode] = useState(null);
   const [rosterSummary, setRosterSummary] = useState(null);
   const [message, setMessage] = useState("");
+  const [uploading, setUploading] = useState(false);
 
   async function unlockHr() {
     const code = window.prompt("HR PIN:");
@@ -31,17 +36,36 @@ export default function NotPairedYet() {
 
   async function handleRosterUpload(e) {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || uploading) return;
+    setUploading(true);
     setRosterSummary(null);
     setMessage("");
     const form = new FormData();
     form.append("passcode", hrPasscode);
     form.append("file", file);
-    const res = await fetch("/api/hr/roster", { method: "POST", body: form });
-    const data = await res.json();
-    if (!res.ok) setMessage(data.error || "Couldn't import that.");
-    else setRosterSummary(data);
-    e.target.value = "";
+    try {
+      const res = await fetch("/api/hr/roster", { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage(data.error || "Couldn't import that.");
+      } else {
+        setRosterSummary(data);
+        // The upload can pair the CURRENT user (e.g. their own manager
+        // relationship was on the sheet) -- this page's "not paired yet"
+        // vs. dashboard decision is made once, server-side, at page load,
+        // so nothing here would otherwise reflect that until a manual
+        // reload. router.refresh() re-runs that server check now, so a
+        // newly-paired uploader lands on their dashboard automatically
+        // instead of staring at a stale "not paired yet" screen that
+        // looks like the upload failed when it didn't, 2026-09-05.
+        router.refresh();
+      }
+    } catch {
+      setMessage("Something went wrong on the server. Try again, or check with support if it keeps happening.");
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
   }
 
   return (
@@ -52,9 +76,12 @@ export default function NotPairedYet() {
       </p>
 
       {hrPasscode ? (
-        <label className="btn secondary" style={{ cursor: "pointer", width: "100%", marginTop: 16, display: "block", textAlign: "center" }}>
-          Import roster (HR)
-          <input type="file" accept=".xlsx" style={{ display: "none" }} onChange={handleRosterUpload} />
+        <label
+          className="btn secondary"
+          style={{ cursor: uploading ? "default" : "pointer", width: "100%", marginTop: 16, display: "block", textAlign: "center", opacity: uploading ? 0.6 : 1 }}
+        >
+          {uploading ? "Importing…" : "Import roster (HR)"}
+          <input type="file" accept=".xlsx" disabled={uploading} style={{ display: "none" }} onChange={handleRosterUpload} />
         </label>
       ) : (
         <button className="btn ghost" style={{ width: "100%", marginTop: 16 }} onClick={unlockHr}>
@@ -64,12 +91,28 @@ export default function NotPairedYet() {
 
       {rosterSummary && (
         <div className="field-hint" style={{ marginTop: 12 }}>
-          Added {rosterSummary.added}, already there {rosterSummary.skipped}, of {rosterSummary.total}.
+          Added {rosterSummary.added}, corrected {rosterSummary.corrected || 0}, already there {rosterSummary.skipped}, of {rosterSummary.total}.
           {rosterSummary.failed?.length > 0 && (
             <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
               {rosterSummary.failed.map((f, i) => <li key={i}>{f}</li>)}
             </ul>
           )}
+        </div>
+      )}
+
+      {rosterSummary?.unmatchedManagers?.length > 0 && (
+        <div className="limits" style={{ marginTop: 12 }}>
+          These manager names don&apos;t match anyone in the Employee column —
+          double-check for a typo or extra character (often invisible at
+          normal zoom): {rosterSummary.unmatchedManagers.join(", ")}
+        </div>
+      )}
+
+      {rosterSummary?.nameCollisions?.length > 0 && (
+        <div className="limits" style={{ marginTop: 12 }}>
+          These names appear more than once with different emails —
+          whichever email wins is unpredictable, so anyone referencing them
+          as a manager may get paired to the wrong account: {rosterSummary.nameCollisions.join(", ")}
         </div>
       )}
 

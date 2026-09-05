@@ -24,7 +24,11 @@ export default function PrivacyPage() {
         <p style={{ fontSize: 13 }}>
           Your name and email address, and whatever you or your manager/employee
           enter into the app: 1:1 topics, goals, development plans, actions,
-          feedback, and meeting notes.
+          feedback, and meeting notes. HR can also upload a company org chart
+          (names, emails, and reporting lines) to set up pairings in advance —
+          if that happens before you&apos;ve signed in yourself, your name and
+          email may already be on file when you first sign in, so your account
+          links to the right manager automatically.
         </p>
 
         <h3 style={{ marginTop: 20 }}>Where it lives</h3>

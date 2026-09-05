@@ -49,6 +49,24 @@ export async function createPair(supabase, myRole, partnerEmail) {
 // anything in the interaction payload itself. Scoped to manager-adds-employee
 // only, matching the one real request this exists for (SLACK_TODO.md).
 export async function createPairForSlack(admin, managerId, managerEmail, employeeEmail) {
+  // The roster importer (createPairFromRoster) enforces one active manager
+  // per employee; this path had no equivalent check, so a manager could add
+  // someone here who already has a different active manager elsewhere,
+  // silently giving that employee two managers at once, found in review
+  // 2026-09-05. Checked directly here rather than relying on the DB's
+  // (employee_id, manager_id) unique index, which never fires for an
+  // employee with no profile yet (employee_id is NULL on every such row,
+  // and Postgres treats NULL as distinct from NULL) -- that gap let a
+  // manager silently re-add the same not-yet-signed-up person twice,
+  // found while testing this same fix.
+  const { data: existing, error: existingErr } = await admin.from("pairs").select("id, manager_id").eq("employee_email", employeeEmail).is("closed_at", null);
+  if (existingErr) throw existingErr;
+  const dup = existing[0];
+  if (dup) {
+    if (dup.manager_id === managerId) throw new Error("You're already paired with this person.");
+    throw new Error("This person already has an active pairing with a different manager. Ask them or HR to close it first.");
+  }
+
   const { data: employeeProfile } = await admin.from("profiles").select("id").eq("email", employeeEmail).maybeSingle();
   const { data, error } = await admin
     .from("pairs")
@@ -74,24 +92,56 @@ export async function createPairForSlack(admin, managerId, managerEmail, employe
 // (employee_id, manager_id) -- Postgres treats NULL <> NULL, so it won't
 // catch a re-upload where both sides are still unmatched placeholder
 // emails; checked by email pair here instead (Melissa's call, 2026-09-04).
-export async function createPairFromRoster(admin, employeeEmail, managerEmail) {
-  const { data: existing } = await admin
-    .from("pairs")
-    .select("id")
-    .eq("employee_email", employeeEmail)
-    .eq("manager_email", managerEmail)
-    .maybeSingle();
-  if (existing) return { skipped: true };
-
-  const [{ data: emp }, { data: mgr }] = await Promise.all([
-    admin.from("profiles").select("id").eq("email", employeeEmail).maybeSingle(),
+// One active pairing per employee (a re-uploaded roster corrects the
+// existing row's manager instead of leaving a stale one in place -- an
+// earlier version deduped on the exact (employee_email, manager_email)
+// pair, so a row created with a wrong/placeholder manager email before a
+// parsing fix was never corrected by a later, fixed re-upload: the newly
+// computed row didn't match the old one, so it just inserted a second row
+// and left the first, wrong one active, 2026-09-05).
+export async function createPairFromRoster(admin, employeeEmail, managerEmail, managerPlaceholder, employeeLabel) {
+  // One query covers both the exact-duplicate check and the stale-placeholder
+  // self-heal check (both only ever matched non-closed rows for this
+  // employee_email) -- two round trips collapsed into one, 2026-09-05.
+  const [{ data: existingRows, error: existingErr }, { data: mgr, error: mgrErr }] = await Promise.all([
+    admin.from("pairs").select("id, manager_email").eq("employee_email", employeeEmail).is("closed_at", null),
     admin.from("profiles").select("id").eq("email", managerEmail).maybeSingle(),
   ]);
+  if (existingErr) throw existingErr;
+  if (mgrErr) throw mgrErr;
+
+  if (existingRows.some((r) => r.manager_email === managerEmail)) return { skipped: true };
+
+  // Self-heal ONLY the row that was a placeholder for THIS SAME manager name
+  // (matched by the exact placeholder email that name would generate, not
+  // "any placeholder") -- an employee can legitimately have a second,
+  // different pending manager (dotted-line reporting), and keying this off
+  // employee_email alone previously matched and clobbered that unrelated
+  // relationship instead of only correcting a stale copy of itself, found
+  // live 2026-09-05.
+  const stale = managerPlaceholder && existingRows.find((r) => r.manager_email === managerPlaceholder);
+
+  if (stale) {
+    const { error } = await admin
+      .from("pairs")
+      .update({ manager_email: managerEmail, manager_id: mgr?.id || null })
+      .eq("id", stale.id);
+    if (error) throw error;
+    return { skipped: false, updated: true };
+  }
+
+  // Only needed on the insert path -- fetched here, not up front, so the
+  // exact-duplicate and self-heal branches above never pay for a lookup
+  // they don't use, 2026-09-05.
+  const { data: emp, error: empErr } = await admin.from("profiles").select("id").eq("email", employeeEmail).maybeSingle();
+  if (empErr) throw empErr;
+
   const { error } = await admin.from("pairs").insert({
     employee_id: emp?.id || null,
     employee_email: employeeEmail,
     manager_id: mgr?.id || null,
     manager_email: managerEmail,
+    employee_label: employeeLabel || null,
   });
   if (error) {
     if (error.code === "23505") return { skipped: true };
@@ -1142,6 +1192,33 @@ export async function getHrPasscode(supabase) {
 export async function setHrPasscode(supabase, value) {
   const { error } = await supabase.from("app_settings").upsert({ key: "hr_handbook_passcode", value, updated_at: new Date().toISOString() });
   if (error) throw error;
+}
+
+// Read-only view of the roster as it actually landed in `pairs` -- grouped
+// by manager so HR can see who reports to whom without re-opening the
+// spreadsheet. Names prefer a real profile's full_name (once that person
+// has signed in), falling back to employee_label or the bare email.
+export async function getOrgChart(admin) {
+  const { data: pairs, error } = await admin
+    .from("pairs")
+    .select("employee_email, manager_email, employee_label")
+    .is("closed_at", null);
+  if (error) throw error;
+
+  const emails = [...new Set(pairs.flatMap((p) => [p.employee_email, p.manager_email]))];
+  const { data: profiles, error: profErr } = await admin.from("profiles").select("email, full_name").in("email", emails);
+  if (profErr) throw profErr;
+  const nameFor = new Map(profiles.map((p) => [p.email, p.full_name]));
+
+  const displayName = (email, label) => nameFor.get(email) || label || email;
+
+  const byManager = new Map();
+  for (const p of pairs) {
+    const managerName = displayName(p.manager_email, null);
+    if (!byManager.has(p.manager_email)) byManager.set(p.manager_email, { manager: managerName, managerEmail: p.manager_email, reports: [] });
+    byManager.get(p.manager_email).reports.push({ name: displayName(p.employee_email, p.employee_label), email: p.employee_email });
+  }
+  return [...byManager.values()].sort((a, b) => a.manager.localeCompare(b.manager));
 }
 
 // ------------------------------------------------------------- messages ----

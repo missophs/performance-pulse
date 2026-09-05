@@ -45,6 +45,7 @@ export default function DashboardPage() {
   // controls for the rest of this page load, nothing is persisted.
   const [hrPasscode, setHrPasscode] = useState(null);
   const [rosterSummary, setRosterSummary] = useState(null);
+  const [orgChart, setOrgChart] = useState(null);
   const toast = useToast();
   const router = useRouter();
 
@@ -297,6 +298,21 @@ export default function DashboardPage() {
     e.target.value = "";
   }
 
+  async function toggleOrgChart() {
+    if (orgChart) {
+      setOrgChart(null);
+      return;
+    }
+    const res = await fetch("/api/hr/org-chart", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ passcode: hrPasscode }),
+    });
+    const data = await res.json();
+    if (!res.ok) toast("Couldn't load the org chart", data.error || "Unknown error");
+    else setOrgChart(data.orgChart);
+  }
+
   async function openHandbook(link) {
     const url = await getHandbookFileUrl(supabase, link);
     window.open(url, "_blank", "noopener");
@@ -355,7 +371,8 @@ export default function DashboardPage() {
             <label className="btn secondary sm" style={{ cursor: "pointer" }}>
               Import roster (HR)
               <input type="file" accept=".xlsx" style={{ display: "none" }} onChange={handleRosterUpload} />
-            </label>
+            </label>{" "}
+            <button className="btn ghost sm" onClick={toggleOrgChart}>{orgChart ? "Hide org chart" : "View org chart (HR)"}</button>
           </>
         ) : (
           <button className="btn ghost sm" style={{ marginLeft: 8 }} onClick={unlockHr}>🔒 HR unlock</button>
@@ -363,13 +380,36 @@ export default function DashboardPage() {
       </p>
       {rosterSummary && (
         <p className="hb-strip">
-          Roster: added {rosterSummary.added}, already there {rosterSummary.skipped}, of {rosterSummary.total}.
+          Roster: added {rosterSummary.added}, corrected {rosterSummary.corrected || 0}, already there {rosterSummary.skipped}, of {rosterSummary.total}.
           {rosterSummary.failed.length > 0 && (
             <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
               {rosterSummary.failed.map((f, i) => <li key={i}>{f}</li>)}
             </ul>
           )}
+          {rosterSummary.unmatchedManagers?.length > 0 && (
+            <>Manager names with no match in the Employee column (check for typos): {rosterSummary.unmatchedManagers.join(", ")}</>
+          )}
+          {rosterSummary.nameCollisions?.length > 0 && (
+            <>Names used more than once with different emails: {rosterSummary.nameCollisions.join(", ")}</>
+          )}
         </p>
+      )}
+      {orgChart && (
+        <div className="card">
+          <div className="card-head"><h2>Org chart</h2></div>
+          {orgChart.length === 0 ? (
+            <p style={{ color: "var(--muted)", fontSize: 13 }}>No active pairings yet.</p>
+          ) : (
+            orgChart.map((g) => (
+              <div key={g.managerEmail} style={{ marginBottom: 12 }}>
+                <strong>{g.manager}</strong>
+                <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+                  {g.reports.map((r) => <li key={r.email}>{r.name}</li>)}
+                </ul>
+              </div>
+            ))
+          )}
+        </div>
       )}
 
       <div className="card">

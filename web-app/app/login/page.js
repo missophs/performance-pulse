@@ -35,7 +35,14 @@ export default function LoginPage() {
     const supabase = createClient();
     await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+        // Without this, Google silently reuses whichever Google account is
+        // already active in the browser instead of showing the account
+        // picker -- there's no way to switch accounts from this button
+        // otherwise, even after signing out of the app itself, 2026-09-05.
+        queryParams: { prompt: "select_account" },
+      },
     });
   }
 
