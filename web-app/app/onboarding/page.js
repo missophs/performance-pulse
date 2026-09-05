@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { listMyPairs } from "@/lib/data";
-import OnboardingForm from "@/components/OnboardingForm";
+import NotPairedYet from "@/components/NotPairedYet";
 
 export default async function OnboardingPage() {
   const supabase = await createClient();
@@ -19,11 +19,11 @@ export default async function OnboardingPage() {
         <div className="auth-logo">
           <div className="logo">PP</div>
           <div>
-            <strong>Set up your 1:1</strong>
-            <small>One-time — tell us who you work with</small>
+            <strong>Performance Pulse</strong>
+            <small>Not paired yet</small>
           </div>
         </div>
-        <OnboardingForm />
+        <NotPairedYet />
       </div>
     </div>
   );

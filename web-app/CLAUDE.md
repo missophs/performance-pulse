@@ -57,3 +57,23 @@ this repo either (`supabase/.temp` has no project ref), so any new
 `supabase/migrations/*.sql` file needs to be run by hand in the Supabase
 SQL editor before it does anything — writing the migration file is not
 the same as applying it.
+
+# Governance: privacy policy accuracy (added 2026-09-05)
+
+`app/privacy/page.js` is a real, live page — it's the URL entered as the
+"Application privacy policy link" on the Google Cloud OAuth consent
+screen (Google Auth Platform → Branding, project "Performance Pulse
+SSO"), required for the app to leave Testing mode and let any Google
+account sign in. It is read by Google, and by real employees during
+onboarding — not decorative content.
+
+**Rule: any change to what data this app collects, stores, shares, or
+signs in with (a new table, a new integration, a new OAuth provider like
+Microsoft, a new third-party service, a new HR/roster feature) must
+update `app/privacy/page.js` in the same change, not as a follow-up.**
+Do not let this page drift from what the app actually does. If it's
+unclear whether something needs disclosing, ask Melissa rather than
+guess or quietly omit it. Do not add compliance claims (GDPR, CCPA, SOC2,
+etc.) unless they're actually true — this is a plain-language description
+of real behavior, not a legal document, and should stay that way unless
+Melissa explicitly wants real legal review.

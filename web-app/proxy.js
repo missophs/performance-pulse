@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 // /api/slack is authenticated separately, via the x-webhook-secret header
 // checked in app/api/slack/notify/route.js — Supabase's webhook call has no
 // browser session cookie to check here.
-const PUBLIC_PATHS = ["/login", "/auth/callback", "/api/slack"];
+const PUBLIC_PATHS = ["/login", "/auth/callback", "/api/slack", "/privacy"];
 
 export async function proxy(request) {
   let response = NextResponse.next({ request });
