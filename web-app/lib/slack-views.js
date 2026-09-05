@@ -135,8 +135,21 @@ export function homeView(ctx, d) {
           ),
         ]
       : []),
-    section(`Your 1:1 partner: *${ctx.partnerName}* · you're the ${ctx.role}.`),
-    section(`You appear as *${ctx.myName}* to ${ctx.partnerName}.`, button("Edit your own name", "open_edit_name")),
+    // No self-name-edit at all, either role -- names are set once at signup
+    // (OnboardingForm.js) and carry through everywhere, including here, so a
+    // separate "edit your own name" entry point was pure confusion (Melissa's
+    // call). Managers keep "Edit their name" -- a distinct feature, a
+    // manager-only per-pairing label (pairs.employee_label, migration 0015)
+    // that never touches the employee's real account name.
+    // Wording spells out the relationship directly (Melissa's explicit
+    // rewrite) instead of the old dry "Your 1:1 partner: X · you're the
+    // role" line, which tested as unclear.
+    ...(ctx.isMgr
+      ? [
+          context(`*${ctx.myName}* (manager)`),
+          section(`*${ctx.partnerName}* is your employee — they'll be your 1:1 partner.`, button("Edit their name", "open_edit_employee_label")),
+        ]
+      : [context(`*${ctx.partnerName}* is your manager — they'll be your 1:1 partner.`)]),
     ...(ctx.isMgr ? [actions([button("Add a new employee", "open_add_employee")])] : []),
     context(`Next 1:1: ${next1on1}  ·  ${openTopics.length} open topic${openTopics.length === 1 ? "" : "s"}  ·  ${openActions.length} open action${openActions.length === 1 ? "" : "s"}`),
     { type: "divider" },
@@ -149,8 +162,19 @@ export function homeView(ctx, d) {
       button("Wrap up a 1:1", "open_wrap_up"),
       button("Prepare a hard conversation", "open_add_hardconvo"),
     ]),
-    section("*My suggestions*"),
-    actions([button("My suggestions", "open_list_suggestions"), button("Write my own suggestion", "open_add_suggestion")]),
+    // Manager-only private scratchpad -- Melissa's explicit call, since the
+    // old per-role "My suggestions" (both sides had their own private list)
+    // read as if it were a suggestion TO the other person, which it never
+    // was. Hidden from the employee's Home tab entirely, not just relabeled
+    // -- re-checked server-side too (see open_list_suggestions/
+    // open_add_suggestion in route.js), same defense-in-depth as every
+    // other role-gated feature here.
+    ...(ctx.isMgr
+      ? [
+          section(`*Private notes* — only you see this, never ${ctx.partnerName}.`),
+          actions([button("View notes", "open_list_suggestions"), button("Write a note", "open_add_suggestion")]),
+        ]
+      : []),
     { type: "divider" },
     section(`*Goals* — ${d.goals.length} on record`),
     actions([button("Add a goal", "open_add_goal"), button("View goals", "open_list_goals")]),
@@ -159,17 +183,24 @@ export function homeView(ctx, d) {
     section(`*Achievements* — ${d.achievements.length} logged`),
     actions([button("Log one", "open_add_achievement"), button("View achievements", "open_list_achievements")]),
     section(`*Feedback* — ${d.feedback.length} entries${openRequests.length ? `, ${openRequests.length} request${openRequests.length === 1 ? "" : "s"} waiting` : ""}`),
+    context(
+      ctx.isMgr
+        ? "*Give feedback:* write feedback for them, they'll see it. *Ask for feedback:* ask them to evaluate you. *View feedback in the app:* read the full history."
+        : "*Ask for feedback:* ask your manager to evaluate you. *View feedback in the app:* read the full history, including anything they've given you."
+    ),
     actions([
       ...(ctx.isMgr ? [button("Give feedback", "open_add_feedback")] : []),
       button("Ask for feedback", "open_add_feedback_request"),
       button("View feedback in the app", "open_list_feedback"),
     ]),
-    section("*Career*"),
-    actions([button("View career", "open_list_career"), button("Edit my answers", "open_add_career")]),
+    // Both buttons just open the app -- no in-Slack list or upload flow at
+    // all (Melissa's call). Uploading needs a real file, which only works on
+    // the website; viewing pointed there too rather than maintaining two
+    // copies of the same list.
     section(`*Documents* — ${d.documents.length}`),
-    actions([button("Add a document", "open_add_document"), button("View documents", "open_list_documents")]),
+    actions([openInApp("Upload a document", "/dashboard"), openInApp("View documents", "/dashboard")]),
     section("*Handbook*"),
-    actions([button("View links", "open_list_handbook")]),
+    actions([button("View handbook", "open_list_handbook")]),
     section("*History*\nEverything past — meetings, goals, feedback, all of it — lives in the app."),
     actions([openInApp("Open History in the app", "/history")]),
     { type: "divider" },
@@ -181,9 +212,17 @@ export function homeView(ctx, d) {
   return { type: "home", blocks };
 }
 
-export function editNameModal(ctx) {
-  return modal("edit_name", "Your display name", [
-    inputBlock("name", "Your name", plainInput("val", { initial: ctx.myName, placeholder: "e.g. Melissa Weiss" })),
+// Manager-only (see the governance re-check on open_edit_employee_label in
+// route.js): sets pairs.employee_label (migration 0015), the same
+// manager-only per-pairing display name the website's "Name to show you"
+// field writes -- never the employee's own profiles.full_name, so it can't
+// leak into any other pairing that employee is in and the employee's own
+// account name is untouched.
+export function editEmployeeLabelModal(ctx) {
+  const realName = ctx.pair.employee?.full_name || ctx.pair.employee_email;
+  return modal("edit_employee_label", "Employee's name", [
+    section(`Their account name is *${realName}*. This only changes what you call them here — it doesn't rename their account, and only you see it.`),
+    inputBlock("label", "Name to show you", plainInput("val", { initial: ctx.pair.employee_label || "", placeholder: realName })),
   ]);
 }
 
@@ -260,7 +299,6 @@ export function addTopicModal(ctx, draft, saved = false) {
     "add_topic",
     "Add a topic",
     [
-      ...draftControls("save_draft_topic", saved),
       section(
         "*Pick a suggestion (optional)*",
         { type: "static_select", action_id: "suggested_pick", option_groups: groups, placeholder: { type: "plain_text", text: "Browse suggested topics" } }
@@ -286,6 +324,7 @@ export function addTopicModal(ctx, draft, saved = false) {
         ),
         true
       ),
+      ...draftControls("save_draft_topic", saved),
     ],
     "Save"
   );
@@ -304,12 +343,13 @@ export function addHardConvoModal() {
   ]);
 }
 
-// Mirrors the website's "Write my own suggestion" tool
-// (components/one-on-one/SuggestionsCard.js) — a personal, role-scoped list
-// (each side only ever sees their own), filed under the same category
-// names as that role's fixed SUGGESTIONS library plus "Other". "Add to
-// agenda" mirrors addFromSuggestion (page.js): creates a plain unsubmitted
-// topic, same as adding one by hand — no ping until Submit.
+// Manager-only private scratchpad (Melissa's explicit call, see homeView) --
+// a personal list only the manager ever sees, filed under the manager's
+// fixed SUGGESTIONS categories plus "Other". "Add to agenda" mirrors
+// addFromSuggestion (page.js): creates a plain unsubmitted topic, same as
+// adding one by hand — no ping until Submit. `role` param stays (rather
+// than assuming "manager") so the underlying list/filter logic doesn't need
+// to change if this ever needs to support both roles again.
 function mySuggestionCategories(role) {
   return Object.keys(SUGGESTIONS[role] || {}).concat("Other");
 }
@@ -321,13 +361,13 @@ export function listMySuggestionsModal(list, role) {
         section(`*${s.text}*\n${s.category}`),
         actions([button("Add to agenda", "suggestion_add", s.id), button("Remove", "suggestion_delete", s.id, "danger")]),
       ])
-    : [section("Nothing saved yet. Use \"Write my own suggestion\" on the Home tab.")];
-  return modal("view_suggestions", "My suggestions", blocks, "Close");
+    : [section("Nothing saved yet. Use \"Write a note\" on the Home tab.")];
+  return modal("view_suggestions", "Private notes", blocks, "Close");
 }
 
 export function addSuggestionModal(role) {
   const cats = mySuggestionCategories(role);
-  return modal("add_suggestion", "Write my own suggestion", [
+  return modal("add_suggestion", "Write a private note", [
     inputBlock("text", "The question or topic", plainInput("val", { multiline: true, placeholder: "Something you want to remember to raise." })),
     inputBlock("category", "File it under", staticSelect("val", cats, cats[0])),
   ]);
@@ -349,7 +389,9 @@ export function listTopicsModal(topics, viewerRole) {
   const open = topics.filter(isOpenTopic);
   const blocks = open.length
     ? open.flatMap((t) => [
-        section(`*${t.text}*\n${t.category} · added ${ago(t.created_at)}${t.submitted_at ? "" : " · _not yet submitted_"}`),
+        section(
+          `*${t.text}*\n${t.category} · added ${ago(t.created_at)}${t.submitted_at ? "" : " · _not yet submitted_"}${t.why ? `\n_${t.why}_` : ""}`
+        ),
         actions([
           button("Mark discussed", "topic_mark_discussed", t.id, "primary"),
           // Submit is the explicit "let them know" action (SLACK_TODO.md item
@@ -363,7 +405,11 @@ export function listTopicsModal(topics, viewerRole) {
         ]),
       ])
     : [section("No open topics. Add one from the Home tab.")];
-  blocks.push({ type: "divider" }, actions([openInApp("Open topics in the app for full notes")]));
+  // No "open in the app for full notes" link here anymore -- text + why are
+  // both already shown above (real text has been shown since 2026-08-28,
+  // "why" was the one thing still missing). Unlike Actions/Dev
+  // plans/Achievements below, which stay deliberately redacted, there's
+  // nothing left in the app that isn't already in this modal.
   return modal("view_topics", "Open topics", blocks, "Close");
 }
 
@@ -469,7 +515,6 @@ export function addGoalModal(ctx, draft, saved = false) {
     "add_goal",
     "Add a goal",
     [
-      ...draftControls("save_draft_goal", saved),
       context(SMART_GOAL_CONTEXT),
       // Verbatim match to the website's Add Goal modal (Melissa's
       // instruction) — shown only to the employee, same as there.
@@ -483,6 +528,7 @@ export function addGoalModal(ctx, draft, saved = false) {
       inputBlock(id("measure"), "How you'll know it's met", plainInput("val", { initial: draft?.measure }), true),
       inputBlock(id("target"), "Target date", datePicker("val", draft?.target), true),
       inputBlock(id("status"), "Status", staticSelect("val", GOAL_STATES, draft?.status || GOAL_STATES[0])),
+      ...draftControls("save_draft_goal", saved),
     ],
     "Save"
   );
@@ -494,11 +540,15 @@ export function addGoalModal(ctx, draft, saved = false) {
 export function listGoalsModal(goals) {
   const blocks = goals.length
     ? goals.flatMap((g) => [
-        section(`*${g.text}*\n${g.status} · ${g.progress || 0}%${g.target_date ? ` · target ${g.target_date}` : ""}`),
+        section(
+          `*${g.text}*\n${g.status} · ${g.progress || 0}%${g.target_date ? ` · target ${g.target_date}` : ""}${g.why ? `\n_${g.why}_` : ""}${g.measure ? `\n*How you'll know it's met:* ${g.measure}` : ""}`
+        ),
         actions([button("Edit", "goal_edit", g.id), button("Delete", "goal_delete", g.id, "danger")]),
       ])
     : [section("No goals yet. Add one from the Home tab.")];
-  blocks.push({ type: "divider" }, actions([openInApp("Open goals in the app for the full text")]));
+  // Same reasoning as listTopicsModal above -- real text, why, and measure
+  // are all shown here now, so there's nothing left the app has that this
+  // modal doesn't.
   return modal("view_goals", "Goals", blocks, "Close");
 }
 
@@ -535,7 +585,6 @@ export function addDevPlanModal(ctx, draft, saved = false) {
     "add_devplan",
     "Add a plan",
     [
-      ...draftControls("save_draft_devplan", saved),
       section(
         "*Pick a suggestion (optional)*",
         { type: "static_select", action_id: "devplan_suggested_pick", option_groups: devSuggestionOptionGroups(), placeholder: { type: "plain_text", text: "Get a suggestion" } }
@@ -547,6 +596,7 @@ export function addDevPlanModal(ctx, draft, saved = false) {
       inputBlock(id("support"), `What ${managerName} will do to support this`, plainInput("val", { multiline: true, placeholder: "e.g. Review the first two decks and give feedback", initial: draft?.support }), true),
       inputBlock(id("target"), "Target date", datePicker("val", draft?.target), true),
       inputBlock(id("measure"), "How we'll know it worked", plainInput("val", { multiline: true, placeholder: "e.g. Confidently leads the quarterly leadership presentation", initial: draft?.measure }), true),
+      ...draftControls("save_draft_devplan", saved),
     ],
     "Save"
   );
@@ -581,11 +631,11 @@ export function addAchievementModal(draft, saved = false) {
     "add_achievement",
     "Log an achievement",
     [
-      ...draftControls("save_draft_achievement", saved),
       inputBlock(id("title"), "What happened", plainInput("val", { initial: draft?.title })),
       inputBlock(id("category"), "Category", staticSelect("val", ACH_CATS, draft?.category || ACH_CATS[0])),
       inputBlock(id("impact"), "Impact", plainInput("val", { multiline: true, initial: draft?.impact }), true),
       inputBlock(id("date"), "Date", datePicker("val", draft?.date), true),
+      ...draftControls("save_draft_achievement", saved),
     ],
     "Save"
   );
@@ -629,10 +679,11 @@ export function addFeedbackModal(ctx, draft, saved = false, requestId) {
     "add_feedback",
     `Feedback for ${ctx.partnerName}`,
     [
-      ...(requestId ? [context(`Answering ${ctx.partnerName}'s feedback request.`)] : draftControls("save_draft_feedback", saved)),
+      ...(requestId ? [context(`Answering ${ctx.partnerName}'s feedback request.`)] : []),
       inputBlock(id("type"), "Type", staticSelect("val", types, draft?.type || types[0])),
       inputBlock(id("text"), "Feedback", plainInput("val", { multiline: true, initial: draft?.text })),
       inputBlock(id("example"), "A specific example", plainInput("val", { multiline: true, initial: draft?.example }), true),
+      ...(requestId ? [] : draftControls("save_draft_feedback", saved)),
     ],
     "Save",
     requestId
@@ -682,83 +733,44 @@ export function listFeedbackModal(feedback, requests, viewerRole) {
       ]),
     ]),
     { type: "divider" },
-    actions([openInApp("Open feedback in the app for the full text")]),
+    // Feedback text is deliberately never echoed into Slack (see the file
+    // header comment) -- so "respond" here means a real, working link
+    // straight to the Feedback tab, not a build-in-Slack reply box.
+    // Wording is role-specific: an employee is the one who actually
+    // responds; a manager is just reading their own full history.
+    actions([openInApp(viewerRole === "employee" ? "Respond in the app" : "View full feedback in the app", "/performance")]),
   ];
   return modal("view_feedback", "Feedback", blocks, "Close");
 }
 
 // -------------------------------------------------------------- handbook ---
 
-// View-only, per the item 0g decision — no add/edit from Slack, just a way
-// to reach the links without opening the website first.
+// View-only, per the item 0g decision — no add/edit from Slack (uploading is
+// now HR-passcode-gated on the website, see app/api/handbook/route.js — not
+// a role any Slack account has, so there's nothing to link to here).
+// `l.url` may be null if getHandbookFileUrl (route.js) failed to sign it --
+// guard the button rather than emit an invalid `url` field, which Slack
+// rejects and silently sticks the whole modal on "Loading…" (the exact bug
+// that used to hit Documents' own in-Slack list, before it was replaced by
+// a plain link to the app -- see the comment above the Documents section in
+// homeView).
 export function listHandbookLinksModal(links) {
   const blocks = links.length
     ? links.flatMap((l) => [
         section(`*${l.title}*`),
-        actions([{ type: "button", text: { type: "plain_text", text: "Open", emoji: true }, url: l.url, action_id: "open_handbook_link" }]),
+        l.url
+          ? actions([{ type: "button", text: { type: "plain_text", text: "Open handbook", emoji: true }, url: l.url, action_id: "open_handbook_link" }])
+          : context("Couldn't generate a link for this file — try again from the app."),
       ])
-    : [section("No handbook links yet. Add one from the Home tab.")];
-  blocks.push({ type: "divider" }, actions([openInApp("Add or edit links in the app")]));
-  return modal("view_handbook_links", "Handbook links", blocks, "Close");
+    : [section("No handbook uploaded yet.")];
+  return modal("view_handbook_links", "Handbook", blocks, "Close");
 }
 
-// -------------------------------------------------------------- documents --
-
-// View + add-link only, per the item 0g decision — no raw file upload from
-// Slack (addDocumentLink, not uploadDocument). Same url-button pattern as
-// handbook links above, so opening one never round-trips through the
-// interactivity endpoint.
-export function listDocumentsModal(docs) {
-  const blocks = docs.length
-    ? docs.flatMap((d) => [
-        section(`*${d.name}*`),
-        actions([{ type: "button", text: { type: "plain_text", text: "Open", emoji: true }, url: d.url, action_id: "open_document_link" }]),
-      ])
-    : [section("No documents yet.")];
-  return modal("view_documents", "Documents", blocks, "Close");
-}
-
-export function addDocumentModal() {
-  return modal("add_document", "Add a document", [
-    inputBlock("name", "Name", plainInput("val")),
-    inputBlock("url", "Link", plainInput("val", { placeholder: "https://..." })),
-  ]);
-}
-
-// ----------------------------------------------------------------- career --
-
-// Not redacted between roles — mirrors the website (career/page.js: "Your
-// manager sees these"), unlike the manager-only concerns tracker above.
-export function listCareerModal(answers, employeeName) {
-  const byEmp = answers.filter((a) => a.role === "employee");
-  const byMgr = answers.filter((a) => a.role === "manager");
-  const blocks = [];
-  if (byEmp.length) {
-    blocks.push(section(`*${employeeName}'s answers*`));
-    byEmp.forEach((a) => blocks.push(context(`*${a.question}*\n${a.answer}`)));
-    blocks.push({ type: "divider" });
-  }
-  if (byMgr.length) {
-    blocks.push(section("*Manager's answers*"));
-    byMgr.forEach((a) => blocks.push(context(`*${a.question}*\n${a.answer}`)));
-    blocks.push({ type: "divider" });
-  }
-  if (!blocks.length) blocks.push(section("No career answers yet."));
-  blocks.push(actions([openInApp("Open Career in the app")]));
-  return modal("view_career", "Career", blocks, "Close");
-}
-
-// prompts/answers are pre-resolved by the caller (role-specific list, "{emp}"
-// already substituted) — see open_add_career in
-// app/api/slack/interactivity/route.js, which re-derives the same ordered
-// list from ctx at submit time to zip back up with these q0/q1/... values.
-export function addCareerModal(prompts, answers) {
-  return modal(
-    "add_career",
-    "Career conversation",
-    prompts.map((q, i) => inputBlock(`q${i}`, q, plainInput("val", { multiline: true, initial: answers[q] || "" }), true))
-  );
-}
+// Career was removed from Slack entirely (Melissa's call, 2026-09-04) --
+// too confusing mid-redesign to leave half-built. The website's nav link
+// was pulled too (AppShell.js), but the underlying /career page, its data
+// functions (lib/data.js's listCareerAnswers/saveCareerAnswers), and the
+// career_answers table are all untouched -- easy to bring back if needed.
 
 export function lastMeetingModal(meetings) {
   const last = meetings[0];

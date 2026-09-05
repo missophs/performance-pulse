@@ -25,7 +25,7 @@ import { ago } from "@/lib/format";
 const FILTERS = ["All", "1:1", "Performance", "Goals", "Development", "Career", "Feedback", "Actions", "Changes"];
 
 export default function HistoryPage() {
-  const { pairId, userId, partnerName, supabase } = usePulse();
+  const { pairId, userId, partnerName, isMgr, supabase } = usePulse();
   const router = useRouter();
   const toast = useToast();
 
@@ -49,6 +49,7 @@ export default function HistoryPage() {
   // deliberately leaves the pairing running (Melissa's call, 2026-09-03).
   // Reversible via Reopen above, same as it's always been.
   async function endPairing() {
+    if (!isMgr) return; // manager-only -- re-checked here, the button is already hidden for employees
     if (!window.confirm(`End this pairing with ${partnerName}? It moves to Closed pairings below -- nothing is deleted, and it can be reopened anytime.`)) return;
     const note = window.prompt("Optional note for the record (why, or leave blank):") || "";
     await closePair(supabase, pairId, note.trim() || null);
@@ -101,13 +102,15 @@ export default function HistoryPage() {
       <h1>History</h1>
       <p className="subtitle">Every meaningful conversation, in order. Search it, filter it, export any of it.</p>
 
-      <div className="card">
-        <div className="card-head">
-          <h2>This pairing</h2>
+      {isMgr && (
+        <div className="card">
+          <div className="card-head">
+            <h2>This pairing</h2>
+          </div>
+          <p className="card-note">If {partnerName} has left, or this pairing is over for any other reason, end it here.</p>
+          <button className="btn ghost sm" onClick={endPairing}>End this pairing</button>
         </div>
-        <p className="card-note">If {partnerName} has left, or this pairing is over for any other reason, end it here.</p>
-        <button className="btn ghost sm" onClick={endPairing}>End this pairing</button>
-      </div>
+      )}
 
       {closedPairs.length > 0 && (
         <div className="card">

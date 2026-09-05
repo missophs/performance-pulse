@@ -67,6 +67,39 @@ export async function createPairForSlack(admin, managerId, managerEmail, employe
   return data;
 }
 
+// HR roster import: creates one pair per (employee, manager) row from an
+// uploaded org chart, admin-side, since HR is on neither side of most of
+// these pairs (unlike createPair/createPairForSlack, which always attach
+// the acting user to the new row). The DB's unique index is on
+// (employee_id, manager_id) -- Postgres treats NULL <> NULL, so it won't
+// catch a re-upload where both sides are still unmatched placeholder
+// emails; checked by email pair here instead (Melissa's call, 2026-09-04).
+export async function createPairFromRoster(admin, employeeEmail, managerEmail) {
+  const { data: existing } = await admin
+    .from("pairs")
+    .select("id")
+    .eq("employee_email", employeeEmail)
+    .eq("manager_email", managerEmail)
+    .maybeSingle();
+  if (existing) return { skipped: true };
+
+  const [{ data: emp }, { data: mgr }] = await Promise.all([
+    admin.from("profiles").select("id").eq("email", employeeEmail).maybeSingle(),
+    admin.from("profiles").select("id").eq("email", managerEmail).maybeSingle(),
+  ]);
+  const { error } = await admin.from("pairs").insert({
+    employee_id: emp?.id || null,
+    employee_email: employeeEmail,
+    manager_id: mgr?.id || null,
+    manager_email: managerEmail,
+  });
+  if (error) {
+    if (error.code === "23505") return { skipped: true };
+    throw error;
+  }
+  return { skipped: false };
+}
+
 export async function getProfile(supabase, userId) {
   const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
   if (error) throw error;
@@ -1093,6 +1126,21 @@ export async function deleteHandbookLink(supabase, link) {
     await supabase.storage.from("handbook").remove([link.storage_path]);
   }
   const { error } = await supabase.from("handbook_links").delete().eq("id", link.id);
+  if (error) throw error;
+}
+
+// The shared HR passcode for Handbook uploads/removes (app/api/handbook/
+// route.js) -- lives in app_settings (migration 0018) instead of an env var
+// so it can actually be reset from the app. Only ever read/written with the
+// service-role client (RLS has no policies on this table, service-role only).
+export async function getHrPasscode(supabase) {
+  const { data, error } = await supabase.from("app_settings").select("value").eq("key", "hr_handbook_passcode").maybeSingle();
+  if (error) throw error;
+  return data?.value ?? null;
+}
+
+export async function setHrPasscode(supabase, value) {
+  const { error } = await supabase.from("app_settings").upsert({ key: "hr_handbook_passcode", value, updated_at: new Date().toISOString() });
   if (error) throw error;
 }
 

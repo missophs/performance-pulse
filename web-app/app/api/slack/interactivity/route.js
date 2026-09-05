@@ -14,7 +14,7 @@ import { loadHomeData } from "@/lib/slack-home-data";
 import { LD_RULES } from "@/lib/development-content";
 import {
   homeView,
-  editNameModal,
+  editEmployeeLabelModal,
   addTopicModal,
   TOPIC_FIELDS,
   addHardConvoModal,
@@ -42,10 +42,6 @@ import {
   addEmployeeModal,
   lastMeetingModal,
   listHandbookLinksModal,
-  listDocumentsModal,
-  addDocumentModal,
-  listCareerModal,
-  addCareerModal,
   listMySuggestionsModal,
   addSuggestionModal,
   loadingModal,
@@ -77,20 +73,14 @@ import {
   listMeetings,
   listHandbookLinks,
   getHandbookFileUrl,
-  listDocuments,
-  addDocumentLink,
-  listCareerAnswers,
-  saveCareerAnswers,
   listCustomSuggestions,
   addCustomSuggestion,
   deleteCustomSuggestion,
-  updateProfile,
   updatePair,
   getFormDraft,
   saveFormDraft,
   clearFormDraft,
 } from "@/lib/data";
-import { EMP_CAREER, MGR_CAREER } from "@/lib/career-content";
 import { dmByEmail } from "@/lib/slack-send";
 
 // Slack's interactivity endpoint is one request/response — there's no
@@ -133,14 +123,6 @@ async function draftFor(admin, ctx, kind) {
   return row?.draft;
 }
 
-// Matches career/page.js's `prompts` derivation exactly — used both to build
-// the modal and to zip its q0/q1/... fields back up with real questions on
-// submit, so the two calls must stay in lockstep with the website's list.
-function careerPromptsFor(ctx) {
-  const employeeName = ctx.isMgr ? ctx.partnerName : ctx.myName;
-  return (ctx.isMgr ? MGR_CAREER : EMP_CAREER).map((q) => q.replace("{emp}", employeeName));
-}
-
 // Shared "does this Slack-supplied id belong to my pair" check — the exact
 // pattern CLAUDE.md's governance rule requires at every handler that reads
 // or writes a row using an id Slack handed back to us (action.value,
@@ -162,28 +144,16 @@ async function verifyOwnedRow(admin, table, columns, id, ctx, extraCheck) {
 // `title` is shown in the placeholder modal that opens instantly, so it should
 // match the title `build` returns — only the body swaps when the data lands.
 const OPENERS = {
-  open_edit_name: { title: "Your name", build: async (admin, ctx) => editNameModal(ctx) },
+  // Manager-only: sets pairs.employee_label, the same per-pairing name the
+  // website's "Name to show you" field writes -- never the employee's own
+  // account name (profiles.full_name).
+  open_edit_employee_label: {
+    title: "Employee's name",
+    build: async (admin, ctx) => (ctx.isMgr ? editEmployeeLabelModal(ctx) : noticeModal("Employee's name", "Only managers can do this.")),
+  },
   open_add_topic: { title: "Add a topic", build: async (admin, ctx) => addTopicModal(ctx, normalizeDraft(TOPIC_FIELDS, await draftFor(admin, ctx, "topic"))) },
   open_add_action: { title: "Add an action", build: async (admin, ctx) => addActionModal(ctx) },
   open_add_hardconvo: { title: "Hard conversation", build: async () => addHardConvoModal() },
-  open_list_documents: { title: "Documents", build: async (admin, ctx) => listDocumentsModal(await listDocuments(admin, ctx.pairId)) },
-  open_add_document: { title: "Add a document link", build: async () => addDocumentModal() },
-  open_list_career: {
-    title: "Career",
-    build: async (admin, ctx) => {
-      const employeeName = ctx.isMgr ? ctx.partnerName : ctx.myName;
-      return listCareerModal(await listCareerAnswers(admin, ctx.pairId), employeeName);
-    },
-  },
-  open_add_career: {
-    title: "Career conversation",
-    build: async (admin, ctx) => {
-      const prompts = careerPromptsFor(ctx);
-      const existing = (await listCareerAnswers(admin, ctx.pairId)).filter((a) => a.role === ctx.role);
-      const answers = Object.fromEntries(existing.map((a) => [a.question, a.answer]));
-      return addCareerModal(prompts, answers);
-    },
-  },
   open_wrap_up: { title: "Wrap up", build: async (admin, ctx) => wrapUpModal((await loadHomeData(admin, ctx.pairId)).topics) },
   open_close_pair: { title: "Final wrap up", build: async () => wrapUpConversationModal() },
   // Button is manager-only in homeView too — this re-checks server-side in
@@ -252,18 +222,25 @@ const OPENERS = {
   // only has a storage_path, so the Slack button needs a real (signed) url
   // resolved before it can render as a link -- see getHandbookFileUrl.
   open_list_handbook: {
-    title: "Handbook links",
+    title: "Handbook",
     build: async (admin) => {
       const links = await listHandbookLinks(admin);
       const resolved = await Promise.all(links.map(async (l) => ({ ...l, url: await getHandbookFileUrl(admin, l).catch(() => null) })));
       return listHandbookLinksModal(resolved);
     },
   },
+  // Manager-only private scratchpad -- re-checked here same as every other
+  // role-gated opener, even though the button is already hidden for
+  // employees on the Home tab.
   open_list_suggestions: {
-    title: "My suggestions",
-    build: async (admin, ctx) => listMySuggestionsModal(await listCustomSuggestions(admin, ctx.pairId), ctx.role),
+    title: "Private notes",
+    build: async (admin, ctx) =>
+      ctx.isMgr ? listMySuggestionsModal(await listCustomSuggestions(admin, ctx.pairId), ctx.role) : noticeModal("Private notes", "This is manager-only."),
   },
-  open_add_suggestion: { title: "Write my own suggestion", build: async (admin, ctx) => addSuggestionModal(ctx.role) },
+  open_add_suggestion: {
+    title: "Write a private note",
+    build: async (admin, ctx) => (ctx.isMgr ? addSuggestionModal(ctx.role) : noticeModal("Write a private note", "This is manager-only.")),
+  },
 };
 
 // "Edit" buttons clicked from inside an already-open list modal. Same
@@ -518,11 +495,15 @@ function fieldVal(values, blockId) {
 const fieldValV2 = makeFieldValV2(fieldVal);
 
 const SUBMISSIONS = {
-  edit_name: async (admin, ctx, v) => {
-    const name = (fieldVal(v, "name") || "").trim();
-    if (!name) return;
-    await updateProfile(admin, ctx.profileId, { full_name: name });
-    ctx.myName = name; // so the Home-tab refresh right after this shows the new name immediately
+  // Manager-only: writes pairs.employee_label, never the employee's own
+  // profiles.full_name -- see editEmployeeLabelModal in lib/slack-views.js.
+  edit_employee_label: async (admin, ctx, v) => {
+    if (!ctx.isMgr) return;
+    const label = (fieldVal(v, "label") || "").trim();
+    await updatePair(admin, ctx.pairId, { employee_label: label || null });
+    // So the Home-tab refresh right after this shows the new label
+    // immediately, same trick as edit_name's ctx.myName above.
+    ctx.partnerName = label || ctx.pair.employee?.full_name || ctx.pair.employee_email;
   },
   // Closes out open topics/goals/actions for the pair (see wrapUpConversation
   // in lib/data.js) -- the pairing itself is never touched, unlike the old
@@ -667,29 +648,11 @@ const SUBMISSIONS = {
     await addTopic(admin, ctx.pairId, { text: outcome, why: body, category: "Other", role: ctx.role, name: ctx.myName, submitted: true });
     await notify(admin, ctx.pairId, `${ctx.myName} added a topic to the agenda`, ctx.role, ctx.otherRole, "oneOnOne");
   },
-  // No notification here at all, on either surface — the website's own
-  // document-add flow (app/(dashboard)/dashboard/page.js) doesn't send one
-  // either, so this matches it exactly rather than adding behavior the
-  // source feature doesn't have.
-  // Matches career/page.js's handleSave: a full diff-save across every
-  // prompt at once (saveCareerAnswers deletes now-blank answers, updates
-  // changed ones, inserts new ones) — not a single-field submit.
-  add_career: async (admin, ctx, v) => {
-    const prompts = careerPromptsFor(ctx);
-    const existing = await listCareerAnswers(admin, ctx.pairId);
-    const promptList = prompts.map((question, i) => ({ question, answer: fieldValV2(v, `q${i}`) || "" }));
-    await saveCareerAnswers(admin, ctx.pairId, ctx.role, ctx.myName, promptList, existing);
-    await notify(admin, ctx.pairId, `${ctx.myName} updated their career conversation`, ctx.role, ctx.otherRole, "career");
-  },
-  add_document: async (admin, ctx, v) => {
-    const name = fieldValV2(v, "name");
-    const url = fieldValV2(v, "url");
-    await addDocumentLink(admin, ctx.pairId, name, url, ctx.myName);
-  },
   // Matches saveCustomSuggestion (page.js): no notify() call at all, same as
   // the website — a saved suggestion is a private note-to-self, not
   // something the partner is told about.
   add_suggestion: async (admin, ctx, v) => {
+    if (!ctx.isMgr) return; // manager-only -- re-checked same as the opener
     const text = fieldValV2(v, "text");
     const category = fieldValV2(v, "category");
     await addCustomSuggestion(admin, ctx.pairId, ctx.role, text, category);

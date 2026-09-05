@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { PulseProvider, usePulse } from "@/components/PulseContext";
 import { createClient } from "@/lib/supabase/client";
 import { initials } from "@/lib/format";
-import { updateProfile, updatePair } from "@/lib/data";
+import { updatePair } from "@/lib/data";
 import { setCurrentPair } from "@/lib/actions";
 import NotificationBell from "@/components/NotificationBell";
 import Modal from "@/components/ui/Modal";
@@ -17,7 +17,9 @@ const NAV = [
   { view: "oneOnOne", href: "/one-on-one", label: "My 1:1", countKey: "openTopics" },
   { view: "goals", href: "/goals", label: "Goals", countKey: "activeGoals" },
   { view: "development", href: "/development", label: "Development", countKey: "activeDev" },
-  { view: "career", href: "/career", label: "Career" },
+  // Career removed from nav (Melissa's call, 2026-09-04) -- confusing
+  // mid-redesign. The /career page and its data are untouched, just
+  // unreachable from here now.
   { view: "actions", href: "/actions", label: "Actions", countKey: "openActions" },
   { view: "history", href: "/history", label: "History" },
   { view: "slack", href: "/slack", label: "Slack" },
@@ -37,9 +39,6 @@ function ShellBody({ counts, children }) {
   const pathname = usePathname();
   const router = useRouter();
 
-  const [editingName, setEditingName] = useState(false);
-  const [nameInput, setNameInput] = useState(myName);
-  const [savingName, setSavingName] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [editingLabel, setEditingLabel] = useState(false);
   const [labelInput, setLabelInput] = useState(employeeLabel);
@@ -58,24 +57,6 @@ function ShellBody({ counts, children }) {
     await setCurrentPair(id);
     router.refresh();
     setSwitching(false);
-  }
-
-  function openNameEdit() {
-    setNameInput(myName);
-    setEditingName(true);
-  }
-
-  async function saveName() {
-    const trimmed = nameInput.trim();
-    if (!trimmed) return;
-    setSavingName(true);
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    await updateProfile(supabase, user.id, { full_name: trimmed });
-    setSavingName(false);
-    setEditingName(false);
-    router.refresh();
   }
 
   function openLabelEdit() {
@@ -138,8 +119,8 @@ function ShellBody({ counts, children }) {
                 ))}
               </select>
             )}
-            <Link href="/onboarding/add" className="btn ghost sm" title="Set up a 1:1 with someone else">
-              + Add pairing
+            <Link href="/onboarding/add" className="btn ghost sm" title={isMgr ? "Set up a 1:1 with another employee you manage" : "Set up a 1:1 with another manager"}>
+              + Add {isMgr ? "employee" : "manager"}
             </Link>
             {isMgr ? (
               <button className="btn ghost sm" onClick={openLabelEdit} title="Click to change the name you see for this employee">
@@ -150,9 +131,7 @@ function ShellBody({ counts, children }) {
             )}
             <NotificationBell />
             <div className={`avatar ${isMgr ? "mgr" : "emp"}`}>{initials(myName)}</div>
-            <button className="who" onClick={openNameEdit} style={{ background: "none", border: "none", cursor: "pointer", font: "inherit", color: "inherit" }} title="Change your display name">
-              {myName}
-            </button>
+            <span className="who">{myName}</span>
             <button className="btn ghost sm" onClick={signOut}>
               Sign out
             </button>
@@ -161,27 +140,6 @@ function ShellBody({ counts, children }) {
 
         {children}
       </main>
-
-      <Modal
-        open={editingName}
-        title="Your display name"
-        note="This is what your 1:1 partner sees you as, everywhere in the app and in Slack."
-        onClose={() => setEditingName(false)}
-        onSave={saveName}
-        saveLabel={savingName ? "Saving…" : "Save"}
-        saveDisabled={!nameInput.trim() || savingName}
-      >
-        <div className="field">
-          <label htmlFor="displayName">Your name</label>
-          <input
-            id="displayName"
-            type="text"
-            value={nameInput}
-            onChange={(e) => setNameInput(e.target.value)}
-            placeholder="e.g. Melissa Weiss"
-          />
-        </div>
-      </Modal>
 
       <Modal
         open={editingLabel}

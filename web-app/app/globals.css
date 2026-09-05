@@ -51,8 +51,8 @@
   .nav-item{
     display:flex;align-items:center;justify-content:space-between;gap:8px;
     text-align:left;padding:10px 12px;border:none;background:none;border-radius:10px;
-    font-size:13.5px;color:rgba(255,255,255,.72);cursor:pointer;font-family:inherit;
-    font-weight:500;transition:background .15s,color .15s;text-decoration:none;
+    font-size:13.5px;color:rgba(255,255,255,.92);cursor:pointer;font-family:inherit;
+    font-weight:600;transition:background .15s,color .15s;text-decoration:none;
   }
   .nav-item:hover{background:rgba(255,255,255,.1);color:#fff;}
   .nav-item.active{background:var(--accent-grad);color:#fff;box-shadow:0 4px 14px rgba(124,58,237,.45);}
@@ -78,6 +78,11 @@
     padding:7px 14px;border-radius:20px;box-shadow:0 4px 12px rgba(124,58,237,.35);
   }
   .role-switch{display:flex;align-items:center;gap:10px;}
+  /* Topbar sits on the dark shell gradient, unlike every other .btn.ghost
+     (all on white cards) -- the shared muted/border colors are unreadable
+     here, so brighten just this instance (Melissa's call, 2026-09-04). */
+  .role-switch .btn.ghost{color:#fff;border-color:rgba(255,255,255,.4);font-weight:700;}
+  .role-switch .btn.ghost:hover{border-color:#fff;background:rgba(255,255,255,.1);color:#fff;}
   .role-toggle{
     display:flex;background:rgba(255,255,255,.1);border-radius:10px;padding:3px;
     border:1px solid rgba(255,255,255,.16);
@@ -98,7 +103,7 @@
   .who small{display:block;font-size:11px;color:rgba(255,255,255,.55);font-weight:400;}
 
   h1{font-size:24px;margin:0 0 4px;color:#fff;letter-spacing:-.02em;text-wrap:balance;}
-  .subtitle{color:rgba(255,255,255,.66);font-size:13.5px;margin:0 0 18px;max-width:62ch;}
+  .subtitle{color:rgba(255,255,255,.88);font-size:13.5px;margin:0 0 18px;max-width:62ch;}
   .view{display:none;}
   .view.active{display:block;}
 
@@ -288,9 +293,9 @@
   .privacy-banner strong{color:#d1fae5;}
 
   /* Handbook line — one slim row, not a whole card */
-  .hb-strip{font-size:12.5px;color:rgba(255,255,255,.72);margin:0 0 16px;line-height:1.6;}
+  .hb-strip{font-size:12.5px;color:rgba(255,255,255,.9);margin:0 0 16px;line-height:1.6;}
   .hb-strip a{color:#93c5fd;font-weight:600;}
-  .hb-strip .hb-date{color:rgba(255,255,255,.45);}
+  .hb-strip .hb-date{color:rgba(255,255,255,.65);}
   .hb-strip button{
     border:none;background:none;color:rgba(255,255,255,.45);font-family:inherit;
     font-size:11.5px;cursor:pointer;padding:0;text-decoration:underline;

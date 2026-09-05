@@ -30,6 +30,15 @@ export default function LoginPage() {
     setSent(false);
   }
 
+  async function signInWithGoogle() {
+    setError("");
+    const supabase = createClient();
+    await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: `${window.location.origin}/auth/callback` },
+    });
+  }
+
   async function signIn(e) {
     e.preventDefault();
     setError("");
@@ -120,6 +129,19 @@ export default function LoginPage() {
             <small>Private manager-employee app</small>
           </div>
         </div>
+
+        {!sent && (
+          <>
+            <button type="button" className="btn ghost" style={{ width: "100%", marginTop: 16 }} onClick={signInWithGoogle}>
+              Sign in with Google
+            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "14px 0", color: "var(--faint)", fontSize: 12 }}>
+              <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+              or
+              <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+            </div>
+          </>
+        )}
 
         {sent ? (
           <div className="privacy-banner" style={{ marginTop: 16 }}>

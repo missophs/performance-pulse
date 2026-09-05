@@ -23,9 +23,7 @@ import {
   getDocumentUrl,
   deleteDocument,
   listHandbookLinks,
-  uploadHandbookFile,
   getHandbookFileUrl,
-  deleteHandbookLink,
   listNotifications,
   markAllNotificationsRead,
   groupNotifications,
@@ -39,14 +37,14 @@ import Badge from "@/components/ui/Badge";
 const MSG_KINDS = ["Question", "Concern", "Heads-up", "Idea", "Other"];
 
 export default function DashboardPage() {
-  const { pairId, role, isMgr, myName, partnerName, supabase, email } = usePulse();
-  // UI-only gate for the Handbook upload/remove buttons -- the real
-  // enforcement is the is_hr() Postgres function (supabase/migrations/
-  // 0013_global_handbook.sql), which hardcodes this same email for RLS.
-  // The two are NOT wired together (no shared constant reaches SQL migration
-  // text), so a change to who counts as HR must be made in both places or
-  // this check and the database gate will disagree.
-  const isHr = (email || "").toLowerCase() === "melissaw212@gmail.com";
+  const { pairId, role, isMgr, myName, partnerName, supabase } = usePulse();
+  // There's no real HR account type in this app -- HR access to the
+  // Handbook's upload/remove controls is gated by a shared passcode instead
+  // (checked server-side in app/api/handbook/route.js, which uses the
+  // service-role client). Session-only: entering it once reveals the
+  // controls for the rest of this page load, nothing is persisted.
+  const [hrPasscode, setHrPasscode] = useState(null);
+  const [rosterSummary, setRosterSummary] = useState(null);
   const toast = useToast();
   const router = useRouter();
 
@@ -243,15 +241,59 @@ export default function DashboardPage() {
     loadAll();
   }
 
+  async function unlockHr() {
+    const code = window.prompt("HR PIN:");
+    if (!code) return;
+    const res = await fetch("/api/handbook", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ passcode: code, action: "verify" }),
+    });
+    if (res.ok) setHrPasscode(code);
+    else toast("Wrong PIN", "Try again, or ask whoever manages HR access.");
+  }
+
+  async function resetHrPin() {
+    const next = window.prompt("New HR PIN:");
+    if (!next) return;
+    const res = await fetch("/api/handbook", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ passcode: hrPasscode, action: "reset_pin", newPasscode: next.trim() }),
+    });
+    if (res.ok) {
+      setHrPasscode(next.trim());
+      toast("PIN changed", "The new HR PIN is in effect immediately.");
+    } else {
+      const data = await res.json();
+      toast("Couldn't change the PIN", data.error || "Unknown error");
+    }
+  }
+
   async function handleHandbookUpload(e) {
     const file = e.target.files?.[0];
     if (!file) return;
-    try {
-      await uploadHandbookFile(supabase, file);
-      loadAll();
-    } catch (err) {
-      toast("Couldn't upload that", err.message);
-    }
+    const form = new FormData();
+    form.append("passcode", hrPasscode);
+    form.append("file", file);
+    const res = await fetch("/api/handbook", { method: "POST", body: form });
+    const data = await res.json();
+    if (!res.ok) toast("Couldn't upload that", data.error || "Unknown error");
+    else loadAll();
+    e.target.value = "";
+  }
+
+  async function handleRosterUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setRosterSummary(null);
+    const form = new FormData();
+    form.append("passcode", hrPasscode);
+    form.append("file", file);
+    const res = await fetch("/api/hr/roster", { method: "POST", body: form });
+    const data = await res.json();
+    if (!res.ok) toast("Couldn't import that", data.error || "Unknown error");
+    else setRosterSummary(data);
     e.target.value = "";
   }
 
@@ -262,7 +304,16 @@ export default function DashboardPage() {
 
   async function removeHandbook(link) {
     if (!window.confirm(`Remove ${link.title}?`)) return;
-    await deleteHandbookLink(supabase, link);
+    const res = await fetch("/api/handbook", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ passcode: hrPasscode, action: "remove", linkId: link.id }),
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      toast("Couldn't remove that", data.error || "Unknown error");
+      return;
+    }
     loadAll();
   }
 
@@ -289,18 +340,37 @@ export default function DashboardPage() {
             {handbook.map((h) => (
               <span key={h.id}>
                 <a href="#" onClick={(e) => { e.preventDefault(); openHandbook(h); }}>{h.title}</a> <span className="hb-date">({fmtDate((h.created_at || "").slice(0, 10))})</span>
-                {isHr && <button className="btn ghost sm" onClick={() => removeHandbook(h)}>Remove</button>}{" "}
+                {hrPasscode && <button className="btn ghost sm" onClick={() => removeHandbook(h)}>Remove</button>}{" "}
               </span>
             ))}
           </>
         )}
-        {isHr && (
-          <label className="btn secondary sm" style={{ cursor: "pointer", marginLeft: 8 }}>
-            HR only uploads
-            <input type="file" style={{ display: "none" }} onChange={handleHandbookUpload} />
-          </label>
+        {hrPasscode ? (
+          <>
+            <label className="btn secondary sm" style={{ cursor: "pointer", marginLeft: 8 }}>
+              {handbook.length > 0 ? "Replace handbook (HR)" : "Upload handbook (HR)"}
+              <input type="file" style={{ display: "none" }} onChange={handleHandbookUpload} />
+            </label>{" "}
+            <button className="btn ghost sm" onClick={resetHrPin}>Reset PIN</button>{" "}
+            <label className="btn secondary sm" style={{ cursor: "pointer" }}>
+              Import roster (HR)
+              <input type="file" accept=".xlsx" style={{ display: "none" }} onChange={handleRosterUpload} />
+            </label>
+          </>
+        ) : (
+          <button className="btn ghost sm" style={{ marginLeft: 8 }} onClick={unlockHr}>🔒 HR unlock</button>
         )}
       </p>
+      {rosterSummary && (
+        <p className="hb-strip">
+          Roster: added {rosterSummary.added}, already there {rosterSummary.skipped}, of {rosterSummary.total}.
+          {rosterSummary.failed.length > 0 && (
+            <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+              {rosterSummary.failed.map((f, i) => <li key={i}>{f}</li>)}
+            </ul>
+          )}
+        </p>
+      )}
 
       <div className="card">
         <div className="card-head">
