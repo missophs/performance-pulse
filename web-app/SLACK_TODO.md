@@ -1,5 +1,244 @@
 # Slack integration — status and what's left
 
+## Session closeout (2026-09-04, night): Google SSO, HR roster import, contrast fixes — git AND deploy both confirmed, session ended clean
+
+**Everything below is live.** Deploy status was genuinely unclear for part
+of the closeout (Melissa's "It won all changes pushed and committed. done"
+initially turned out to mean the git backup only — checked by diffing the
+live site's CSS bundle before and after, which was unchanged at that
+point) — she then ran the real `vercel --prod` deploy, and a second CSS
+diff check afterward confirmed the new contrast-fix values
+(`rgba(255,255,255,.92)` etc.) are actually present in the live bundle.
+Nothing is left pending from tonight. **Next session can start straight
+from "what's open" below — no deploy or git catch-up needed first.**
+
+**Git: committed and pushed, confirmed.** Commit `41347f7` on `main`,
+pushed to `missophs/performance-pulse` (`7406aa0..41347f7`). Also fixed a
+real gap while doing this: root `.gitignore` had no `.next/` entry, so
+Next.js's build cache was showing up as untracked — added it before
+staging, so it's not in the commit. Left `web-app/pac-enterprise-slack-build`
+(a pre-existing, unrelated 0-byte file, dated 2026-09-03, already untracked
+before tonight's session started) out of the commit deliberately — not
+tonight's work, not touched.
+
+### Google Sign-In (SSO) — built, deployed once already this session, verified working, one real limitation not yet resolved
+
+Built at Melissa's request after she asked how OAuth/Google sign-in works,
+using her own Gmail as a stand-in "pretend company" test identity rather
+than waiting on real company IT — "FDLW" used as the placeholder company
+name throughout (Google Cloud project name, OAuth consent screen app name).
+
+- **Google Cloud project "Performance Pulse SSO"** created under Melissa's
+  own Google account. OAuth consent screen configured: External audience
+  (works with any Google account, not just a Workspace domain), app name
+  "FDLW Performance Pulse", support email melissaw212@gmail.com.
+- **OAuth Web Client "Performance Pulse Web"** created, with the authorized
+  redirect URI set to Supabase's own callback
+  (`https://pndaiendsthsyolaefnt.supabase.co/auth/v1/callback`) — this has
+  to match exactly or Google refuses the redirect.
+- **Supabase (Authentication → Providers → Google):** enabled, Client ID +
+  Secret saved — confirmed via Supabase's own "Successfully updated
+  settings" toast, not just assumed. The Client Secret was never printed
+  in chat or logged anywhere in plain text — copied straight from Google's
+  one-time reveal dialog into Supabase's field via the browser, per the
+  house rule about not echoing secrets.
+- **`app/login/page.js`:** new `signInWithGoogle()` calls
+  `supabase.auth.signInWithOAuth({ provider: "google", ... })`; a "Sign in
+  with Google" button added above the existing email/password form, with
+  an "or" divider.
+- **Verified two ways:** (1) locally, clicking the button in a real browser
+  correctly redirected to Google's actual sign-in screen, addressed to the
+  right Supabase project; (2) after that batch's deploy, `curl`ing the live
+  `/login` page's HTML directly confirmed "Sign in with Google" is really
+  in production, not just built locally.
+- **Real-world test finding, not a bug:** Melissa's Google sign-in
+  correctly auto-linked to her existing `melissaw212@gmail.com` account
+  (Supabase shows one user row, Providers: "Email, Google," not two) — but
+  that particular account had zero pairings, because her "manages Monte"
+  testing this whole project has been happening under a different
+  `+alias@gmail.com` test account, not the bare address. Not a linking
+  bug; just a reminder that Google sign-in only reaches whichever account
+  actually shares that literal email.
+- **⚠️ Not yet resolved, will block real use:** the OAuth consent screen is
+  still in Google's default "Testing" mode (External, unpublished) — while
+  it's in this state, **only Google accounts explicitly added as "test
+  users" in the OAuth consent screen can actually complete sign-in.**
+  Right now that's likely just Melissa's own account (added automatically
+  as the project owner). Before any real employee can use "Sign in with
+  Google," either (a) each of their Google accounts needs to be added to
+  the test-user allowlist in Google Cloud Console → Google Auth Platform →
+  Audience, or (b) the app needs to be published (which, for an app only
+  requesting basic email/profile scopes — nothing "sensitive" — likely
+  doesn't need Google's full verification review, but this hasn't been
+  confirmed). **Not surfaced to Melissa in chat when it was found — flagging
+  it here so it isn't missed.**
+
+### HR roster import (.xlsx org chart → pre-built pairings) — built, verified via dry run only, NOT yet actually used on real data
+
+Built after Melissa shared a real `roster.xlsx` and the plan evolved twice
+in conversation: first a "manager uploads their own direct reports" CSV
+feature, then — once her real file turned out to be a whole multi-level
+org chart with no email column — a company-wide "HR uploads everyone at
+once" importer instead, per her explicit call: "HR will be uploading
+anything... different levels of managers but we can create fake emails for
+everyone."
+
+- **Dependency decision, worth knowing about:** needed a library to parse
+  real binary `.xlsx` files. The obvious choice, `xlsx` (SheetJS) from npm,
+  has an unpatched high-severity vulnerability (prototype pollution +
+  ReDoS, "no fix available" per `npm audit` — SheetJS only ships the real
+  fix from their own CDN, not npm). Installing an arbitrary tarball URL
+  from their CDN was blocked by the coding sandbox's own safety classifier
+  as a supply-chain risk, so used `exceljs` instead — a normal,
+  actively-maintained npm package. It carries its own minor, moderate-
+  severity transitive advisory (in its `uuid` dependency) — accepted as
+  normal background risk, not something this app's code path actually
+  triggers.
+- **`lib/data.js`:** new `createPairFromRoster(admin, employeeEmail,
+  managerEmail)`. Unlike `createPair`/`createPairForSlack`, HR is on
+  neither side of most of these pairings, so this always uses the
+  service-role admin client and looks up both emails against `profiles`
+  independently, rather than assuming the acting user is one side of the
+  pair. Also fixes a real edge case the DB's own unique index misses:
+  `pairs_employee_manager_key` is on `(employee_id, manager_id)`, and
+  Postgres treats `NULL <> NULL` — so re-uploading the same roster twice
+  wouldn't be caught by the database at all, since freshly-created
+  placeholder pairs have both ids null. Checked by
+  `(employee_email, manager_email)` in the app instead before inserting.
+- **`app/api/hr/roster/route.js` (new):** gated by the same shared HR
+  passcode as `/api/handbook` (there's still no real HR account role in
+  this app — see the long-standing flagged item further down this file).
+  Parses the uploaded file with ExcelJS, finds "Employee"/"Manager"
+  columns by header name (case-insensitive), skips any row missing either
+  value, generates a placeholder email per name
+  (`first.last@placeholder.test`, using the IANA-reserved `.test` TLD so
+  it can never collide with a real domain), and creates one pair per row.
+  Returns `{ total, added, skipped, failed[] }` so a partial failure is
+  visible, not silently swallowed.
+- **Dashboard UI:** new "Import roster (HR)" button next to "Reset PIN,"
+  visible only when HR is unlocked; shows the added/skipped/failed summary
+  inline after upload.
+- **Verified by dry run only, on purpose — nothing was actually written to
+  the database.** Melissa was explicit: "I don't want you to upload it,
+  I'm just showing you what's gonna get uploaded." Wrote a throwaway
+  script (deleted after) that ran the exact same parsing + placeholder-
+  email logic against her real file with no database calls. Confirmed all
+  10 real relationships parsed correctly, including the multi-level part —
+  Ann Steiner and Monte Montoya each show up as both someone's employee
+  *and* someone else's manager, and the flat-list-of-pairs data model
+  already handles that with zero extra code (a person just ends up on two
+  separate `pairs` rows, same mechanism the multi-pair switcher already
+  uses).
+- **Had to create one throwaway Supabase auth account
+  (`rostercheck12345@gmail.com`) to test the route's login-gate behavior
+  locally — deleted afterward via the Supabase dashboard, confirmed gone.**
+- **Known limitation, not yet solved:** since the emails are made up, no
+  real person auto-links into these pre-built pairings until they sign in
+  with that *exact* placeholder address. Great for testing the shape of
+  the whole org chart today; for real employees, something will eventually
+  need to let HR (or the employee) swap the placeholder email for a real
+  one on an existing pending pair — **not built, not scoped yet.**
+
+### Dark-theme contrast fixes (several rounds, same underlying pattern each time)
+
+Melissa flagged low-contrast text against the dark purple shell background
+four separate times tonight, each in a different spot — worth recording as
+one pattern, not four unrelated tickets: `--muted`/`--border` and various
+low-opacity-white values throughout `globals.css` were designed for text
+sitting on the white `.card` background, and silently look wrong wherever
+a component sits directly on the dark shell instead. Fixed each time it
+was found, not swept globally (the white-card usages are correct as they
+are and shouldn't change):
+- `.role-switch .btn.ghost` (topbar: "+Add pairing"/"You manage X"/"Sign
+  out") — brightened to solid white text/border, scoped to `.role-switch`
+  only so every other `.btn.ghost` on a white card is untouched.
+- `.nav-item` (sidebar: Dashboard, Performance, My 1:1, Goals,
+  Development, Actions, History, Slack, Export) — opacity .72 → .92,
+  weight 500 → 600.
+- `.subtitle` (page subtitle line, used on 10 different pages) — opacity
+  .66 → .88.
+- `.hb-strip`/`.hb-date` (the handbook line on the dashboard) — .72 → .9
+  and .45 → .65.
+- **Two pre-existing, unrelated design-lint findings surfaced repeatedly by
+  the automated design hook while editing this same file
+  (`app/globals.css`) — flagged to Melissa each time, never fixed, still
+  standing, not touched:** a thick side-border on some card (line ~243)
+  and a width/height/padding animation that could cause layout jank (line
+  ~199). Also a ~90-item backlog of pre-existing off-palette colors/radii
+  in the same file, flagged once early in the session, explicitly left
+  alone as out of scope for a contrast-only pass.
+
+### Smaller fixes and clarifications, same session
+
+- **"+ Add pairing" → "+ Add employee" / "+ Add manager"** in
+  `components/AppShell.js`, based on the signed-in account's actual role —
+  Melissa's own read: "it should say add another employee," since the
+  generic wording read as unrelated to what the button does. (It's still
+  shared code with the employee-adds-a-second-manager case, hence the
+  role-conditional label rather than a hardcoded rename.)
+- **Bulk CSV upload for a single manager's own direct reports**, added to
+  `components/OnboardingForm.js` — a toggle between "Add one employee" and
+  "Upload a list (CSV)" when the role is Manager, two columns (name,
+  email) per line, reuses the existing `create_pair` RPC + `updatePair`
+  (for `employee_label`) once per row, shows an added/failed summary. This
+  predates and is narrower in scope than the HR org-chart importer above —
+  both exist; this one is for a single manager's own reports, the HR one
+  is for a whole company at once.
+- **Confirmed via direct code read, not assumed:** the "Set up your 1:1"
+  onboarding screen (`app/onboarding/page.js`) already redirects straight
+  to `/dashboard` if the signed-in account has any existing pairing — so
+  anyone pre-loaded by either roster-upload feature above never sees that
+  screen at all once their real account matches. No code change was
+  needed for this; it already worked correctly, confirmed by reading the
+  existing redirect logic line by line.
+- Answered Melissa's questions about where the app's data actually lives
+  (Supabase, a real hosted database — not the browser, not local to any
+  computer) and whether the website and Slack read the same data in real
+  time (yes — same tables, same database, confirmed by reading the actual
+  data-access code on both surfaces, not assumed).
+- Signed Melissa out (cleared cookies + localStorage) at her request to
+  test a fresh login — **this also signed her out on every other open tab
+  on that site**, since cookies are shared per-origin across a whole
+  browser profile, not scoped to one tab. Not a bug, just worth knowing:
+  she'll need to log back in wherever she resumes next session.
+
+### Still open, not decided or built (carried over, not new tonight unless noted)
+
+1. **Google OAuth "Testing" mode restriction (new, see above)** — blocks
+   any real employee from using Google sign-in until test users are added
+   or the app is published.
+2. **Placeholder-email swap-in for roster-imported pairs (new, see
+   above)** — no flow yet to replace a placeholder email with a real one
+   on an existing pending pair.
+3. **Onboarding/add page has no Cancel/back link** — flagged to Melissa
+   this session ("this page is missing a Cancel/Back to dashboard link"),
+   offered to add it, no answer given yet — still just the browser's own
+   back button.
+4. **Website "My suggestions" parity + a real two-way Slack suggestion
+   exchange** — both explicitly raised and then explicitly not decided
+   earlier this session (Melissa's own two questions were left
+   unanswered/dismissed mid-session): should the website's own "My
+   suggestions"/"Write my own suggestion" become manager-only to match
+   Slack, and should Slack get a real two-way note exchange (porting the
+   website's existing "Between you two" message feature)? Do not build
+   either without asking again — this was an explicit pause, not a
+   decision.
+5. **"End this pairing" is UI-only, not DB/RLS-enforced** (from the same
+   session as the manager-only restriction) — a manager-only check exists
+   in the page component, but nothing at the database level stops an
+   employee from calling `closePair` directly. Offered to close this gap,
+   not asked for, not done.
+6. **HR email/HR role still isn't a real account type** — long-standing,
+   see every earlier closeout entry below. The HR passcode (this session's
+   `app_settings`-backed, resettable version) replaces the *handbook's*
+   old hardcoded-email gate specifically, but there is still no real "HR"
+   user role anywhere in this app's data model.
+7. Several old test/`+alias` Supabase accounts are still sitting in the
+   users list from earlier sessions (`melissahr212@gmail.com`,
+   `dhwconsulting3@gmail.com`, `melissaw212+accounta@gmail.com`,
+   `melissaw212+accountc@gmail.com`, `melissaw212+testboss@gmail.com`,
+   `swm3016@gmail.com`) — harmless, not cleaned up, not blocking anything.
+
 ## Session closeout (2026-09-03): Final wrap up rebuilt and actually fixed, code review, pilot-readiness pass
 
 Long session. Melissa's framing at the end: this app is about to become a
