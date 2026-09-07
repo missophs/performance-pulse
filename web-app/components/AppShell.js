@@ -6,10 +6,11 @@ import { usePathname, useRouter } from "next/navigation";
 import { PulseProvider, usePulse } from "@/components/PulseContext";
 import { createClient } from "@/lib/supabase/client";
 import { initials } from "@/lib/format";
-import { updatePair } from "@/lib/data";
+import { updatePair, updateProfile } from "@/lib/data";
 import { setCurrentPair } from "@/lib/actions";
 import NotificationBell from "@/components/NotificationBell";
 import Modal from "@/components/ui/Modal";
+import { useToast } from "@/components/ui/ToastProvider";
 
 const NAV = [
   { view: "dashboard", href: "/dashboard", label: "Dashboard" },
@@ -35,14 +36,18 @@ export default function AppShell({ ctx, counts, children }) {
 }
 
 function ShellBody({ counts, children }) {
-  const { pairId, pairs, role, myName, partnerName, employeeLabel, isMgr, supabase } = usePulse();
+  const { userId, pairId, pairs, role, myName, partnerName, employeeLabel, isMgr, supabase } = usePulse();
   const pathname = usePathname();
   const router = useRouter();
+  const toast = useToast();
 
   const [switching, setSwitching] = useState(false);
   const [editingLabel, setEditingLabel] = useState(false);
   const [labelInput, setLabelInput] = useState(employeeLabel);
   const [savingLabel, setSavingLabel] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState(myName);
+  const [savingName, setSavingName] = useState(false);
 
   async function signOut() {
     const supabase = createClient();
@@ -70,6 +75,26 @@ function ShellBody({ counts, children }) {
     setSavingLabel(false);
     setEditingLabel(false);
     router.refresh();
+  }
+
+  function openNameEdit() {
+    setNameInput(myName);
+    setEditingName(true);
+  }
+
+  async function saveName() {
+    const next = nameInput.trim();
+    if (!next) return;
+    setSavingName(true);
+    try {
+      await updateProfile(supabase, userId, { full_name: next });
+      setEditingName(false);
+      router.refresh();
+    } catch (err) {
+      toast("Couldn't save that", err.message || "Unknown error");
+    } finally {
+      setSavingName(false);
+    }
   }
 
   return (
@@ -130,8 +155,15 @@ function ShellBody({ counts, children }) {
               <span className="badge b-purple" title="Your role in this 1:1">Employee</span>
             )}
             <NotificationBell />
-            <div className={`avatar ${isMgr ? "mgr" : "emp"}`}>{initials(myName)}</div>
-            <span className="who">{myName}</span>
+            <button
+              className="btn ghost sm"
+              onClick={openNameEdit}
+              title="Click to change your own name"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            >
+              <div className={`avatar ${isMgr ? "mgr" : "emp"}`}>{initials(myName)}</div>
+              <span className="who">{myName}</span>
+            </button>
             <button className="btn ghost sm" onClick={signOut}>
               Sign out
             </button>
@@ -158,6 +190,27 @@ function ShellBody({ counts, children }) {
             value={labelInput}
             onChange={(e) => setLabelInput(e.target.value)}
             placeholder="e.g. Monte"
+          />
+        </div>
+      </Modal>
+
+      <Modal
+        open={editingName}
+        title="Your own name"
+        note="This is your account's real name -- everyone you're paired with sees it, on the website and in Slack. It's separate from any nickname a manager might set just for their own view of you."
+        onClose={() => setEditingName(false)}
+        onSave={saveName}
+        saveLabel={savingName ? "Saving…" : "Save"}
+        saveDisabled={savingName || !nameInput.trim()}
+      >
+        <div className="field">
+          <label htmlFor="myOwnName">Your name</label>
+          <input
+            id="myOwnName"
+            type="text"
+            value={nameInput}
+            onChange={(e) => setNameInput(e.target.value)}
+            placeholder="Your full name"
           />
         </div>
       </Modal>

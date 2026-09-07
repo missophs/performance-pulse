@@ -13,6 +13,8 @@ export default async function OnboardingPage() {
   const pairs = await listMyPairs(supabase, user.id);
   if (pairs.length) redirect("/dashboard");
 
+  const { data: isHr } = await supabase.rpc("is_hr");
+
   return (
     <div className="auth-shell">
       <div className="card auth-card">
@@ -23,7 +25,7 @@ export default async function OnboardingPage() {
             <small>Not paired yet</small>
           </div>
         </div>
-        <NotPairedYet />
+        <NotPairedYet isHr={Boolean(isHr)} />
       </div>
     </div>
   );

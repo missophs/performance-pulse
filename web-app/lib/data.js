@@ -98,7 +98,11 @@ export async function createPairForSlack(admin, managerId, managerEmail, employe
 // pair, so a row created with a wrong/placeholder manager email before a
 // parsing fix was never corrected by a later, fixed re-upload: the newly
 // computed row didn't match the old one, so it just inserted a second row
-// and left the first, wrong one active, 2026-09-05).
+// and left the first, wrong one active, 2026-09-05). Also handles a real
+// manager change (employee moved teams): reassigns the existing pairing in
+// place rather than leaving the old one open and inserting a second, which
+// used to leave the employee showing up under both managers at once
+// (found 2026-09-06).
 export async function createPairFromRoster(admin, employeeEmail, managerEmail, managerPlaceholder, employeeLabel) {
   // One query covers both the exact-duplicate check and the stale-placeholder
   // self-heal check (both only ever matched non-closed rows for this
@@ -128,6 +132,25 @@ export async function createPairFromRoster(admin, employeeEmail, managerEmail, m
       .eq("id", stale.id);
     if (error) throw error;
     return { skipped: false, updated: true };
+  }
+
+  // Reassignment: this employee has exactly one other active pairing, under
+  // a genuinely different (non-placeholder) manager -- the roster moved
+  // them. Reassign that SAME row rather than closing it and inserting a new
+  // one, so every topic/goal/action/feedback tied to its pair_id carries
+  // straight over to the new manager (Melissa's explicit call, 2026-09-06:
+  // the new manager sees the employee's full history, not a blank slate).
+  // Only safe when exactly one existing row -- with two or more (dotted-line
+  // reporting, rare but real per Melissa) there's no way to guess which one
+  // this roster row means to replace, so that case falls through to
+  // inserting a new pairing instead, same as before.
+  if (existingRows.length === 1) {
+    const { error } = await admin
+      .from("pairs")
+      .update({ manager_email: managerEmail, manager_id: mgr?.id || null })
+      .eq("id", existingRows[0].id);
+    if (error) throw error;
+    return { reassigned: true, fromManagerEmail: existingRows[0].manager_email };
   }
 
   // Only needed on the insert path -- fetched here, not up front, so the
@@ -171,6 +194,24 @@ export async function closePair(supabase, pairId, note) {
 
 export async function reopenPair(supabase, pairId) {
   return updatePair(supabase, pairId, { closed_at: null });
+}
+
+// One-click "remove the roster" for HR (Melissa's explicit ask, 2026-09-06):
+// closes every currently-open pairing in one query, the same way closePair
+// closes one -- still just sets closed_at/closing_note, so every row is
+// reopenable individually afterward, same as any other closed pairing.
+// Admin-only (service-role client): bypasses the same manager-only
+// restriction the org chart's per-row Close button already bypasses, for
+// the same reason -- most of these pairings' managers can't sign in to
+// close them themselves.
+export async function closeAllPairs(admin, note) {
+  const { data, error } = await admin
+    .from("pairs")
+    .update({ closed_at: new Date().toISOString(), closing_note: note || null })
+    .is("closed_at", null)
+    .select("id");
+  if (error) throw error;
+  return data.length;
 }
 
 export async function listClosedPairs(supabase, userId) {
@@ -1068,22 +1109,12 @@ export async function listDocuments(supabase, pairId) {
   return data;
 }
 
-export async function addDocumentLink(supabase, pairId, name, url, byName) {
-  const { data, error } = await supabase
-    .from("documents")
-    .insert({ pair_id: pairId, name, url, created_by_name: byName })
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
-}
-
 const DOC_SIZE_LIMIT = 15 * 1024 * 1024; // Storage, not localStorage — the original 1.5MB cap was a
 // base64-in-JSON workaround; a real object store can afford more headroom.
 
 export async function uploadDocument(supabase, pairId, file, byName) {
   if (file.size > DOC_SIZE_LIMIT) {
-    throw new Error("File is larger than 15MB. Share a link instead.");
+    throw new Error("File is larger than 15MB.");
   }
   const path = `${pairId}/${crypto.randomUUID()}-${file.name}`;
   const { error: uploadErr } = await supabase.storage.from("documents").upload(path, file);
@@ -1179,21 +1210,6 @@ export async function deleteHandbookLink(supabase, link) {
   if (error) throw error;
 }
 
-// The shared HR passcode for Handbook uploads/removes (app/api/handbook/
-// route.js) -- lives in app_settings (migration 0018) instead of an env var
-// so it can actually be reset from the app. Only ever read/written with the
-// service-role client (RLS has no policies on this table, service-role only).
-export async function getHrPasscode(supabase) {
-  const { data, error } = await supabase.from("app_settings").select("value").eq("key", "hr_handbook_passcode").maybeSingle();
-  if (error) throw error;
-  return data?.value ?? null;
-}
-
-export async function setHrPasscode(supabase, value) {
-  const { error } = await supabase.from("app_settings").upsert({ key: "hr_handbook_passcode", value, updated_at: new Date().toISOString() });
-  if (error) throw error;
-}
-
 // Read-only view of the roster as it actually landed in `pairs` -- grouped
 // by manager so HR can see who reports to whom without re-opening the
 // spreadsheet. Names prefer a real profile's full_name (once that person
@@ -1201,7 +1217,7 @@ export async function setHrPasscode(supabase, value) {
 export async function getOrgChart(admin) {
   const { data: pairs, error } = await admin
     .from("pairs")
-    .select("employee_email, manager_email, employee_label")
+    .select("id, employee_email, manager_email, employee_label")
     .is("closed_at", null);
   if (error) throw error;
 
@@ -1216,7 +1232,7 @@ export async function getOrgChart(admin) {
   for (const p of pairs) {
     const managerName = displayName(p.manager_email, null);
     if (!byManager.has(p.manager_email)) byManager.set(p.manager_email, { manager: managerName, managerEmail: p.manager_email, reports: [] });
-    byManager.get(p.manager_email).reports.push({ name: displayName(p.employee_email, p.employee_label), email: p.employee_email });
+    byManager.get(p.manager_email).reports.push({ id: p.id, name: displayName(p.employee_email, p.employee_label), email: p.employee_email });
   }
   return [...byManager.values()].sort((a, b) => a.manager.localeCompare(b.manager));
 }

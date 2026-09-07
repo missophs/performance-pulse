@@ -18,7 +18,6 @@ import {
   listMessages,
   addMessage,
   listDocuments,
-  addDocumentLink,
   uploadDocument,
   getDocumentUrl,
   deleteDocument,
@@ -37,14 +36,9 @@ import Badge from "@/components/ui/Badge";
 const MSG_KINDS = ["Question", "Concern", "Heads-up", "Idea", "Other"];
 
 export default function DashboardPage() {
-  const { pairId, role, isMgr, myName, partnerName, supabase } = usePulse();
-  // There's no real HR account type in this app -- HR access to the
-  // Handbook's upload/remove controls is gated by a shared passcode instead
-  // (checked server-side in app/api/handbook/route.js, which uses the
-  // service-role client). Session-only: entering it once reveals the
-  // controls for the rest of this page load, nothing is persisted.
-  const [hrPasscode, setHrPasscode] = useState(null);
+  const { pairId, role, isMgr, myName, partnerName, supabase, isHr } = usePulse();
   const [rosterSummary, setRosterSummary] = useState(null);
+  const [rosterUploading, setRosterUploading] = useState(false);
   const [orgChart, setOrgChart] = useState(null);
   const toast = useToast();
   const router = useRouter();
@@ -210,15 +204,6 @@ export default function DashboardPage() {
     URL.revokeObjectURL(url);
   }
 
-  async function addLink() {
-    const name = window.prompt("What is this document called?");
-    if (!name || !name.trim()) return;
-    const url = window.prompt("Link to it (SharePoint, Drive, OneDrive…):");
-    if (!url || !url.trim()) return;
-    await addDocumentLink(supabase, pairId, name.trim(), url.trim(), myName);
-    loadAll();
-  }
-
   async function handleFileUpload(e) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -242,40 +227,10 @@ export default function DashboardPage() {
     loadAll();
   }
 
-  async function unlockHr() {
-    const code = window.prompt("HR PIN:");
-    if (!code) return;
-    const res = await fetch("/api/handbook", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ passcode: code, action: "verify" }),
-    });
-    if (res.ok) setHrPasscode(code);
-    else toast("Wrong PIN", "Try again, or ask whoever manages HR access.");
-  }
-
-  async function resetHrPin() {
-    const next = window.prompt("New HR PIN:");
-    if (!next) return;
-    const res = await fetch("/api/handbook", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ passcode: hrPasscode, action: "reset_pin", newPasscode: next.trim() }),
-    });
-    if (res.ok) {
-      setHrPasscode(next.trim());
-      toast("PIN changed", "The new HR PIN is in effect immediately.");
-    } else {
-      const data = await res.json();
-      toast("Couldn't change the PIN", data.error || "Unknown error");
-    }
-  }
-
   async function handleHandbookUpload(e) {
     const file = e.target.files?.[0];
     if (!file) return;
     const form = new FormData();
-    form.append("passcode", hrPasscode);
     form.append("file", file);
     const res = await fetch("/api/handbook", { method: "POST", body: form });
     const data = await res.json();
@@ -286,16 +241,37 @@ export default function DashboardPage() {
 
   async function handleRosterUpload(e) {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || rosterUploading) return;
+    setRosterUploading(true);
     setRosterSummary(null);
-    const form = new FormData();
-    form.append("passcode", hrPasscode);
-    form.append("file", file);
-    const res = await fetch("/api/hr/roster", { method: "POST", body: form });
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/hr/roster", { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok) toast("Couldn't import that", data.error || "Unknown error");
+      else setRosterSummary(data);
+    } catch {
+      toast("Couldn't import that", "Something went wrong on the server. Try again.");
+    } finally {
+      setRosterUploading(false);
+      e.target.value = "";
+    }
+  }
+
+  async function removeRoster() {
+    if (!window.confirm("Close every active pairing? This is a clean-slate reset for the whole roster -- reversible per pairing from History, but affects everyone.")) return;
+    const res = await fetch("/api/hr/close-all-pairs", { method: "POST" });
     const data = await res.json();
-    if (!res.ok) toast("Couldn't import that", data.error || "Unknown error");
-    else setRosterSummary(data);
-    e.target.value = "";
+    if (!res.ok) {
+      toast("Couldn't remove the roster", data.error || "Unknown error");
+      return;
+    }
+    toast("Roster removed", `Closed ${data.closed} pairing${data.closed === 1 ? "" : "s"}.`);
+    if (orgChart) {
+      const refreshed = await fetch("/api/hr/org-chart", { method: "POST" });
+      setOrgChart((await refreshed.json()).orgChart);
+    }
   }
 
   async function toggleOrgChart() {
@@ -303,14 +279,26 @@ export default function DashboardPage() {
       setOrgChart(null);
       return;
     }
-    const res = await fetch("/api/hr/org-chart", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ passcode: hrPasscode }),
-    });
+    const res = await fetch("/api/hr/org-chart", { method: "POST" });
     const data = await res.json();
     if (!res.ok) toast("Couldn't load the org chart", data.error || "Unknown error");
     else setOrgChart(data.orgChart);
+  }
+
+  async function closePairAsHr(pairId, name) {
+    if (!window.confirm(`Close the pairing for ${name}? Reversible -- reopen from either side's History page.`)) return;
+    const res = await fetch("/api/hr/close-pair", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pairId }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      toast("Couldn't close that pairing", data.error || "Unknown error");
+      return;
+    }
+    const refreshed = await fetch("/api/hr/org-chart", { method: "POST" });
+    setOrgChart((await refreshed.json()).orgChart);
   }
 
   async function openHandbook(link) {
@@ -323,7 +311,7 @@ export default function DashboardPage() {
     const res = await fetch("/api/handbook", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ passcode: hrPasscode, action: "remove", linkId: link.id }),
+      body: JSON.stringify({ action: "remove", linkId: link.id }),
     });
     if (!res.ok) {
       const data = await res.json();
@@ -356,26 +344,24 @@ export default function DashboardPage() {
             {handbook.map((h) => (
               <span key={h.id}>
                 <a href="#" onClick={(e) => { e.preventDefault(); openHandbook(h); }}>{h.title}</a> <span className="hb-date">({fmtDate((h.created_at || "").slice(0, 10))})</span>
-                {hrPasscode && <button className="btn ghost sm" onClick={() => removeHandbook(h)}>Remove</button>}{" "}
+                {isHr && <button className="btn ghost sm" onClick={() => removeHandbook(h)}>Remove</button>}{" "}
               </span>
             ))}
           </>
         )}
-        {hrPasscode ? (
+        {isHr && (
           <>
             <label className="btn secondary sm" style={{ cursor: "pointer", marginLeft: 8 }}>
               {handbook.length > 0 ? "Replace handbook (HR)" : "Upload handbook (HR)"}
               <input type="file" style={{ display: "none" }} onChange={handleHandbookUpload} />
             </label>{" "}
-            <button className="btn ghost sm" onClick={resetHrPin}>Reset PIN</button>{" "}
-            <label className="btn secondary sm" style={{ cursor: "pointer" }}>
-              Import roster (HR)
-              <input type="file" accept=".xlsx" style={{ display: "none" }} onChange={handleRosterUpload} />
+            <label className="btn secondary sm" style={{ cursor: rosterUploading ? "default" : "pointer", opacity: rosterUploading ? 0.6 : 1 }}>
+              {rosterUploading ? "Importing…" : "Import roster (HR)"}
+              <input type="file" accept=".xlsx" disabled={rosterUploading} style={{ display: "none" }} onChange={handleRosterUpload} />
             </label>{" "}
+            <button className="btn ghost sm" onClick={removeRoster}>Remove roster (HR)</button>{" "}
             <button className="btn ghost sm" onClick={toggleOrgChart}>{orgChart ? "Hide org chart" : "View org chart (HR)"}</button>
           </>
-        ) : (
-          <button className="btn ghost sm" style={{ marginLeft: 8 }} onClick={unlockHr}>🔒 HR unlock</button>
         )}
       </p>
       {rosterSummary && (
@@ -392,6 +378,9 @@ export default function DashboardPage() {
           {rosterSummary.nameCollisions?.length > 0 && (
             <>Names used more than once with different emails: {rosterSummary.nameCollisions.join(", ")}</>
           )}
+          {rosterSummary.reassignments?.length > 0 && (
+            <>Moved to a new manager (history moved with them): {rosterSummary.reassignments.join("; ")}</>
+          )}
         </p>
       )}
       {orgChart && (
@@ -402,9 +391,14 @@ export default function DashboardPage() {
           ) : (
             orgChart.map((g) => (
               <div key={g.managerEmail} style={{ marginBottom: 12 }}>
-                <strong>{g.manager}</strong>
+                <strong>{g.manager}</strong> <span style={{ color: "var(--muted)", fontSize: 12 }}>({g.managerEmail})</span>
                 <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
-                  {g.reports.map((r) => <li key={r.email}>{r.name}</li>)}
+                  {g.reports.map((r) => (
+                    <li key={r.email}>
+                      {r.name} <span style={{ color: "var(--muted)", fontSize: 12 }}>({r.email})</span>{" "}
+                      <button className="btn ghost sm" onClick={() => closePairAsHr(r.id, r.name)}>Close</button>
+                    </li>
+                  ))}
                 </ul>
               </div>
             ))
@@ -458,14 +452,13 @@ export default function DashboardPage() {
         <div className="card-head">
           <h2>Documents</h2>
           <div className="btn-row">
-            <button className="btn sm" onClick={addLink}>Add a link</button>
             <label className="btn secondary sm" style={{ cursor: "pointer" }}>
               Upload a file
               <input type="file" style={{ display: "none" }} onChange={handleFileUpload} />
             </label>
           </div>
         </div>
-        <p className="card-note"><strong>Best practice: keep the file in OneDrive, SharePoint, or Google Drive and add the link here.</strong> Uploaded files are stored privately — only you and {partnerName} can open them.</p>
+        <p className="card-note">Uploaded files are stored privately — only you and {partnerName} can open them.</p>
         {documents.length > 0 && (
           <ul className="list">
             {documents.map((d) => (

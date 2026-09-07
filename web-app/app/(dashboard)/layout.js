@@ -28,10 +28,12 @@ export default async function DashboardLayout({ children }) {
   const partnerIdOf = (p) => (p.employee_id === user.id ? p.manager_id : p.employee_id);
   const uniquePartnerIds = [...new Set(pairs.map(partnerIdOf).filter(Boolean))];
 
-  const [myProfile, ...partnerProfiles] = await Promise.all([
+  const [myProfile, isHrResult, ...partnerProfiles] = await Promise.all([
     getProfile(supabase, user.id),
+    supabase.rpc("is_hr"),
     ...uniquePartnerIds.map((id) => getProfile(supabase, id)),
   ]);
+  const isHr = Boolean(isHrResult.data);
   const partnerNameById = new Map(uniquePartnerIds.map((id, i) => [id, partnerProfiles[i]?.full_name || partnerProfiles[i]?.email || null]));
 
   // employee_label is a manager-only, per-pairing display name -- it never
@@ -70,6 +72,7 @@ export default async function DashboardLayout({ children }) {
     partnerName: pairOptions.find((p) => p.id === pair.id)?.partnerName || (role === "employee" ? "Your manager" : "Your employee"),
     employeeLabel: pairOptions.find((p) => p.id === pair.id)?.employeeLabel || "",
     email: user.email,
+    isHr,
   };
 
   return (

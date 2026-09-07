@@ -8,30 +8,28 @@
 // has one. This screen exists so HR can also reach the roster importer
 // without needing a pairing of their own, and so anyone else just sees a
 // plain status message instead of a form (Melissa's call, 2026-09-05).
+// HR access is the signed-in account's real identity (isHr, computed
+// server-side via is_hr()) -- no PIN to unlock, replaced 2026-09-06.
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 
-export default function NotPairedYet() {
+export default function NotPairedYet({ isHr }) {
   const router = useRouter();
-  const [hrPasscode, setHrPasscode] = useState(null);
   const [rosterSummary, setRosterSummary] = useState(null);
   const [message, setMessage] = useState("");
   const [uploading, setUploading] = useState(false);
 
-  async function unlockHr() {
-    const code = window.prompt("HR PIN:");
-    if (!code) return;
-    const res = await fetch("/api/handbook", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ passcode: code, action: "verify" }),
-    });
-    if (res.ok) {
-      setHrPasscode(code);
-      setMessage("");
-    } else {
-      setMessage("Wrong PIN. Try again, or ask whoever manages HR access.");
-    }
+  // Nobody stuck here has any other way off this page -- no sidebar, no
+  // topbar, nothing (found live, 2026-09-06: signing in as the wrong test
+  // account left no visible way to sign out and try another one). Same
+  // sign-out pattern as AppShell.js's, since there's no shared ctx here to
+  // read a supabase client from.
+  async function signOut() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push("/login");
+    router.refresh();
   }
 
   async function handleRosterUpload(e) {
@@ -41,7 +39,6 @@ export default function NotPairedYet() {
     setRosterSummary(null);
     setMessage("");
     const form = new FormData();
-    form.append("passcode", hrPasscode);
     form.append("file", file);
     try {
       const res = await fetch("/api/hr/roster", { method: "POST", body: form });
@@ -75,7 +72,9 @@ export default function NotPairedYet() {
         the roster, signing in will take you straight to your dashboard.
       </p>
 
-      {hrPasscode ? (
+      <button className="btn ghost sm" onClick={signOut}>Sign out</button>
+
+      {isHr && (
         <label
           className="btn secondary"
           style={{ cursor: uploading ? "default" : "pointer", width: "100%", marginTop: 16, display: "block", textAlign: "center", opacity: uploading ? 0.6 : 1 }}
@@ -83,10 +82,6 @@ export default function NotPairedYet() {
           {uploading ? "Importing…" : "Import roster (HR)"}
           <input type="file" accept=".xlsx" disabled={uploading} style={{ display: "none" }} onChange={handleRosterUpload} />
         </label>
-      ) : (
-        <button className="btn ghost" style={{ width: "100%", marginTop: 16 }} onClick={unlockHr}>
-          🔒 HR unlock
-        </button>
       )}
 
       {rosterSummary && (
@@ -113,6 +108,15 @@ export default function NotPairedYet() {
           These names appear more than once with different emails —
           whichever email wins is unpredictable, so anyone referencing them
           as a manager may get paired to the wrong account: {rosterSummary.nameCollisions.join(", ")}
+        </div>
+      )}
+
+      {rosterSummary?.reassignments?.length > 0 && (
+        <div className="field-hint" style={{ marginTop: 12 }}>
+          Moved to a new manager (their full history moved with them):
+          <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+            {rosterSummary.reassignments.map((r, i) => <li key={i}>{r}</li>)}
+          </ul>
         </div>
       )}
 

@@ -1,24 +1,20 @@
 // HR roster import: parses an uploaded org-chart file (Employee, Manager,
 // optional Email columns) and creates one pending pair per row. Gated by
-// the same shared HR passcode as /api/handbook -- see that file's header
-// comment for why there's a passcode instead of a real HR role. A row's
-// real email (if the file has one) is used so a matching real account
-// links immediately; a name with no email on any of its rows still gets a
-// placeholder so the pairing exists ahead of anyone signing in -- the
-// existing auto-link trigger takes it from there once a real account signs
-// in with a matching email (Melissa's call, 2026-09-04; email-column
-// support and no-manager rows added 2026-09-05).
+// requireHr() -- the signed-in account's real identity -- same as
+// /api/handbook (see that file's header comment; passcode replaced
+// 2026-09-06). A row's real email (if the file has one) is used so a
+// matching real account links immediately; a name with no email on any of
+// its rows still gets a placeholder so the pairing exists ahead of anyone
+// signing in -- the existing auto-link trigger takes it from there once a
+// real account signs in with a matching email (Melissa's call, 2026-09-04;
+// email-column support and no-manager rows added 2026-09-05).
 import { createClient } from "@supabase/supabase-js";
 import ExcelJS from "exceljs";
-import { getHrPasscode, createPairFromRoster } from "@/lib/data";
+import { createPairFromRoster } from "@/lib/data";
+import { requireHr } from "@/lib/hr-auth";
 
 function admin() {
   return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-}
-
-async function checkPasscode(a, passcode) {
-  const real = await getHrPasscode(a);
-  return Boolean(real) && passcode === real;
 }
 
 function placeholderEmail(name) {
@@ -27,11 +23,11 @@ function placeholderEmail(name) {
 }
 
 export async function POST(req) {
+  const hr = await requireHr();
+  if (!hr.ok) return Response.json({ error: hr.error }, { status: hr.status });
+
   const a = admin();
   const form = await req.formData();
-  if (!(await checkPasscode(a, form.get("passcode")))) {
-    return Response.json({ error: "Wrong passcode." }, { status: 401 });
-  }
   const file = form.get("file");
   if (!file) return Response.json({ error: "No file." }, { status: 400 });
 
@@ -106,10 +102,12 @@ export async function POST(req) {
   let corrected = 0;
   let skipped = 0;
   const failed = [];
+  const reassignments = [];
   for (const { employee, manager } of rows) {
     try {
       const result = await createPairFromRoster(a, emailFor(employee), emailFor(manager), placeholderEmail(manager), employee);
-      if (result.updated) corrected++;
+      if (result.reassigned) reassignments.push(`${employee}: ${result.fromManagerEmail} → ${manager}`);
+      else if (result.updated) corrected++;
       else if (result.skipped) skipped++;
       else added++;
     } catch (err) {
@@ -117,5 +115,5 @@ export async function POST(req) {
     }
   }
 
-  return Response.json({ total: rows.length, added, corrected, skipped, failed, unmatchedManagers, nameCollisions: [...nameCollisions] });
+  return Response.json({ total: rows.length, added, corrected, skipped, failed, unmatchedManagers, nameCollisions: [...nameCollisions], reassignments });
 }
