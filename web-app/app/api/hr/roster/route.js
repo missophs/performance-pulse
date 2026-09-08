@@ -10,7 +10,7 @@
 // email-column support and no-manager rows added 2026-09-05).
 import { createClient } from "@supabase/supabase-js";
 import ExcelJS from "exceljs";
-import { createPairFromRoster } from "@/lib/data";
+import { createPairFromRoster, resolveRosterEmails } from "@/lib/data";
 import { requireHr } from "@/lib/hr-auth";
 
 function admin() {
@@ -63,48 +63,33 @@ export async function POST(req) {
   // silently produced an empty string, 2026-09-05).
   const norm = (s) => s.trim().toLowerCase().replace(/\s+/g, " ");
   const allRows = [];
-  const nameToEmail = new Map();
-  // Two different employees sharing a (normalized) name would otherwise
-  // silently cross-assign: whichever row's email Map.set() ran last wins the
-  // shared key, and anyone who references that name as a manager gets
-  // paired to whichever email happened to win -- found in review 2026-09-05.
-  // Surface the collision instead of resolving it silently.
-  const nameCollisions = new Set();
   sheet.eachRow((row, rowNumber) => {
     if (rowNumber === 1) return;
     const employee = (row.getCell(empCol).text || "").trim();
     const manager = (row.getCell(mgrCol).text || "").trim();
     const email = emailCol === -1 ? "" : (row.getCell(emailCol).text || "").trim();
     if (!employee) return;
-    if (email) {
-      const key = norm(employee);
-      if (nameToEmail.has(key) && nameToEmail.get(key) !== email) nameCollisions.add(employee);
-      nameToEmail.set(key, email);
-    }
-    allRows.push({ employee, manager });
+    allRows.push({ employee, manager, email });
   });
 
-  // Fallback for a name this sheet doesn't have a real email for: check
-  // whether that person is ALREADY a real, linked identity elsewhere in the
-  // org (a multi-level manager appears as an EMPLOYEE under their own
-  // manager too, e.g. Monte Montoya is Melissa's report and Wren's manager).
-  // Root-caused 2026-09-07: a re-upload with a blank Email cell for
-  // "Melissa Weiss" generated a fresh placeholder for her and reassigned
-  // all 6 of her real direct reports to it, even though her real email was
-  // sitting right there on her own employee row from a previous upload.
-  // Sheet data always wins (only fills gaps this sheet left); not scoped to
-  // open pairs only, since a manager whose OWN row got closed (e.g. via
-  // "Reset all pairings") is still a real, known identity, not a stranger.
+  // "Known real" fallback for a name this sheet doesn't have a real email
+  // for this run: any name whose employee_email is already NOT a placeholder
+  // anywhere in pairs (not scoped to open-only -- a manager whose own row
+  // got closed, e.g. via "Reset all pairings," is still a real, known
+  // identity, not a stranger). See resolveRosterEmails' own header comment
+  // in lib/data.js for the full incident this closes, and
+  // test/roster-reassignment.test.mjs for the regression test pinning it.
   const { data: knownReal } = await a
     .from("pairs")
     .select("employee_label, employee_email")
     .not("employee_email", "ilike", "%@placeholder.test")
     .order("created_at", { ascending: false });
-  for (const row of knownReal || []) {
-    if (!row.employee_label) continue;
-    const key = norm(row.employee_label);
-    if (!nameToEmail.has(key)) nameToEmail.set(key, row.employee_email);
-  }
+  // Two different employees sharing a (normalized) name would otherwise
+  // silently cross-assign: whichever row's email wins the shared key, and
+  // anyone who references that name as a manager gets paired to whichever
+  // email happened to win -- found in review 2026-09-05. Surface the
+  // collision instead of resolving it silently.
+  const { nameToEmail, nameCollisions } = resolveRosterEmails(allRows, knownReal);
 
   const rows = allRows.filter((r) => r.manager);
   const emailFor = (name) => nameToEmail.get(norm(name)) || placeholderEmail(name);

@@ -153,6 +153,23 @@ cases pinning the placeholder-downgrade guard and the 23505 handling).
 `npm run build` clean. `npm run lint`: same pre-existing warnings only,
 nothing new introduced.
 
+**Regression test added for the actual incident, not just the guard
+(Melissa's explicit ask: "put in a regressor... find out what bug it is and
+how to fix it").** The real fix lived in `app/api/hr/roster/route.js`'s
+`emailFor()`, which wasn't independently unit-testable — it was inline logic
+mixed into the HTTP handler, dependent on ExcelJS and a live Supabase query.
+Extracted the actual name→email resolution (sheet data, then the "already
+known real" DB fallback) into a new pure function, `resolveRosterEmails()`
+in `lib/data.js`, with zero I/O — `route.js` now just calls it. Added 3 new
+tests, one of which reproduces the exact incident shape (a manager with a
+blank Email cell this upload, whose real email is only known from their own
+employee row elsewhere in `pairs`) and asserts it resolves to the real
+email — this test would have caught tonight's bug before it ever shipped.
+**Tests now 18/18 passing.** Build and lint re-verified clean after this
+refactor. **Not yet deployed** — this needs one more `vercel --prod` to go
+live; the code is committed but the route.js logic vercel is currently
+serving still has the old inline (equivalent, but untested) version.
+
 ### Smaller fixes, same session (all deployed, all verified live)
 
 - **"Edit your own name" removed** from the website topbar (Melissa's call:

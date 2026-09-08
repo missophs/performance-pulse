@@ -85,6 +85,41 @@ export async function createPairForSlack(admin, managerId, managerEmail, employe
   return data;
 }
 
+// Pure, dependency-free name -> email resolution for the HR roster importer
+// (app/api/hr/roster/route.js). Pulled out of the route handler specifically
+// so this can be unit-tested without mocking ExcelJS or a real HTTP request
+// -- this exact logic is what let the 2026-09-07 incident happen: a re-
+// upload with a blank Email cell for an existing real manager ("Melissa
+// Weiss") had nothing to fall back on but a freshly-guessed placeholder,
+// which createPairFromRoster then wrote over her real, already-linked
+// email everywhere she was referenced as a manager.
+//
+// `allRows`: every row from the CURRENT upload, as {employee, manager, email}
+// (email may be "" if the sheet has no Email column or the cell is blank).
+// `knownReal`: independently-fetched `pairs` rows where employee_email is
+// NOT a placeholder, as {employee_label, employee_email} -- i.e. "people
+// this app already knows the real email for, whether or not they're on
+// this specific sheet." Sheet data always wins; knownReal only fills a gap
+// this sheet itself left, so a legitimate rename/correction in the sheet
+// is never overridden by stale history.
+export function resolveRosterEmails(allRows, knownReal) {
+  const norm = (s) => s.trim().toLowerCase().replace(/\s+/g, " ");
+  const nameToEmail = new Map();
+  const nameCollisions = new Set();
+  for (const { employee, email } of allRows) {
+    if (!email) continue;
+    const key = norm(employee);
+    if (nameToEmail.has(key) && nameToEmail.get(key) !== email) nameCollisions.add(employee);
+    nameToEmail.set(key, email);
+  }
+  for (const row of knownReal || []) {
+    if (!row.employee_label) continue;
+    const key = norm(row.employee_label);
+    if (!nameToEmail.has(key)) nameToEmail.set(key, row.employee_email);
+  }
+  return { nameToEmail, nameCollisions: [...nameCollisions] };
+}
+
 // HR roster import: creates one pair per (employee, manager) row from an
 // uploaded org chart, admin-side, since HR is on neither side of most of
 // these pairs (unlike createPair/createPairForSlack, which always attach

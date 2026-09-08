@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-const { createPairFromRoster } = await import("@/lib/data");
+const { createPairFromRoster, resolveRosterEmails } = await import("@/lib/data");
 
 // Stands in for the service-role Supabase client. Matches the exact call
 // shape createPairFromRoster uses: pairs.select().eq().is() for the
@@ -114,6 +114,45 @@ test("reassignment collision (23505) surfaces a readable message, not a raw Post
     () => createPairFromRoster(admin, "monte@example.com", "new.real.manager@example.com", "new.real.manager@placeholder.test", "Monte Montoya"),
     /already has an active pairing with new\.real\.manager@example\.com/
   );
+});
+
+// Regression test for the 2026-09-07 incident: a re-upload with a blank
+// Email cell for an existing real manager must resolve to their already-
+// known real email (from a `pairs` row where they're an employee elsewhere
+// in the org), not a freshly-guessed placeholder. This is what actually
+// broke live -- reproduces the exact shape (Melissa Weiss's row has no
+// email in this upload, but her own employee row elsewhere in `pairs`
+// already has it) rather than testing the downgrade guard in isolation.
+test("REGRESSION 2026-09-07: manager with a blank Email cell this upload still resolves to their already-known real email, not a placeholder", () => {
+  const allRows = [
+    { employee: "Melissa Weiss", manager: "", email: "" }, // blank Email cell, exactly what broke live
+    { employee: "Monte Montoya", manager: "Melissa Weiss", email: "" },
+    { employee: "Ann Steiner", manager: "Melissa Weiss", email: "" },
+  ];
+  // Melissa's real email is already known from a previous upload -- her own
+  // row as an employee, unrelated to this sheet having her email or not.
+  const knownReal = [{ employee_label: "Melissa Weiss", employee_email: "melissaw212@gmail.com" }];
+
+  const { nameToEmail, nameCollisions } = resolveRosterEmails(allRows, knownReal);
+
+  assert.equal(nameToEmail.get("melissa weiss"), "melissaw212@gmail.com", "must resolve to the real email, not fall through to a placeholder");
+  assert.deepEqual(nameCollisions, []);
+});
+
+test("resolveRosterEmails: this upload's own Email column always wins over knownReal, even if both exist", () => {
+  const allRows = [{ employee: "Melissa Weiss", manager: "", email: "melissaw212+updated@gmail.com" }];
+  const knownReal = [{ employee_label: "Melissa Weiss", employee_email: "melissaw212@gmail.com" }];
+
+  const { nameToEmail } = resolveRosterEmails(allRows, knownReal);
+
+  assert.equal(nameToEmail.get("melissa weiss"), "melissaw212+updated@gmail.com", "a real correction in the sheet must not be overridden by stale history");
+});
+
+test("resolveRosterEmails: a name with no email anywhere (sheet or knownReal) is simply absent from the map, left for the caller to placeholder", () => {
+  const allRows = [{ employee: "Brand New Hire", manager: "", email: "" }];
+  const { nameToEmail } = resolveRosterEmails(allRows, []);
+
+  assert.equal(nameToEmail.has("brand new hire"), false);
 });
 
 test("dotted-line (two existing managers): does not guess, falls through to insert", async () => {
