@@ -1,14 +1,25 @@
 # Slack integration — status and what's left
 
-## Session closeout (2026-09-07/08): a real production incident (roster re-upload silently locked Melissa out of her own team), root-caused and fixed in code (not just patched live), independent code review run and every real finding fixed, browser-autofill garbage swept from every form in the app — web-app only, Slack app untouched this session, git committed (not pushed)
+## Session closeout (2026-09-07/08): a real production incident (roster re-upload silently locked Melissa out of her own team), root-caused and fixed in code (not just patched live) with a regression test that reproduces it, independent code review run and every real finding fixed, browser-autofill garbage swept from every form in the app, all test-data cleanup confirmed done — web-app only, Slack app untouched this session, everything committed AND pushed to GitHub
 
-**Deploy: confirmed live via `vercel --prod`, twice this session** — once after
-the first batch of fixes (name-edit removal, roster wording, RLS/signup
-migrations), once after the code-review fixes (roster insert-path guard,
-history-page error handling, login message, index migrations). Both deploys
-verified live by reading the actual deployed JS bundle for new strings, not
-assumed. **Git: committed** (`4dd73ee` + a follow-up commit adding this
-self-critique section) — **not pushed**, not asked to push.
+**Deploy: confirmed live via `vercel --prod`, three times this session** —
+after the first batch of fixes (name-edit removal, roster wording, RLS/signup
+migrations); after the code-review fixes (roster insert-path guard,
+history-page error handling, login message, index migrations); and after the
+`resolveRosterEmails` regression-test refactor. First two verified live by
+reading the actual deployed JS bundle for new strings. The third is a
+server-only change with nothing client-visible to check against — confirmed
+the site is healthy post-deploy, but could not independently prove that
+exact commit is what's serving without Vercel dashboard access. **Git:
+committed and pushed** — `4dd73ee`, `ac06f6a`, `b4b5442`, all on
+`performance-pulse/main`.
+
+**Test-data cleanup: DONE.** The 6 leftover test topics on Monte's real
+pairing (`pair_id 21fd3120-...`) were deleted, confirmed via SQL
+`returning id` listing all 6 ids back — not just a bare "Success" message,
+which is exactly the trap that caused this cleanup to take three attempts
+(see below). The test achievement ("did well") was already gone from an
+earlier pass. Nothing outstanding on this specific item.
 
 ### The incident: roster re-upload silently overwrote Melissa's real email with a placeholder, locking her out of her own team
 
@@ -263,7 +274,7 @@ forward unchanged from earlier sessions, still open:
 
 ### Still open, not decided or built (carried over + new tonight)
 
-1. **Test-data cleanup** (topics) — see above, exact IDs ready.
+1. ~~Test-data cleanup (topics)~~ — **DONE**, confirmed via `returning id`.
 2. **`app/privacy/page.js`** needs updating for the new sign-in restriction
    — needs Melissa's input on wording, not a unilateral guess.
 3. **`supabase/schema.sql`** is stale against ~10 migrations' worth of
@@ -281,6 +292,32 @@ forward unchanged from earlier sessions, still open:
    trigger firing on every `pairs` update, duplicated placeholder-domain
    string, throw-vs-typed-return style preference in `createPairFromRoster`.
 7. All Slack items above, unchanged.
+
+### What was actually audited tonight vs. what wasn't — stated plainly, not assumed clean
+
+Melissa asked to keep finding bugs and "stay that way." Being honest about
+scope instead of implying a full sweep happened: the independent 8-angle
+review targeted exactly 9 files (`lib/data.js`, the 4 HR API routes,
+`lib/hr-auth.js`, and the 4 new migrations) — the roster/pairing/auth
+backend, because that's where tonight's incident lived. It did **not**
+cover:
+- `slack-app/` and every Slack-facing route in `web-app`
+  (`app/api/slack/*`, `lib/slack-*.js`) — untouched, not reviewed, not
+  tested this session. `web-app/CLAUDE.md`'s own governance note (added
+  2026-08-29) flags this exact surface as having had real IDOR bugs before
+  ("every Slack interactivity/event handler... MUST verify that row's
+  pair_id matches ctx.pairId") — worth a dedicated review pass, not
+  assumed still-safe just because nothing broke recently.
+- Every other website page not touched tonight (`/performance`,
+  `/development`, `/actions`, `/export`, `/career`, `/slack` tab) — no
+  reason to suspect a problem, but genuinely not looked at this session
+  either.
+- `concerns`, `review_drafts`, `form_drafts` RLS asymmetry (also flagged in
+  `web-app/CLAUDE.md` from the same 2026-08-29 audit) — still open, still
+  UI-only enforcement, not re-checked tonight.
+
+Not claiming these are broken — claiming they're **unverified**, which is
+the distinction that mattered all night.
 
 ## Session closeout (2026-09-06/07): roster-upload "stuck" bug found and fixed, Google-only sign-in, HR PIN replaced with real identity, manager-reassignment fix, HR can now force-close any pairing (including orphaned test data), "Edit your own name" restored to the website — every change deployed live via `vercel --prod` and verified in Melissa's real Chrome; git NOT yet committed as this was written
 
