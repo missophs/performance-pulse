@@ -1,14 +1,14 @@
 # Slack integration — status and what's left
 
-## Session closeout (2026-09-07/08): a real production incident (roster re-upload silently locked Melissa out of her own team), root-caused and fixed in code (not just patched live), independent code review run and every real finding fixed, browser-autofill garbage swept from every form in the app — web-app only, Slack app untouched this session, git NOT yet committed as this was written
+## Session closeout (2026-09-07/08): a real production incident (roster re-upload silently locked Melissa out of her own team), root-caused and fixed in code (not just patched live), independent code review run and every real finding fixed, browser-autofill garbage swept from every form in the app — web-app only, Slack app untouched this session, git committed (not pushed)
 
 **Deploy: confirmed live via `vercel --prod`, twice this session** — once after
 the first batch of fixes (name-edit removal, roster wording, RLS/signup
 migrations), once after the code-review fixes (roster insert-path guard,
 history-page error handling, login message, index migrations). Both deploys
 verified live by reading the actual deployed JS bundle for new strings, not
-assumed. **Git: NOT committed yet** — everything below is real, deployed,
-live-verified code sitting uncommitted in the working tree.
+assumed. **Git: committed** (`4dd73ee` + a follow-up commit adding this
+self-critique section) — **not pushed**, not asked to push.
 
 ### The incident: roster re-upload silently overwrote Melissa's real email with a placeholder, locking her out of her own team
 
@@ -52,6 +52,21 @@ SQL editor since Claude cannot write to prod directly):**
 3. Verified after every step via a live, read-only fetch to
    `/api/hr/org-chart` — never just assumed a SQL "Success" meant the data
    was actually right.
+
+**The biggest mistake of the session, named plainly:** earlier the same
+night, after the first batch of fixes (name-edit removal, roster wording,
+the RLS/signup migrations), Claude told Melissa everything was "done,
+verified live" — true for what had been changed, but it created false
+confidence going into her own roster re-upload, which then triggered this
+latent, pre-existing bug in code nobody had reviewed that session. When
+buttons started failing afterward, Claude's first response was to guess at
+the cause (told her the uploaded *file* was the problem) instead of reading
+the actual importer code first — Melissa had to correct this directly
+("You are wrong... don't tell me they're not there") before the real
+root cause (the code, not the file) was found. Lesson applied for the rest
+of the session and going forward: "verified" only covers what was actually
+tested, not what hasn't broken yet; check code/data before asserting a
+cause, every time, not after being told to.
 
 ### Root-caused in code, not just patched live — an independent 8-angle review caught the fix was incomplete
 
@@ -185,6 +200,16 @@ corrected once caught:
    test rows aged out of the window before the delete ran. Caught by
    re-querying the actual stored rows (exact IDs, timestamps, text) instead
    of re-guessing at another filter.
+
+**Fix applied going forward, both cases:** stopped writing a DELETE/UPDATE
+against a guessed column name or a guessed time window. Query the real rows
+first (`select` the exact ids/columns/values), then write the DELETE/UPDATE
+against those literal ids — no relative filters, no assumed schema, nothing
+inferred from another table's naming pattern. Also: a bare "Success. No rows
+returned" from the SQL editor for a DELETE/UPDATE with no `returning` clause
+does **not** mean it matched any rows — always add `returning id` (or
+similar) so the result itself proves what changed, instead of re-checking
+the app separately every time.
 
 **Still open, exact IDs known, ready to run:**
 ```sql
