@@ -11,8 +11,11 @@ export default function LoginPage() {
   // desync from the static HTML and fail hydration. Reading it post-mount
   // instead avoids that, at the cost of the error flashing in a tick late.
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("error") === "auth") {
+    const err = new URLSearchParams(window.location.search).get("error");
+    if (err === "not_provisioned") {
       // eslint-disable-next-line react-hooks/set-state-in-effect
+      setError("That Google account isn't on the roster yet — ask HR to add you, then try again.");
+    } else if (err === "auth") {
       setError("That sign-in didn't work — try again below.");
     }
   }, []);

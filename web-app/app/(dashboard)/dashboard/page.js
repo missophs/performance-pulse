@@ -30,6 +30,7 @@ import {
   getPair,
   notify,
 } from "@/lib/data";
+import { useRosterUpload } from "@/lib/useRosterUpload";
 import { isOpenTopic, isActiveGoal, isOpenAction, isActiveDev, isOverdue, fmtDate, fmtTime, daysBetween, today, ago } from "@/lib/format";
 import Badge from "@/components/ui/Badge";
 
@@ -37,11 +38,12 @@ const MSG_KINDS = ["Question", "Concern", "Heads-up", "Idea", "Other"];
 
 export default function DashboardPage() {
   const { pairId, role, isMgr, myName, partnerName, supabase, isHr } = usePulse();
-  const [rosterSummary, setRosterSummary] = useState(null);
-  const [rosterUploading, setRosterUploading] = useState(false);
   const [orgChart, setOrgChart] = useState(null);
   const toast = useToast();
   const router = useRouter();
+  const { rosterSummary, uploading: rosterUploading, handleRosterUpload } = useRosterUpload({
+    onError: (msg) => toast("Couldn't import that", msg),
+  });
 
   const [loading, setLoading] = useState(true);
   const [pair, setPair] = useState(null);
@@ -239,26 +241,6 @@ export default function DashboardPage() {
     e.target.value = "";
   }
 
-  async function handleRosterUpload(e) {
-    const file = e.target.files?.[0];
-    if (!file || rosterUploading) return;
-    setRosterUploading(true);
-    setRosterSummary(null);
-    try {
-      const form = new FormData();
-      form.append("file", file);
-      const res = await fetch("/api/hr/roster", { method: "POST", body: form });
-      const data = await res.json();
-      if (!res.ok) toast("Couldn't import that", data.error || "Unknown error");
-      else setRosterSummary(data);
-    } catch {
-      toast("Couldn't import that", "Something went wrong on the server. Try again.");
-    } finally {
-      setRosterUploading(false);
-      e.target.value = "";
-    }
-  }
-
   async function removeRoster() {
     if (!window.confirm("Close every active pairing? This is a clean-slate reset for the whole roster -- reversible per pairing from History, but affects everyone.")) return;
     const res = await fetch("/api/hr/close-all-pairs", { method: "POST" });
@@ -299,6 +281,7 @@ export default function DashboardPage() {
     }
     const refreshed = await fetch("/api/hr/org-chart", { method: "POST" });
     setOrgChart((await refreshed.json()).orgChart);
+    router.refresh();
   }
 
   async function openHandbook(link) {
@@ -359,7 +342,7 @@ export default function DashboardPage() {
               {rosterUploading ? "Importing…" : "Import roster (HR)"}
               <input type="file" accept=".xlsx" disabled={rosterUploading} style={{ display: "none" }} onChange={handleRosterUpload} />
             </label>{" "}
-            <button className="btn ghost sm" onClick={removeRoster}>Remove roster (HR)</button>{" "}
+            <button className="btn ghost sm" onClick={removeRoster} title="Full reset only -- to change who reports to whom, re-upload roster.xlsx instead">Reset all pairings (HR)</button>{" "}
             <button className="btn ghost sm" onClick={toggleOrgChart}>{orgChart ? "Hide org chart" : "View org chart (HR)"}</button>
           </>
         )}
@@ -431,7 +414,7 @@ export default function DashboardPage() {
           <select value={msgKind} onChange={(e) => setMsgKind(e.target.value)} style={{ maxWidth: 160 }}>
             {MSG_KINDS.map((k) => <option key={k}>{k}</option>)}
           </select>
-          <input type="text" value={msgText} onChange={(e) => setMsgText(e.target.value)} placeholder="What's on your mind?" style={{ flex: 1 }} />
+          <input type="text" autoComplete="off" value={msgText} onChange={(e) => setMsgText(e.target.value)} placeholder="What's on your mind?" style={{ flex: 1 }} />
           <button className="btn sm" onClick={sendMessage}>Send</button>
         </div>
         {messages.length > 0 && (
@@ -542,7 +525,7 @@ export default function DashboardPage() {
                 </div>
                 <div className="field">
                   <label htmlFor="suggNote">Why (optional)</label>
-                  <input id="suggNote" type="text" value={suggNote} onChange={(e) => setSuggNote(e.target.value)} placeholder="e.g. conflicts with another meeting" />
+                  <input id="suggNote" type="text" autoComplete="off" value={suggNote} onChange={(e) => setSuggNote(e.target.value)} placeholder="e.g. conflicts with another meeting" />
                 </div>
                 <button className="btn secondary sm" onClick={suggestReschedule} disabled={!suggDate}>Send suggestion</button>{" "}
                 <button className="btn ghost sm" onClick={() => setShowSuggestForm(false)}>Cancel</button>

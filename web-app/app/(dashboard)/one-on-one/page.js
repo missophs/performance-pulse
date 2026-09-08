@@ -478,7 +478,7 @@ export default function OneOnOnePage() {
             <div className="row">
               <div className="field" style={{ flex: 2 }}>
                 <label htmlFor="topicText">I want to discuss…</label>
-                <input id="topicText" type="text" value={topicText} onChange={(e) => setTopicText(e.target.value)} placeholder="e.g. How we're staffing the Q3 rollout" />
+                <input id="topicText" type="text" autoComplete="off" value={topicText} onChange={(e) => setTopicText(e.target.value)} placeholder="e.g. How we're staffing the Q3 rollout" />
               </div>
               <div className="field">
                 <label htmlFor="topicCat">Category</label>
@@ -578,15 +578,15 @@ export default function OneOnOnePage() {
             </div>
             <div className="field">
               <label htmlFor="wrapStart">Start</label>
-              <input id="wrapStart" type="text" value={wrap.start} onChange={(e) => setWrapField("start", e.target.value)} placeholder="One thing to start doing" />
+              <input id="wrapStart" type="text" autoComplete="off" value={wrap.start} onChange={(e) => setWrapField("start", e.target.value)} placeholder="One thing to start doing" />
             </div>
             <div className="field">
               <label htmlFor="wrapStop">Stop</label>
-              <input id="wrapStop" type="text" value={wrap.stop} onChange={(e) => setWrapField("stop", e.target.value)} placeholder="One thing to stop doing" />
+              <input id="wrapStop" type="text" autoComplete="off" value={wrap.stop} onChange={(e) => setWrapField("stop", e.target.value)} placeholder="One thing to stop doing" />
             </div>
             <div className="field">
               <label htmlFor="wrapContinue">Continue</label>
-              <input id="wrapContinue" type="text" value={wrap.keep} onChange={(e) => setWrapField("keep", e.target.value)} placeholder="One thing that works — keep doing it" />
+              <input id="wrapContinue" type="text" autoComplete="off" value={wrap.keep} onChange={(e) => setWrapField("keep", e.target.value)} placeholder="One thing that works — keep doing it" />
             </div>
             <div className="row">
               <div className="field">
@@ -731,7 +731,7 @@ export default function OneOnOnePage() {
         <div className="row">
           <div className="field" style={{ flex: 2 }}>
             <label htmlFor="editTopicText">I want to discuss…</label>
-            <input id="editTopicText" type="text" value={editText} onChange={(e) => setEditText(e.target.value)} />
+            <input id="editTopicText" type="text" autoComplete="off" value={editText} onChange={(e) => setEditText(e.target.value)} />
           </div>
           <div className="field">
             <label htmlFor="editTopicCat">Category</label>

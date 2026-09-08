@@ -237,7 +237,7 @@ export default function GoalsPage() {
         </div>
         <div className="field">
           <label htmlFor="glText">The goal</label>
-          <input id="glText" type="text" placeholder="e.g. Cut onboarding time for new customers to under 10 days" value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} />
+          <input id="glText" type="text" autoComplete="off" placeholder="e.g. Cut onboarding time for new customers to under 10 days" value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} />
         </div>
         <div className="field">
           <label htmlFor="glWhy">What's the plan to accomplish this?</label>

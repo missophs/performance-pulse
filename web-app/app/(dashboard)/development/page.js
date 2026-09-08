@@ -314,7 +314,7 @@ function DevelopmentPageInner() {
       >
         <div className="field">
           <label htmlFor="dvArea">Development area</label>
-          <input id="dvArea" type="text" placeholder="e.g. Executive presentation skills" value={devForm.area} onChange={(e) => setDevForm({ ...devForm, area: e.target.value })} />
+          <input id="dvArea" type="text" autoComplete="off" placeholder="e.g. Executive presentation skills" value={devForm.area} onChange={(e) => setDevForm({ ...devForm, area: e.target.value })} />
         </div>
         <div className="field">
           <label htmlFor="dvWhy">Why it matters</label>

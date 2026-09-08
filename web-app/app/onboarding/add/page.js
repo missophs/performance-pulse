@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { listMyPairs } from "@/lib/data";
@@ -34,6 +35,9 @@ export default async function AddPairingPage() {
           Ask HR to add the relationship to the roster — the next time
           they upload it, it will show up here on its own.
         </p>
+        <Link href="/dashboard" className="btn ghost sm" style={{ marginTop: 16, display: "inline-block" }}>
+          Back to dashboard
+        </Link>
       </div>
     </div>
   );

@@ -10,15 +10,22 @@
 // plain status message instead of a form (Melissa's call, 2026-09-05).
 // HR access is the signed-in account's real identity (isHr, computed
 // server-side via is_hr()) -- no PIN to unlock, replaced 2026-09-06.
-import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { useRosterUpload } from "@/lib/useRosterUpload";
 
 export default function NotPairedYet({ isHr }) {
   const router = useRouter();
-  const [rosterSummary, setRosterSummary] = useState(null);
-  const [message, setMessage] = useState("");
-  const [uploading, setUploading] = useState(false);
+  // The upload can pair the CURRENT user (e.g. their own manager
+  // relationship was on the sheet) -- this page's "not paired yet" vs.
+  // dashboard decision is made once, server-side, at page load, so nothing
+  // here would otherwise reflect that until a manual reload. router.refresh()
+  // re-runs that server check now, so a newly-paired uploader lands on their
+  // dashboard automatically instead of staring at a stale "not paired yet"
+  // screen that looks like the upload failed when it didn't, 2026-09-05.
+  const { rosterSummary, uploading, error: message, handleRosterUpload } = useRosterUpload({
+    onSuccess: () => router.refresh(),
+  });
 
   // Nobody stuck here has any other way off this page -- no sidebar, no
   // topbar, nothing (found live, 2026-09-06: signing in as the wrong test
@@ -30,39 +37,6 @@ export default function NotPairedYet({ isHr }) {
     await supabase.auth.signOut();
     router.push("/login");
     router.refresh();
-  }
-
-  async function handleRosterUpload(e) {
-    const file = e.target.files?.[0];
-    if (!file || uploading) return;
-    setUploading(true);
-    setRosterSummary(null);
-    setMessage("");
-    const form = new FormData();
-    form.append("file", file);
-    try {
-      const res = await fetch("/api/hr/roster", { method: "POST", body: form });
-      const data = await res.json();
-      if (!res.ok) {
-        setMessage(data.error || "Couldn't import that.");
-      } else {
-        setRosterSummary(data);
-        // The upload can pair the CURRENT user (e.g. their own manager
-        // relationship was on the sheet) -- this page's "not paired yet"
-        // vs. dashboard decision is made once, server-side, at page load,
-        // so nothing here would otherwise reflect that until a manual
-        // reload. router.refresh() re-runs that server check now, so a
-        // newly-paired uploader lands on their dashboard automatically
-        // instead of staring at a stale "not paired yet" screen that
-        // looks like the upload failed when it didn't, 2026-09-05.
-        router.refresh();
-      }
-    } catch {
-      setMessage("Something went wrong on the server. Try again, or check with support if it keeps happening.");
-    } finally {
-      setUploading(false);
-      e.target.value = "";
-    }
   }
 
   return (

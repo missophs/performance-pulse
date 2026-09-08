@@ -14,7 +14,7 @@ const { createPairFromRoster } = await import("@/lib/data");
 // existing-rows lookup, profiles.select().eq().maybeSingle() for a
 // manager/employee id lookup, pairs.update().eq() to reassign/self-heal,
 // and pairs.insert() for a brand-new row.
-function fakeAdmin({ existingRows = [], profilesByEmail = {}, insertError = null } = {}) {
+function fakeAdmin({ existingRows = [], profilesByEmail = {}, insertError = null, updateError = null } = {}) {
   const updates = [];
   const inserts = [];
   function from(table) {
@@ -24,7 +24,7 @@ function fakeAdmin({ existingRows = [], profilesByEmail = {}, insertError = null
         update: (patch) => ({
           eq: (_col, id) => {
             updates.push({ id, patch });
-            return Promise.resolve({ error: null });
+            return Promise.resolve({ error: updateError });
           },
         }),
         insert: (row) => {
@@ -76,6 +76,44 @@ test("employee moved to a genuinely different manager: reassigned in place, not 
   assert.equal(updates[0].patch.manager_email, "ann@example.com");
   assert.equal(updates[0].patch.manager_id, "ann-id");
   assert.equal(inserts.length, 0);
+});
+
+test("won't downgrade a real, already-linked manager to a freshly-guessed placeholder", async () => {
+  const { admin, updates, inserts } = fakeAdmin({
+    existingRows: [{ id: "p1", manager_email: "melissaw212@gmail.com" }],
+  });
+  // Simulates a re-upload whose Email column is blank for "Melissa Weiss" --
+  // emailFor() in route.js would fall back to a placeholder even though this
+  // employee's existing row already has her real email.
+  await assert.rejects(
+    () => createPairFromRoster(admin, "monte@example.com", "melissa.weiss@placeholder.test", "melissa.weiss@placeholder.test", "Monte Montoya"),
+    /won't replace melissaw212@gmail\.com/
+  );
+  assert.equal(updates.length, 0, "must not overwrite the real manager email");
+  assert.equal(inserts.length, 0);
+});
+
+test("reassignment to a genuinely different real manager still works even though the old one was real too", async () => {
+  const { admin, updates } = fakeAdmin({
+    existingRows: [{ id: "p1", manager_email: "old.real.manager@example.com" }],
+    profilesByEmail: { "new.real.manager@example.com": { id: "new-mgr-id" } },
+  });
+  const result = await createPairFromRoster(admin, "monte@example.com", "new.real.manager@example.com", "new.real.manager@placeholder.test", "Monte Montoya");
+  assert.deepEqual(result, { reassigned: true, fromManagerEmail: "old.real.manager@example.com" });
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].patch.manager_email, "new.real.manager@example.com");
+});
+
+test("reassignment collision (23505) surfaces a readable message, not a raw Postgres error", async () => {
+  const { admin } = fakeAdmin({
+    existingRows: [{ id: "p1", manager_email: "old.real.manager@example.com" }],
+    profilesByEmail: { "new.real.manager@example.com": { id: "new-mgr-id" } },
+    updateError: { code: "23505", message: "duplicate key value violates unique constraint" },
+  });
+  await assert.rejects(
+    () => createPairFromRoster(admin, "monte@example.com", "new.real.manager@example.com", "new.real.manager@placeholder.test", "Monte Montoya"),
+    /already has an active pairing with new\.real\.manager@example\.com/
+  );
 });
 
 test("dotted-line (two existing managers): does not guess, falls through to insert", async () => {

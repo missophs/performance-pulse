@@ -47,7 +47,7 @@ export default function ActionModal({ open, existing, seed, owners, defaultOwner
     >
       <div className="field">
         <label htmlFor="acText">What needs to happen</label>
-        <input id="acText" type="text" value={form.text} onChange={(e) => set("text", e.target.value)} placeholder="e.g. Draft the rollout timeline" />
+        <input id="acText" type="text" autoComplete="off" value={form.text} onChange={(e) => set("text", e.target.value)} placeholder="e.g. Draft the rollout timeline" />
       </div>
       <div className="row">
         <div className="field">
@@ -80,6 +80,7 @@ export default function ActionModal({ open, existing, seed, owners, defaultOwner
         <input
           id="acRelated"
           type="text"
+          autoComplete="off"
           value={form.related}
           onChange={(e) => set("related", e.target.value)}
           placeholder="A goal, topic or conversation (optional)"

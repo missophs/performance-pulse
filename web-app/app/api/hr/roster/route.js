@@ -84,6 +84,28 @@ export async function POST(req) {
     allRows.push({ employee, manager });
   });
 
+  // Fallback for a name this sheet doesn't have a real email for: check
+  // whether that person is ALREADY a real, linked identity elsewhere in the
+  // org (a multi-level manager appears as an EMPLOYEE under their own
+  // manager too, e.g. Monte Montoya is Melissa's report and Wren's manager).
+  // Root-caused 2026-09-07: a re-upload with a blank Email cell for
+  // "Melissa Weiss" generated a fresh placeholder for her and reassigned
+  // all 6 of her real direct reports to it, even though her real email was
+  // sitting right there on her own employee row from a previous upload.
+  // Sheet data always wins (only fills gaps this sheet left); not scoped to
+  // open pairs only, since a manager whose OWN row got closed (e.g. via
+  // "Reset all pairings") is still a real, known identity, not a stranger.
+  const { data: knownReal } = await a
+    .from("pairs")
+    .select("employee_label, employee_email")
+    .not("employee_email", "ilike", "%@placeholder.test")
+    .order("created_at", { ascending: false });
+  for (const row of knownReal || []) {
+    if (!row.employee_label) continue;
+    const key = norm(row.employee_label);
+    if (!nameToEmail.has(key)) nameToEmail.set(key, row.employee_email);
+  }
+
   const rows = allRows.filter((r) => r.manager);
   const emailFor = (name) => nameToEmail.get(norm(name)) || placeholderEmail(name);
 

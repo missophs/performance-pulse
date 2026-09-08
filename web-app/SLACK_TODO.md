@@ -1,5 +1,245 @@
 # Slack integration — status and what's left
 
+## Session closeout (2026-09-07/08): a real production incident (roster re-upload silently locked Melissa out of her own team), root-caused and fixed in code (not just patched live), independent code review run and every real finding fixed, browser-autofill garbage swept from every form in the app — web-app only, Slack app untouched this session, git NOT yet committed as this was written
+
+**Deploy: confirmed live via `vercel --prod`, twice this session** — once after
+the first batch of fixes (name-edit removal, roster wording, RLS/signup
+migrations), once after the code-review fixes (roster insert-path guard,
+history-page error handling, login message, index migrations). Both deploys
+verified live by reading the actual deployed JS bundle for new strings, not
+assumed. **Git: NOT committed yet** — everything below is real, deployed,
+live-verified code sitting uncommitted in the working tree.
+
+### The incident: roster re-upload silently overwrote Melissa's real email with a placeholder, locking her out of her own team
+
+Started from three small asks (remove "Edit your own name," make Google
+sign-in safer, enforce "End this pairing" at the database level) and escalated
+into the worst bug of the project so far, found live mid-session.
+
+**What happened:** Melissa re-uploaded her roster (`roster-2.xlsx`) to add
+"Stella Weiss" under Monte. That specific file was fine — real emails present
+for both her and Monte — but something (an earlier attempt, of the "asked me
+to import the roster four times" reports) uploaded a version where the Email
+cell was blank for "Melissa Weiss" and "Monte Montoya." The importer's
+existing "manager moved teams, reassign the same row" feature
+(`createPairFromRoster`, built 2026-09-06) had no concept of "wait, I already
+know this manager's real email" — it just trusted whatever this specific
+upload computed, generated fresh placeholder addresses
+(`melissa.weiss@placeholder.test`, `monte.montoya@placeholder.test`), and
+**reassigned all 6 of Melissa's real direct reports and both of Monte's real
+reports to those fake addresses.** Melissa's own session no longer matched
+any pairing row — she got kicked to "not paired yet," "Add goal" and "Add"
+buttons on already-open tabs looked broken (stale `pairId` in React state),
+and every re-upload attempt after that just re-triggered the same bad
+resolution instead of fixing it, because a *different* pre-existing bug (see
+below) made the DB reject the correct-looking repair too.
+
+**Live data repair (not a migration — a one-time fix, done via the Supabase
+SQL editor since Claude cannot write to prod directly):**
+1. First attempt failed: `pairs_employee_manager_key` (from
+   `0010_multi_pair.sql`) was a **non-partial** unique index on
+   `(employee_id, manager_id)` — a **closed** pairing between two real people
+   permanently blocked ever creating a new active one between them again. A
+   correctly-linked-but-closed duplicate already existed for Monte's row
+   (created 9/5, closed 9/6) and for Wren's row, both from earlier testing.
+2. Diagnosed via direct read-only queries (not guessed): found the exact
+   duplicate row pairs, confirmed both sides had zero real topics/goals/
+   actions attached (safe to touch), reopened the correct closed rows,
+   deleted the corrupted duplicates, then fixed the remaining 5 rows (Ann,
+   Devon, Sasha, Kiran, Lena) and Monte's own report (`swm3016@gmail.com`,
+   whose `employee_label` also still said "Password Test" from old testing —
+   fixed to "Stella Weiss").
+3. Verified after every step via a live, read-only fetch to
+   `/api/hr/org-chart` — never just assumed a SQL "Success" meant the data
+   was actually right.
+
+### Root-caused in code, not just patched live — an independent 8-angle review caught the fix was incomplete
+
+First fix (a guard in `createPairFromRoster`'s reassignment branch, refusing
+to overwrite a real manager email with a placeholder) only covered ONE of the
+function's three write paths. Two independent review angles both found the
+same real gap: a dotted-line employee (2+ active managers) or a brand-new
+hire under an already-real manager whose Email cell is blank *this specific
+upload* could still fall through to a plain **insert** with a fresh
+placeholder — same corruption, unguarded door.
+
+**Real fix, applied and deployed:** `app/api/hr/roster/route.js`'s
+`emailFor()` now checks the database — via any existing pairs row's
+`employee_label` matching a non-placeholder `employee_email` — for whether a
+name is already a real, linked identity **before ever generating a
+placeholder**, not just after a reassignment already went wrong. This closes
+the gap for the insert path, the self-heal path, and the reassignment path
+all at once, at the actual source of the bad data instead of one symptom.
+
+**Everything else the review caught and fixed the same session:**
+- Reassignment branch now handles a unique-constraint collision (23505)
+  the same way the insert path already did — a readable message instead of
+  a raw Postgres error string.
+- Placeholder-email detection made case-insensitive (was comparing a plain
+  JS string against a `citext` column — latent mismatch risk).
+- `history/page.js`'s "Reopen"/"End this pairing" had **zero error
+  handling** — tonight's new DB guards (see migrations below) can now
+  reject those writes in cases that previously could never fail; both now
+  show a toast instead of silently doing nothing.
+- A rejected Google sign-in (new provisioning check, see 0020 below) showed
+  the same generic "try again" as any other failure. `app/auth/callback/
+  route.js` and `app/login/page.js` now show "ask HR to add you" for that
+  specific case.
+- Migration `0022` (the index fix) wrapped in an explicit `begin`/`commit`
+  — this repo's migrations are run by hand by pasting into the SQL editor,
+  so a half-run paste could otherwise leave a window with zero uniqueness
+  enforced.
+- New migration `0023`: the new sign-in provisioning check (0020) was doing
+  a full-table scan on `profiles` and `pairs` on **every single Google
+  sign-in** — added the missing indexes.
+
+**Flagged by the review, deliberately NOT fixed this session (real, but not
+a code bug):**
+- `app/privacy/page.js` was never updated to reflect the new sign-in
+  restriction (0020). `web-app/CLAUDE.md`'s own rule says ask Melissa
+  rather than guess at privacy-policy wording — not done unilaterally.
+  **Needs Melissa's input, next session.**
+- `supabase/schema.sql` (the from-scratch bootstrap file) is stale against
+  many migrations, not just tonight's four — it's missing `closed_at`,
+  `employee_label`, `suggested_1on1_*`, and more, going back to migration
+  0012. Patching in only tonight's fixes would leave it referencing columns
+  it never creates. Added a clear warning comment instead of a risky
+  partial patch. **Real fix — fully reconciling schema.sql against every
+  migration in order — is a separate, larger task.**
+- Minor efficiency/style items (the close-guard trigger firing on every
+  `pairs` update, not just closes; the literal `"@placeholder.test"` string
+  duplicated across two files with no shared constant; a `throw` used where
+  the function's other branches return a typed result) — logged, low
+  severity, deliberately not touched to avoid more surface area under
+  incident-response time pressure.
+
+**New migrations this session** (all run live in Supabase, all confirmed
+"Success" before moving to the next):
+- `0019_pairs_close_guard.sql` — "End this pairing" is now manager-only at
+  the database level via a trigger, not just the UI. Reopening is
+  unrestricted (matches the UI, which never gated it either).
+- `0020_restrict_signup_to_provisioned.sql` — Google sign-in was Published
+  (any Google account could complete OAuth) with no allowlist; this blocks
+  account creation for any email not already on the roster or an existing
+  profile. Matches the app's existing "no self-serve" design.
+- `0021_pairs_concurrent_roster_upload_guard.sql` — a partial unique index
+  closing a double-submit/concurrent-upload race the app-level dedup check
+  alone couldn't catch (two placeholder rows with null ids don't collide on
+  the old id-based index).
+- `0022_pairs_reopenable_unique_key.sql` — made the original
+  `pairs_employee_manager_key` (0010) **partial** (`where closed_at is
+  null`) so a closed pairing no longer permanently blocks a rehire/reopen —
+  this is the exact bug that blocked the first data-repair attempt above.
+- `0023_signup_check_indexes.sql` — indexes for 0020's new per-signup checks
+  (`profiles.email`, `pairs.employee_email`, `pairs.manager_email`).
+
+**Tests: 15/15 passing** (`test/roster-reassignment.test.mjs` gained 2 new
+cases pinning the placeholder-downgrade guard and the 23505 handling).
+`npm run build` clean. `npm run lint`: same pre-existing warnings only,
+nothing new introduced.
+
+### Smaller fixes, same session (all deployed, all verified live)
+
+- **"Edit your own name" removed** from the website topbar (Melissa's call:
+  "why would you have it add your name... I don't think we need that").
+  `updateProfile` back to zero callers, same as before the feature existed.
+- **Stale-page bug fixed**: closing a pairing (org chart) or resetting all
+  pairings never called `router.refresh()`, so the rest of an already-open
+  page could keep showing pre-close data. Fixed in `dashboard/page.js`.
+- **"Remove roster" → "Reset all pairings"**, reworded. Melissa's own
+  read: re-uploading `roster.xlsx` already updates the org chart in place
+  (reassigns people, keeps history) — this button is only for a full wipe,
+  and the old name/copy made that easy to confuse with a normal update.
+- **Roster-upload logic consolidated**: `NotPairedYet.js` and
+  `dashboard/page.js` had two separate copies of the exact same
+  upload/state/error-handling logic, flagged repeatedly in earlier
+  sessions as "not consolidated." New `lib/useRosterUpload.js` hook, used
+  by both — zero behavior change, one copy of the logic instead of two.
+- **Browser-autofill garbage swept from the whole app**: Melissa found
+  Chrome showing old test junk ("TEST demo achievement," "u aren't
+  listenieng") as autocomplete suggestions in the achievement/feedback
+  forms. Root cause: **none of this app's 17 free-text `<input>` elements,
+  across 9 files, had `autoComplete="off"`** — Chrome remembers and
+  resuggests every value ever typed into any of them, forever, across
+  sessions. Fixed all 17. Old cached suggestions in a given browser still
+  need a one-time manual clear (right-click the autofill entry → delete)
+  since that's Chrome's own memory, not app state — the fix only stops new
+  garbage from accumulating.
+- 2FA: Melissa can't afford SMS-based 2FA (cost, phone-number collection).
+  No action taken, confirmed declined, not raised again.
+
+### Test-data cleanup — started, NOT finished
+
+Debugging the "Add" button reports live created real test clutter in
+Melissa's actual pairing with Monte Montoya (`pair_id
+21fd3120-01f1-4734-a4bf-fe9dff338746`) — duplicate suggested-question topics
+and one test achievement, from repeatedly clicking Add to prove the button
+worked. Two cleanup attempts already made two separate mistakes, both
+corrected once caught:
+1. First attempt used the wrong column name (`achievements.text` instead of
+   the real `achievements.title`) — the whole batched delete rolled back,
+   caught via reading the actual error instead of assuming success.
+2. Second attempt used a `created_at > now() - interval '6 hours'` filter
+   that looked safe but wasn't checked against the actual server clock —
+   the session ran long enough (past midnight, into 2026-09-08) that the
+   test rows aged out of the window before the delete ran. Caught by
+   re-querying the actual stored rows (exact IDs, timestamps, text) instead
+   of re-guessing at another filter.
+
+**Still open, exact IDs known, ready to run:**
+```sql
+delete from topics
+where id in (
+  'c1b41d24-5e84-4602-8139-27be6adb0fb4',
+  'f370fa13-9077-4309-8b7e-a28cc0a69d5e',
+  'f7b85af7-b035-441b-8b3e-64c6dbcf568e',
+  'ee469283-34fc-439e-9fa9-69f092aa443d',
+  '2571eb28-d5a6-4526-ae8c-2506836b0b8c',
+  '0b11d745-f225-4c98-9360-b529b31f3266'
+)
+returning id;
+```
+The test achievement ("did well") was already successfully removed earlier
+in the same cleanup pass — confirmed gone from "Recent conversations."
+
+### Slack app: untouched this session
+
+Every change this session was web-app only. Nothing in `slack-app/` or the
+Slack-facing parts of `web-app` (`app/api/slack/*`, `lib/slack-*.js`) was
+read, tested, or modified. Every previously-open Slack item is carried
+forward unchanged from earlier sessions, still open:
+1. **Real-time Slack DM delivery** — was mid-build as of an earlier session;
+   see this file's own history further down for exact next steps. Not
+   picked up this session.
+2. **Custom questions** — still pending, not started.
+3. **"My suggestions" parity + a real two-way Slack note exchange** — raised
+   and explicitly left undecided in an earlier session (Melissa's own two
+   questions were never answered). Do not build either without asking
+   again — this is an explicit pause, not a decision.
+4. **Slack Marketplace listing** — Melissa mentioned wanting this later for
+   her own startup; not scoped, not started.
+
+### Still open, not decided or built (carried over + new tonight)
+
+1. **Test-data cleanup** (topics) — see above, exact IDs ready.
+2. **`app/privacy/page.js`** needs updating for the new sign-in restriction
+   — needs Melissa's input on wording, not a unilateral guess.
+3. **`supabase/schema.sql`** is stale against ~10 migrations' worth of
+   schema changes — flagged with a warning comment, real fix is a separate,
+   larger reconciliation task.
+4. **Placeholder-email swap-in for roster-imported pairs** — still no flow
+   for HR/an employee to replace a placeholder email with a real one on an
+   existing pending pair outside a full re-upload. Carried over from
+   2026-09-04/05.
+5. **`NotPairedYet.js`/`dashboard/page.js` HR-strip duplication** — the
+   roster-upload *logic* was consolidated tonight (`useRosterUpload`), but
+   the surrounding HR-strip markup (handbook upload, org chart toggle) is
+   still duplicated between the two files.
+6. Minor review findings deliberately not fixed (see above): close-guard
+   trigger firing on every `pairs` update, duplicated placeholder-domain
+   string, throw-vs-typed-return style preference in `createPairFromRoster`.
+7. All Slack items above, unchanged.
+
 ## Session closeout (2026-09-06/07): roster-upload "stuck" bug found and fixed, Google-only sign-in, HR PIN replaced with real identity, manager-reassignment fix, HR can now force-close any pairing (including orphaned test data), "Edit your own name" restored to the website — every change deployed live via `vercel --prod` and verified in Melissa's real Chrome; git NOT yet committed as this was written
 
 **Deploy: confirmed live, each change verified individually as it shipped**

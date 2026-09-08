@@ -2,6 +2,22 @@
 -- Paste this whole file into the Supabase SQL Editor (Dashboard → SQL Editor → New query) and run it.
 -- Safe to re-run on a fresh project. Not idempotent against a partially-applied version — if you
 -- need to re-run after an error, drop the created objects first or start a new project.
+--
+-- ** STALE as of 2026-09-07, confirmed by grep, do not trust as a complete
+-- bootstrap. ** This file predates the supabase/migrations/ folder and was
+-- updated ad hoc after that (e.g. handbook_links is here) but several later
+-- migrations were never folded back in -- this table has no `closed_at`
+-- column (0012_pair_close.sql), no `employee_label` (0015), no
+-- `suggested_1on1_*` (0016), no hr_passcode-era columns (0018), and none of
+-- tonight's 0019-0022 (the pairs_close_guard trigger, the not_provisioned
+-- signup restriction, or either partial unique index). A fresh project
+-- built from this file alone would resurrect the exact "reopening a closed
+-- pairing fails" bug found live tonight, among others. Real fix -- fully
+-- reconciling this file against every migration in order -- is a real,
+-- separate task, deliberately not attempted here to avoid guessing at a
+-- disaster-recovery script under incident-response time pressure. Until
+-- that's done: after pasting this file, also run every file in
+-- supabase/migrations/ in numeric order.
 
 create extension if not exists citext;
 

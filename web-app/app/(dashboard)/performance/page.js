@@ -537,7 +537,7 @@ export default function PerformancePage() {
       >
         <div className="field">
           <label htmlFor="acTitle">What happened</label>
-          <input id="acTitle" ref={achTitleRef} type="text" value={achTitle} onChange={(e) => setAchTitle(e.target.value)} placeholder="e.g. Led the Northwind migration to a clean cutover" />
+          <input id="acTitle" ref={achTitleRef} type="text" autoComplete="off" value={achTitle} onChange={(e) => setAchTitle(e.target.value)} placeholder="e.g. Led the Northwind migration to a clean cutover" />
         </div>
         <div className="field">
           <label htmlFor="acCat">Category</label>
@@ -601,7 +601,7 @@ export default function PerformancePage() {
       >
         <div className="field">
           <label htmlFor="frAbout">What do you want feedback on?</label>
-          <input id="frAbout" ref={frAboutRef} type="text" value={frAbout} onChange={(e) => setFrAbout(e.target.value)} placeholder="e.g. How I handled the Northwind escalation" />
+          <input id="frAbout" ref={frAboutRef} type="text" autoComplete="off" value={frAbout} onChange={(e) => setFrAbout(e.target.value)} placeholder="e.g. How I handled the Northwind escalation" />
         </div>
         <div className="field">
           <label htmlFor="frWhy">Anything that would help them answer</label>

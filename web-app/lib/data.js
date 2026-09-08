@@ -145,12 +145,37 @@ export async function createPairFromRoster(admin, employeeEmail, managerEmail, m
   // this roster row means to replace, so that case falls through to
   // inserting a new pairing instead, same as before.
   if (existingRows.length === 1) {
+    // Never let a re-upload downgrade a manager who's already known by a
+    // real email into a freshly-guessed placeholder. If this roster's Email
+    // column is blank (or typo'd) for that manager's name, emailFor() falls
+    // back to a placeholder even though the manager is already real and
+    // linked -- reassigning to it would silently overwrite every one of
+    // their real reports with a fake address, locking the real manager out
+    // of their own team. Found live 2026-09-07: a re-upload missing
+    // "Melissa Weiss"'s email reassigned all 6 of her real direct reports to
+    // melissa.weiss@placeholder.test. Refuse instead of guessing -- the row
+    // keeps its current real manager, and the thrown error lands in the
+    // upload response's `failed` list so HR sees it and can fix the sheet.
+    const currentManagerEmail = existingRows[0].manager_email;
+    const isPlaceholder = (email) => email.toLowerCase().endsWith("@placeholder.test");
+    if (!isPlaceholder(currentManagerEmail) && isPlaceholder(managerEmail)) {
+      throw new Error(`won't replace ${currentManagerEmail} (a real, already-linked manager) with a placeholder -- check the Email column for this manager's row`);
+    }
     const { error } = await admin
       .from("pairs")
       .update({ manager_email: managerEmail, manager_id: mgr?.id || null })
       .eq("id", existingRows[0].id);
-    if (error) throw error;
-    return { reassigned: true, fromManagerEmail: existingRows[0].manager_email };
+    if (error) {
+      // Mirrors the insert path's own 23505 handling below -- a reassignment
+      // can now collide with 0022's partial (employee_id, manager_id) index
+      // (e.g. this employee has a second row already linked to the same
+      // manager) or 0021's email-pair index. Surface a readable reason
+      // instead of the raw Postgres constraint string, found in review
+      // 2026-09-07.
+      if (error.code === "23505") throw new Error(`this employee already has an active pairing with ${managerEmail}`);
+      throw error;
+    }
+    return { reassigned: true, fromManagerEmail: currentManagerEmail };
   }
 
   // Only needed on the insert path -- fetched here, not up front, so the

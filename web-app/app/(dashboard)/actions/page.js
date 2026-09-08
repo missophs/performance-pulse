@@ -190,7 +190,7 @@ export default function ActionsPage() {
       >
         <div className="field">
           <label htmlFor="acText">What needs to happen</label>
-          <input id="acText" type="text" value={form.text} onChange={(e) => setForm((f) => ({ ...f, text: e.target.value }))} placeholder="e.g. Draft the rollout timeline" />
+          <input id="acText" type="text" autoComplete="off" value={form.text} onChange={(e) => setForm((f) => ({ ...f, text: e.target.value }))} placeholder="e.g. Draft the rollout timeline" />
         </div>
         <div className="row">
           <div className="field">
@@ -214,7 +214,7 @@ export default function ActionsPage() {
         </div>
         <div className="field">
           <label htmlFor="acRelated">Related to</label>
-          <input id="acRelated" type="text" value={form.related} onChange={(e) => setForm((f) => ({ ...f, related: e.target.value }))} placeholder="A goal, topic or conversation (optional)" />
+          <input id="acRelated" type="text" autoComplete="off" value={form.related} onChange={(e) => setForm((f) => ({ ...f, related: e.target.value }))} placeholder="A goal, topic or conversation (optional)" />
         </div>
         <div className="field">
           <label htmlFor="acNotes">Notes</label>

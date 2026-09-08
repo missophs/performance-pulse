@@ -40,8 +40,19 @@ export default function HistoryPage() {
   }
 
   async function reopen(id) {
-    await reopenPair(supabase, id);
-    loadClosedPairs();
+    // Neither call in this file checked for an error before tonight --
+    // migrations 0021/0022 (partial unique indexes on pairs) can now make
+    // this UPDATE fail with a real, reachable constraint violation (e.g. the
+    // same two people already have a different active pairing), which used
+    // to always succeed. Without a catch, that's an unhandled rejection:
+    // no toast, the closed-pairs list never refreshes, and it silently
+    // looks like nothing happened. Found in review 2026-09-07.
+    try {
+      await reopenPair(supabase, id);
+      loadClosedPairs();
+    } catch (err) {
+      toast("Couldn't reopen that pairing", err.message || "Unknown error");
+    }
   }
 
   // Ends the pairing itself (e.g. someone left the company) -- distinct from
@@ -52,9 +63,17 @@ export default function HistoryPage() {
     if (!isMgr) return; // manager-only -- re-checked here, the button is already hidden for employees
     if (!window.confirm(`End this pairing with ${partnerName}? It moves to Closed pairings below -- nothing is deleted, and it can be reopened anytime.`)) return;
     const note = window.prompt("Optional note for the record (why, or leave blank):") || "";
-    await closePair(supabase, pairId, note.trim() || null);
-    toast("Pairing ended", `${partnerName} is unaffected until they open the app again.`);
-    router.refresh();
+    try {
+      await closePair(supabase, pairId, note.trim() || null);
+      toast("Pairing ended", `${partnerName} is unaffected until they open the app again.`);
+      router.refresh();
+    } catch (err) {
+      // Migration 0019's guard_pairs_close trigger can now reject this (e.g.
+      // a roster reassignment changed manager_id server-side since this page
+      // loaded, so the signed-in user is no longer the manager of record) --
+      // previously this UPDATE could never fail. Found in review 2026-09-07.
+      toast("Couldn't end that pairing", err.message || "Unknown error");
+    }
   }
 
   useEffect(() => {
@@ -139,6 +158,7 @@ export default function HistoryPage() {
           <input
             id="historySearch"
             type="text"
+            autoComplete="off"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search everything in this workspace…"
