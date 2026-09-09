@@ -164,7 +164,7 @@ const OPENERS = {
   open_add_action: { title: "Add an action", build: async (admin, ctx) => addActionModal(ctx) },
   open_add_hardconvo: { title: "Hard conversation", build: async () => addHardConvoModal() },
   open_wrap_up: { title: "Wrap up", build: async (admin, ctx) => wrapUpModal((await loadHomeData(admin, ctx.pairId)).topics, ctx.pairId) },
-  open_close_pair: { title: "Final wrap up", build: async () => wrapUpConversationModal() },
+  open_close_pair: { title: "Final wrap up", build: async (admin, ctx) => wrapUpConversationModal(ctx.pairId) },
   // Button is manager-only in homeView too — this re-checks server-side in
   // case of a stale/replayed action, same defense-in-depth as every other
   // role-gated opener here.
@@ -475,10 +475,11 @@ const QUICK_ACTIONS = {
     run: async (admin, ctx, id) => {
       // id is a plain string in the interaction payload with no
       // server-side ownership check otherwise — this admin client bypasses
-      // RLS entirely, so pair_id is checked here before closing anything.
-      // See the governance note in CLAUDE.md.
-      const { data: request } = await admin.from("feedback_requests").select("pair_id").eq("id", id).maybeSingle();
-      if (!request || request.pair_id !== ctx.pairId) return;
+      // RLS entirely, so pair_id is checked here before closing anything,
+      // via the same shared verifyOwnedRow guard every other handler in
+      // this file uses. See the governance note in CLAUDE.md.
+      const request = await verifyOwnedRow(admin, "feedback_requests", "pair_id", id, ctx);
+      if (!request) return;
       await setFeedbackRequestStatus(admin, id, "closed", fromSlack(ctx));
     },
     refreshList: (data, ctx) => listFeedbackModal(data.feedback, data.feedbackRequests, ctx.role),
@@ -520,11 +521,20 @@ const SUBMISSIONS = {
   // from the shared dispatcher; this handles telling the OTHER side
   // directly, by email, since nothing about their Home tab data changes on
   // its own without a fresh open.
-  wrap_up_conversation: async (admin, ctx, v) => {
+  // Same staleness risk as wrap_up above: a multi-pair manager can switch
+  // their active pair via "switch_pair" while this modal is still open, so
+  // ctx.pairId can be a DIFFERENT pair than the one open_close_pair actually
+  // opened this for. Pin/re-resolve exactly like wrap_up does — see the
+  // governance note in CLAUDE.md and the comment on that handler.
+  wrap_up_conversation: async (admin, ctx, v, view) => {
+    const pinnedPairId = view?.private_metadata;
+    if (!pinnedPairId || !ctx.pairs.some((p) => p.id === pinnedPairId)) return;
+    const pairCtx = pinnedPairId === ctx.pairId ? ctx : await resolvePairContext(admin, ctx.email, pinnedPairId);
+    if (!pairCtx) return; // pair closed/deleted between open and submit
     const note = (fieldVal(v, "note") || "").trim();
-    const { topics, goals, actions } = await wrapUpConversation(admin, ctx.pairId, fromSlack(ctx));
-    const otherEmail = ctx.isMgr ? ctx.pair.employee_email : ctx.pair.manager_email;
-    const text = `${ctx.myName} did a final wrap up on your 1:1 conversation -- ${topics} topic(s), ${goals} goal(s), and ${actions} action(s) closed out. Your pairing is unaffected.${note ? `\n\nNote: ${note}` : ""}`;
+    const { topics, goals, actions } = await wrapUpConversation(admin, pairCtx.pairId, fromSlack(pairCtx));
+    const otherEmail = pairCtx.isMgr ? pairCtx.pair.employee_email : pairCtx.pair.manager_email;
+    const text = `${pairCtx.myName} did a final wrap up on your 1:1 conversation -- ${topics} topic(s), ${goals} goal(s), and ${actions} action(s) closed out. Your pairing is unaffected.${note ? `\n\nNote: ${note}` : ""}`;
     await dmByEmail(otherEmail, { text }).catch((e) => console.error("wrap up conversation notify:", e));
   },
   // Manager-only (also gated in OPENERS above). createPairForSlack takes
@@ -585,7 +595,11 @@ const SUBMISSIONS = {
     // Open topics list, via the topic_submit quick action below.
   },
   add_action: async (admin, ctx, v) => {
-    const text = fieldVal(v, "text");
+    // Same whitespace-only gap add_topic's own comment above already
+    // guards against: Slack's required-field check only verifies non-empty,
+    // not non-whitespace.
+    const text = (fieldVal(v, "text") || "").trim();
+    if (!text) return { error: { blockId: "text", message: "Action can't be empty." } };
     await saveAction(admin, ctx.pairId, { text, owner: fieldVal(v, "owner"), due: fieldVal(v, "due"), notes: fieldVal(v, "notes"), status: "Open" }, ctx.myName);
     await notify(admin, ctx.pairId, `${ctx.myName} added an action: ${text}`, ctx.role, ctx.otherRole, "actions", "action");
   },
@@ -594,7 +608,11 @@ const SUBMISSIONS = {
     // comment above: an already-open Goal modal patched via views.update
     // (the "Save draft" confirmation re-render) can visibly show the right
     // value while submitting empty under the base block_id.
-    const text = fieldValV2(v, "text");
+    // Same whitespace-only gap add_topic's own comment above already
+    // guards against: Slack's required-field check only verifies non-empty,
+    // not non-whitespace.
+    const text = (fieldValV2(v, "text") || "").trim();
+    if (!text) return { error: { blockId: v?.text_v2 ? "text_v2" : "text", message: "Goal can't be empty." } };
     await saveGoal(
       admin,
       ctx.pairId,

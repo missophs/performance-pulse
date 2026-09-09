@@ -834,7 +834,7 @@ export function addEmployeeModal() {
   );
 }
 
-export function wrapUpConversationModal() {
+export function wrapUpConversationModal(pairId) {
   return modal(
     "wrap_up_conversation",
     "Final wrap up",
@@ -844,6 +844,7 @@ export function wrapUpConversationModal() {
       ),
       inputBlock("note", "Anything worth noting as this closes", plainInput("val", { multiline: true, placeholder: "Optional — goes in the note to your partner." }), false),
     ],
-    "Close out conversation"
+    "Close out conversation",
+    pairId
   );
 }
