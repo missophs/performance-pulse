@@ -13,21 +13,25 @@ import { loadHomeData } from "@/lib/slack-home-data";
 export async function POST(request) {
   const rawBody = await request.text();
 
-  // Slack's one-time handshake when you first set the Request URL — must
-  // echo the challenge back verbatim, before any signature check is useful
-  // (the secret is already configured by this point, so still verify).
   let body;
   try {
     body = JSON.parse(rawBody);
   } catch {
     return Response.json({ error: "invalid json" }, { status: 400 });
   }
-  if (body.type === "url_verification") {
-    return Response.json({ challenge: body.challenge });
-  }
 
   if (!verifySlackSignature(rawBody, request.headers)) {
     return Response.json({ error: "invalid signature" }, { status: 401 });
+  }
+
+  // Slack's one-time handshake when you first set the Request URL — must
+  // echo the challenge back verbatim. The secret is already configured by
+  // this point (it's an app-level value, not tied to Event Subscriptions
+  // setup), so this still goes through the signature check above rather
+  // than short-circuiting before it: without that, this endpoint would be a
+  // public, unauthenticated "echo whatever challenge string I send" oracle.
+  if (body.type === "url_verification") {
+    return Response.json({ challenge: body.challenge });
   }
 
   const event = body.event;

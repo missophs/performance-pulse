@@ -5,7 +5,7 @@
 
 import { slackApi } from "@/lib/slack-api";
 
-function pairRoleFields(pair, email) {
+export function pairRoleFields(pair, email) {
   const isMgr = pair.manager_email?.toLowerCase() === email;
   const employeeName = pair.employee?.full_name || pair.employee_email;
   const managerName = pair.manager?.full_name || pair.manager_email;
@@ -71,6 +71,30 @@ export async function resolveSlackUser(supabaseAdmin, slackUserId) {
     pairId: pair.id,
     pair,
     pairs: pairOptions,
+    profileId: pairRoleFields(pair, email).isMgr ? pair.manager_id : pair.employee_id,
+    ...pairRoleFields(pair, email),
+  };
+}
+
+// Re-resolves role/name context for one specific pair, given its id has
+// already been verified to belong to this Slack user's own pairs list (see
+// the wrap_up handler in app/api/slack/interactivity/route.js) -- used when
+// a pinned private_metadata pair id no longer matches the caller's currently
+// *active* pair (they switched via "switch_pair" after opening the modal),
+// so the submission still applies to the right pair with the right role/name
+// fields instead of whatever's active now. Returns null if the pair no
+// longer exists (e.g. closed/deleted between open and submit).
+export async function resolvePairContext(supabaseAdmin, email, pairId) {
+  const { data: pair, error } = await supabaseAdmin
+    .from("pairs")
+    .select("*, employee:profiles!employee_id(id, full_name), manager:profiles!manager_id(id, full_name)")
+    .eq("id", pairId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!pair) return null;
+  return {
+    pairId: pair.id,
+    pair,
     profileId: pairRoleFields(pair, email).isMgr ? pair.manager_id : pair.employee_id,
     ...pairRoleFields(pair, email),
   };

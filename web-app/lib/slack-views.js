@@ -782,7 +782,14 @@ export function lastMeetingModal(meetings) {
 
 // ------------------------------------------------------------- wrap up -----
 
-export function wrapUpModal(topics) {
+// pairId is pinned into private_metadata so the submission handler can use
+// the pair this modal was actually opened for, not whatever pair happens to
+// be active if the Slack user switches pairs before submitting -- see the
+// governance note in CLAUDE.md (private_metadata is exactly as
+// replayable/tamperable as any other Slack-supplied id, but it's still the
+// only way to carry "which pair" across the open->submit gap for a
+// multi-pair user).
+export function wrapUpModal(topics, pairId) {
   const open = topics.filter(isOpenTopic);
   const checkboxOptions = open.map((t) => opt(t.text, t.id));
   return modal("wrap_up", "Wrap up your 1:1", [
@@ -799,7 +806,7 @@ export function wrapUpModal(topics) {
     inputBlock("keep", "Continue", plainInput("val", { placeholder: "One thing that works — keep doing it" }), true),
     inputBlock("next", "Next conversation", datePicker("val"), true),
     inputBlock("checkin90", "We will check in with you in 90 days — on", datePicker("val"), true),
-  ]);
+  ], "Save", pairId);
 }
 
 // -------------------------------------------------- close this pairing -----

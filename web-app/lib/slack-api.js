@@ -26,17 +26,29 @@ export async function slackApi(method, body, _isRetry = false) {
       "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
     },
     body: form,
+    // Without this, a hung connection to slack.com never resolves or
+    // rejects, so none of this function's own retry/error handling below
+    // ever runs — the call just occupies the invocation until the platform
+    // force-kills it. 10s comfortably covers a real round trip.
+    signal: AbortSignal.timeout(10000),
   });
 
   // A 429 body isn't JSON-parseable the same way — Slack sends it as plain
   // text with a Retry-After header, not the usual {ok:false, error} shape.
   // Retried once, not looped: at today's single-tiny-workspace scale a
   // second 429 in a row means something's actually wrong, not just a burst.
-  if (res.status === 429 && !_isRetry) {
-    const retryAfterSec = parseInt(res.headers.get("Retry-After"), 10);
-    const waitMs = Math.min((Number.isFinite(retryAfterSec) ? retryAfterSec : 1) * 1000, MAX_RETRY_WAIT_MS);
-    await sleep(waitMs);
-    return slackApi(method, body, true);
+  if (res.status === 429) {
+    if (!_isRetry) {
+      const retryAfterSec = parseInt(res.headers.get("Retry-After"), 10);
+      const waitMs = Math.min((Number.isFinite(retryAfterSec) ? retryAfterSec : 1) * 1000, MAX_RETRY_WAIT_MS);
+      await sleep(waitMs);
+      return slackApi(method, body, true);
+    }
+    // Still rate-limited after the one retry — bail out with the same
+    // greppable marker as any other dead-integration failure, instead of
+    // falling through to res.json() below, which would throw a raw
+    // SyntaxError on this non-JSON body.
+    throw new Error(`[SLACK_INTEGRATION_DOWN] Slack ${method} failed: rate limited (429) after one retry`);
   }
 
   const json = await res.json();

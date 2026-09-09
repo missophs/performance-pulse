@@ -10,9 +10,19 @@
 //   URL: https://<your-deployed-app>/api/slack/notify
 //   HTTP Header: x-webhook-secret: <same value as SLACK_NOTIFY_WEBHOOK_SECRET>
 
+import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import { after } from "next/server";
 import { sendSlackDigest, sendSlackPing } from "@/lib/slack-send";
+
+// Same constant-time-compare reasoning as lib/slack-verify.js's Slack
+// signature check -- a plain `!==` on a secret leaks how many leading bytes
+// matched via response timing.
+function timingSafeEqualStr(a, b) {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  return bufA.length === bufB.length && crypto.timingSafeEqual(bufA, bufB);
+}
 
 // Adding three goals in a row used to be three DMs. Notifications landing
 // close together for the same person are now collapsed into one, decided
@@ -105,7 +115,8 @@ async function loadPairContext(supabaseAdmin, pairId) {
 
 export async function POST(request) {
   const secret = request.headers.get("x-webhook-secret");
-  if (!process.env.SLACK_NOTIFY_WEBHOOK_SECRET || secret !== process.env.SLACK_NOTIFY_WEBHOOK_SECRET) {
+  const expected = process.env.SLACK_NOTIFY_WEBHOOK_SECRET;
+  if (!expected || !secret || !timingSafeEqualStr(secret, expected)) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
 

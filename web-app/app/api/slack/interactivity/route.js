@@ -8,7 +8,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { after } from "next/server";
 import { verifySlackSignature } from "@/lib/slack-verify";
-import { resolveSlackUser, setSlackPairSelection } from "@/lib/slack-user";
+import { resolveSlackUser, setSlackPairSelection, resolvePairContext } from "@/lib/slack-user";
 import { slackApi } from "@/lib/slack-api";
 import { loadHomeData } from "@/lib/slack-home-data";
 import { LD_RULES } from "@/lib/development-content";
@@ -101,8 +101,17 @@ function delayedNotify(admin, pairId, text, role, otherRole, view, kind, entityI
 // republish is scheduled with after() rather than awaited before responding.
 // Callers that already loaded home data pass it in so we don't load twice.
 async function refreshHome(admin, ctx, data) {
-  const view = homeView(ctx, data ?? (await loadHomeData(admin, ctx.pairId)));
-  await slackApi("views.publish", { user_id: ctx.slackUserId, view }).catch((e) => console.error("home publish:", e));
+  // Whole body in one try/catch, not just the slackApi call — this runs
+  // inside after() with nothing else awaiting it, so a rejection from
+  // loadHomeData (a Supabase hiccup) would otherwise be an unhandled
+  // rejection instead of the same fail-soft/console.error every other path
+  // in this file uses.
+  try {
+    const view = homeView(ctx, data ?? (await loadHomeData(admin, ctx.pairId)));
+    await slackApi("views.publish", { user_id: ctx.slackUserId, view });
+  } catch (e) {
+    console.error("home publish:", e);
+  }
 }
 
 // A successful view_submission just closes the modal — identical to what
@@ -154,7 +163,7 @@ const OPENERS = {
   open_add_topic: { title: "Add a topic", build: async (admin, ctx) => addTopicModal(ctx, normalizeDraft(TOPIC_FIELDS, await draftFor(admin, ctx, "topic"))) },
   open_add_action: { title: "Add an action", build: async (admin, ctx) => addActionModal(ctx) },
   open_add_hardconvo: { title: "Hard conversation", build: async () => addHardConvoModal() },
-  open_wrap_up: { title: "Wrap up", build: async (admin, ctx) => wrapUpModal((await loadHomeData(admin, ctx.pairId)).topics) },
+  open_wrap_up: { title: "Wrap up", build: async (admin, ctx) => wrapUpModal((await loadHomeData(admin, ctx.pairId)).topics, ctx.pairId) },
   open_close_pair: { title: "Final wrap up", build: async () => wrapUpConversationModal() },
   // Button is manager-only in homeView too — this re-checks server-side in
   // case of a stale/replayed action, same defense-in-depth as every other
@@ -740,11 +749,18 @@ const SUBMISSIONS = {
     const text = (fieldVal(v, "text") || "").trim();
     if (!text) return { error: { blockId: "text", message: "Topic can't be empty." } };
     // Runs on the admin (service-role) client, which bypasses RLS entirely —
-    // this pair_id check is the only thing stopping a tampered/replayed
-    // private_metadata id from editing a different pair's topic. See the
-    // governance note in CLAUDE.md.
-    const { data: owned } = await admin.from("topics").select("pair_id").eq("id", id).maybeSingle();
-    if (!owned || owned.pair_id !== ctx.pairId) return;
+    // this check is the only thing stopping a tampered/replayed
+    // private_metadata id from editing a topic it shouldn't. Re-checks both
+    // pair_id AND created_by_role here, independently of the same checks
+    // PUSH_ACTIONS.topic_edit already did when it pushed this modal:
+    // private_metadata is exactly as replayable/tamperable as action.value,
+    // so (matching add_feedback's same reasoning below) it needs the same
+    // re-check at the point it's actually used to write something, not just
+    // at open time. Without created_by_role here, a forged submission naming
+    // a same-pair-but-other-role topic id would silently pass the pair_id
+    // check alone. See the governance note in CLAUDE.md.
+    const owned = await verifyOwnedRow(admin, "topics", "pair_id, created_by_role", id, ctx, (row) => row.created_by_role === ctx.role);
+    if (!owned) return;
     await updateTopic(admin, id, { text, why: fieldVal(v, "why"), category: fieldVal(v, "category") }, fromSlack(ctx));
     // Pushed modals close back to the list beneath them on their own, but
     // that list (payload.view.previous_view_id) still has the pre-edit text
@@ -810,7 +826,20 @@ const SUBMISSIONS = {
       await slackApi("views.update", { view_id: view.previous_view_id, view: listActionsModal(data.actions) }).catch((e) => console.error("edit action list refresh:", e));
     }
   },
-  wrap_up: async (admin, ctx, v) => {
+  wrap_up: async (admin, ctx, v, view) => {
+    // The modal was opened for a specific pair (view.private_metadata, set
+    // by wrapUpModal) — a multi-pair Slack user (manager with 2+ reports)
+    // can switch their active pair via "switch_pair" while this modal is
+    // still open, so ctx.pairId here can be a DIFFERENT pair than the one
+    // this wrap-up is actually about. Verify the pinned id is one of THIS
+    // Slack user's own pairs (not a fresh ownership check against ctx.pairId
+    // — that's exactly the stale value being guarded against here), then use
+    // that pair's own role/name context for the whole save. See the
+    // governance note in CLAUDE.md and the comment on wrapUpModal.
+    const pinnedPairId = view?.private_metadata;
+    if (!pinnedPairId || !ctx.pairs.some((p) => p.id === pinnedPairId)) return;
+    const pairCtx = pinnedPairId === ctx.pairId ? ctx : await resolvePairContext(admin, ctx.email, pinnedPairId);
+    if (!pairCtx) return; // pair closed/deleted between open and submit
     const discussed = (fieldVal(v, "discussed") || "").trim();
     const agreed = (fieldVal(v, "agreed") || "").trim();
     if (!discussed && !agreed) return { error: { blockId: "discussed", message: "Add at least what you discussed or what you agreed on." } };
@@ -824,17 +853,17 @@ const SUBMISSIONS = {
     const rawTopicIds = fieldVal(v, "discussed_topics") || [];
     let discussedTopicIds = [];
     if (rawTopicIds.length) {
-      const { data: owned, error: ownedErr } = await admin.from("topics").select("id").eq("pair_id", ctx.pairId).in("id", rawTopicIds);
+      const { data: owned, error: ownedErr } = await admin.from("topics").select("id").eq("pair_id", pairCtx.pairId).in("id", rawTopicIds);
       if (ownedErr) throw ownedErr;
       discussedTopicIds = (owned || []).map((t) => t.id);
     }
     await saveWrapUp(
       admin,
-      ctx.pairId,
+      pairCtx.pairId,
       {
         date: fieldVal(v, "date"),
         // Same source as the website's wrap-up: the pair's scheduled 1:1 time, not a form field.
-        time: ctx.pair.next_1on1_time || null,
+        time: pairCtx.pair.next_1on1_time || null,
         discussed,
         agreed,
         revisit: fieldVal(v, "revisit"),
@@ -844,14 +873,14 @@ const SUBMISSIONS = {
         checkin90: fieldVal(v, "checkin90"),
       },
       discussedTopicIds,
-      ctx.myName
+      pairCtx.myName
     );
     const next = fieldVal(v, "next");
     if (next) {
-      await updatePair(admin, ctx.pairId, { next_1on1_date: next });
-      ctx.pair.next_1on1_date = next; // so the Home-tab refresh right after this shows the new date (same as edit_name)
+      await updatePair(admin, pairCtx.pairId, { next_1on1_date: next });
+      if (pairCtx === ctx) ctx.pair.next_1on1_date = next; // so the Home-tab refresh right after this shows the new date (same as edit_name) — only meaningful when the wrap-up's pair is still the active one
     }
-    await notify(admin, ctx.pairId, `1:1 summary saved by ${ctx.myName}`, ctx.role, ctx.otherRole, "oneOnOne", "wrap");
+    await notify(admin, pairCtx.pairId, `1:1 summary saved by ${pairCtx.myName}`, pairCtx.role, pairCtx.otherRole, "oneOnOne", "wrap");
   },
 };
 
@@ -1035,9 +1064,12 @@ async function handleInteraction(admin, slackUserId, payload) {
         return Response.json({ response_action: "errors", errors: { [result.error.blockId]: result.error.message } });
       }
       // The save already happened above; closing the modal shouldn't wait on
-      // the Home-tab republish (see refreshHome). edit_name's ctx.myName
-      // mutation lands before this runs, so the refresh still shows the new name.
+      // the Home-tab republish (see refreshHome) or the confirmation DM (see
+      // confirmSaved) -- ctx's own in-place mutations (e.g. edit_employee_label's
+      // ctx.partnerName) land before this runs, so the refresh still shows
+      // the new value.
       after(() => refreshHome(admin, ctx));
+      after(() => confirmSaved(admin, ctx));
     }
     return Response.json({}); // close the modal
   }
