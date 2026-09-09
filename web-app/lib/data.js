@@ -577,7 +577,15 @@ export async function saveWrapUp(supabase, pairId, fields, discussedTopicIds, na
   if (fileErr) throw fileErr;
 
   if (discussedTopicIds.length) {
-    const { error: delErr } = await supabase.from("topics").delete().in("id", discussedTopicIds);
+    // pair_id filter is load-bearing, not defensive style: the Slack handler
+    // calls this with the admin (service-role) client, which bypasses RLS
+    // entirely, so this is the only ownership check standing between a
+    // tampered discussed_topics payload and another pair's topics.
+    const { error: delErr } = await supabase
+      .from("topics")
+      .delete()
+      .eq("pair_id", pairId)
+      .in("id", discussedTopicIds);
     if (delErr) throw delErr;
   }
 

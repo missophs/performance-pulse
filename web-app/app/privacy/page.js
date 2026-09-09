@@ -14,7 +14,7 @@ export default function PrivacyPage() {
 
         <h2 style={{ marginTop: 20 }}>Privacy</h2>
         <p style={{ color: "var(--muted)", fontSize: 13 }}>
-          Last updated September 5, 2026. Performance Pulse is a pilot tool for
+          Last updated September 8, 2026. Performance Pulse is a pilot tool for
           one-on-one conversations between a manager and their direct report.
           This page describes what it actually does with your data — plainly,
           not as a legal document.
@@ -47,10 +47,12 @@ export default function PrivacyPage() {
 
         <h3 style={{ marginTop: 20 }}>Signing in</h3>
         <p style={{ fontSize: 13 }}>
-          If you sign in with Google or Microsoft, we only ask for your name,
-          email address, and profile picture — enough to identify you. We
-          don&apos;t access your email, files, calendar, or anything else in
-          your Google or Microsoft account.
+          You sign in with Google. We only ask for your name, email address,
+          and profile picture — enough to identify you. We don&apos;t access
+          your email, files, calendar, or anything else in your Google
+          account. Only people already added by HR (on the company roster or
+          an existing pairing) can sign in — Google accounts not already
+          provisioned are turned away at sign-in.
         </p>
 
         <h3 style={{ marginTop: 20 }}>What we don&apos;t do</h3>

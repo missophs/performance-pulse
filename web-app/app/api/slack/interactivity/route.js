@@ -814,7 +814,20 @@ const SUBMISSIONS = {
     const discussed = (fieldVal(v, "discussed") || "").trim();
     const agreed = (fieldVal(v, "agreed") || "").trim();
     if (!discussed && !agreed) return { error: { blockId: "discussed", message: "Add at least what you discussed or what you agreed on." } };
-    const discussedTopicIds = fieldVal(v, "discussed_topics") || [];
+    // discussed_topics is a Slack checkboxes value — its ids come straight
+    // from the payload with no server-side ownership check otherwise, and
+    // saveWrapUp's delete (lib/data.js) has no pair_id filter of its own
+    // (it relies on RLS, which this admin client bypasses entirely). Filter
+    // down to ids that actually belong to this pair before anything gets
+    // deleted, same pattern as every other id-from-Slack write in this file.
+    // See the governance note in CLAUDE.md.
+    const rawTopicIds = fieldVal(v, "discussed_topics") || [];
+    let discussedTopicIds = [];
+    if (rawTopicIds.length) {
+      const { data: owned, error: ownedErr } = await admin.from("topics").select("id").eq("pair_id", ctx.pairId).in("id", rawTopicIds);
+      if (ownedErr) throw ownedErr;
+      discussedTopicIds = (owned || []).map((t) => t.id);
+    }
     await saveWrapUp(
       admin,
       ctx.pairId,
