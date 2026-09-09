@@ -63,7 +63,17 @@ const button = (text, actionId, value, style) => ({
   ...(value !== undefined && value !== "" ? { value: String(value) } : {}),
   ...(style ? { style } : {}),
 });
-const openInApp = (label = "Open in app", path = "") => ({ type: "button", text: { type: "plain_text", text: label, emoji: true }, url: `${APP_URL}${path}`, action_id: "open_app" });
+// action_id must be unique across an entire published view, not just within
+// one block -- Slack rejects the whole views.publish/views.open call
+// otherwise. homeView calls this more than once, so the id is derived from
+// the label rather than hardcoded (see SEP 09 incident: a hardcoded
+// "open_app" id on every button silently broke every Slack Home tab publish).
+const openInApp = (label = "Open in app", path = "") => ({
+  type: "button",
+  text: { type: "plain_text", text: label, emoji: true },
+  url: `${APP_URL}${path}`,
+  action_id: `open_app_${label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")}`,
+});
 const datePicker = (actionId, initial) => ({ type: "datepicker", action_id: actionId, ...(initial ? { initial_date: initial } : {}) });
 const modal = (callbackId, title, blocks, submit = "Save", privateMetadata) => ({
   type: "modal",

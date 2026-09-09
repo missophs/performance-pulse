@@ -85,3 +85,28 @@ test("homeView: renders the Between you two section for both roles, with a real 
     assert.ok(rendered.includes('"open_list_messages"'), `missing View button for ${ctx.role}`);
   }
 });
+
+// SEP 09 2026 incident: openInApp() hardcoded the same action_id on every
+// button it built. Slack requires action_id to be unique across an entire
+// published view, not just within one block -- so views.publish silently
+// rejected the whole Home tab (invalid_arguments) every time homeView used
+// openInApp more than once, and the tab just kept showing stale content.
+// Caught live, not by this suite -- pinning it so it can't come back unseen.
+test("homeView: every action_id in the published view is unique", () => {
+  const baseCtx = {
+    pairs: [{ id: "p1", partnerName: "Partner" }],
+    pairId: "p1",
+    pair: { next_1on1_date: null, next_1on1_time: null },
+    myName: "Me",
+    partnerName: "Partner",
+  };
+  const baseData = { topics: [], actions: [], goals: [], devPlans: [], achievements: [], feedback: [], feedbackRequests: [], documents: [], messages: [] };
+
+  for (const isMgr of [true, false]) {
+    const ctx = { ...baseCtx, isMgr, role: isMgr ? "manager" : "employee", otherRole: isMgr ? "employee" : "manager" };
+    const view = homeView(ctx, baseData);
+    const ids = JSON.stringify(view.blocks).match(/"action_id":"([^"]+)"/g).map((m) => m.slice(13, -1));
+    const dupes = ids.filter((id, i) => ids.indexOf(id) !== i);
+    assert.deepEqual([...new Set(dupes)], [], `duplicate action_id(s) for ${ctx.role} -- Slack rejects the whole view`);
+  }
+});
