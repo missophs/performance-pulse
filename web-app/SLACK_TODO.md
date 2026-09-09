@@ -1,5 +1,206 @@
 # Slack integration — status and what's left
 
+## Session closeout (2026-09-08/09): real Slack DM delivery confirmed working end-to-end for the first time — found and fixed a live Postgres RLS incident that had been silently blocking it, plus 7 other real bugs from a full Slack-layer audit and code review
+
+**Bottom line: real Slack notification delivery works now, proven by watching
+the actual chain complete (`users.lookupByEmail` → `conversations.open` →
+`chat.postMessage` in Vercel's function trace), not assumed.** Everything
+below is committed and pushed to `performance-pulse/main`. Deploy: `vercel
+--prod` run by Melissa mid-session, confirmed live by reading the deployed
+source bundle directly (not assumed) — deployment `6FAKXs7Qx` contains every
+code fix listed here.
+
+### What was broken, found and fixed this session
+
+**1. Privacy page drift.** `app/privacy/page.js` still claimed "Google or
+Microsoft" sign-in (only Google exists) and didn't disclose the new
+provisioned-accounts-only restriction. Fixed, matches `CLAUDE.md`'s
+privacy-accuracy rule. Verified live via `get_page_text` post-deploy.
+
+**2. `wrap_up` IDOR gap.** `saveWrapUp`'s topic-delete query
+(`lib/data.js`) had no `pair_id` filter of its own — it relied entirely on
+RLS, which the Slack admin client bypasses. A Slack-submitted
+`discussed_topics` id list went straight into that delete unchecked. Fixed
+at both the call site (`app/api/slack/interactivity/route.js`'s `wrap_up`
+handler now filters incoming ids to ones actually owned by `ctx.pairId`
+before use) and the root (`saveWrapUp` itself now scopes its delete by
+`pair_id`, so the website's own caller is covered too). A `/code-review
+medium` pass on this fix caught an unchecked query error that would have
+silently dropped topic ids on a transient failure — fixed same pass.
+
+**3. Six more real bugs from a full Slack-layer audit** (a background agent
+reviewed everything except the pair_id-ownership work above — OAuth,
+signature verification, rate limits/retries, notify-route batching):
+   - `app/api/slack/events/route.js` answered Slack's `url_verification`
+     handshake *before* verifying its signature — an unauthenticated echo
+     oracle for any POST shaped like a challenge request, despite a comment
+     claiming it was already verified. Fixed: signature check now runs
+     first.
+   - `lib/slack-api.js`: a second consecutive 429 from Slack fell through
+     to `res.json()` on a body that's actually plain text, throwing a raw
+     `SyntaxError` instead of the clean `[SLACK_INTEGRATION_DOWN]` error
+     every other failure path produces. Fixed with a clean short-circuit.
+   - `lib/slack-api.js`: no timeout on the `fetch` to Slack's API — a hung
+     connection would occupy the invocation until platform-forced kill.
+     Added a 10s `AbortSignal.timeout`.
+   - `app/api/slack/notify/route.js`: the webhook secret was compared with
+     plain `!==` instead of constant-time, inconsistent with
+     `lib/slack-verify.js`'s own pattern. Fixed using the same
+     `crypto.timingSafeEqual` approach.
+   - `app/api/slack/interactivity/route.js`: `refreshHome`, run via
+     `after()` with nothing else awaiting it, could produce an unhandled
+     rejection if `loadHomeData` failed (9 parallel Supabase queries) —
+     only the `slackApi` call was wrapped in `.catch`. Wrapped the whole
+     function body.
+   - `app/api/slack/interactivity/route.js`: `confirmSaved` (the "✅
+     Saved" DM) was fully implemented and documented as firing after every
+     successful submission, but was never actually called anywhere — dead
+     code. Wired into the `view_submission` success path.
+   - `app/api/slack/interactivity/route.js`: `SUBMISSIONS.edit_topic`
+     re-checked `pair_id` at point of use but dropped the
+     `created_by_role` check that `PUSH_ACTIONS.topic_edit` enforces at
+     open time — inconsistent with this file's own "re-check every guard
+     at point of use" rule. Fixed to match.
+   - Confirmed by grep, not invented: there is **no Slack OAuth install
+     flow** anywhere in this repo — only a static `SLACK_BOT_TOKEN`. Noted
+     plainly, not a bug, just a real gap if a Slack Marketplace listing is
+     ever pursued (see the pending-custom-questions memory).
+
+**4. `wrap_up` cross-pair pair-pinning bug** — found by a `/code-review
+high` pass on this session's own diff, independent of the audit above. The
+"Wrap up" modal never pinned which pair it was opened for into
+`private_metadata`; a manager with 2+ direct reports who switches their
+active pair in Slack (`switch_pair`) before submitting would have their
+1:1 notes saved against whichever pair is *now* active, not the one the
+modal was actually showing. Fixed: `wrapUpModal` now takes and pins
+`pairId`; the submission handler verifies the pinned id is one of the
+Slack user's own pairs (`ctx.pairs`), and — new — `resolvePairContext()`
+in `lib/slack-user.js` re-resolves that specific pair's own role/name
+context when it differs from the currently-active one, so the save always
+uses the right pair's data even if it's not the one on screen anymore.
+
+All four items above: **committed and pushed as `fda48a5`.**
+
+**5. The missing `supabase_functions` schema (a platform bootstrap gap, not
+caused by any migration in this repo)** was blocking Database Webhook
+creation entirely (`ERROR: 3F000: schema "supabase_functions" does not
+exist`). Recreated via `supabase/migrations/0024_restore_supabase_functions_schema.sql`
+(schema, `hooks`/`migrations` tables, the standard `http_request()`
+trigger function, grants) — applied live via the Supabase SQL editor in
+pieces (Claude cannot execute write SQL directly; every DDL statement this
+session required Melissa to paste and click Run herself). Verified applied
+via a read-only check (`hooks_table_exists = true`,
+`http_request_fn_exists = true`), not just a "Success" message.
+
+**6. Database Webhook created**: name `slack_notify`, table
+`public.notifications`, event Insert, POST to
+`https://performance-pulse-lyart.vercel.app/api/slack/notify`, header
+`x-webhook-secret` set to the generated secret (also set as Vercel env var
+`SLACK_NOTIFY_WEBHOOK_SECRET` — confirmed present in Vercel's dashboard,
+never printed in chat). Created successfully in Supabase's UI.
+
+**7. Real end-to-end test #1 FAILED** — added a real goal through the live
+website (a self-test pair: Melissa as manager over her own second Gmail,
+labeled "Monte Montoya"), watched the actual network request:
+`POST .../rest/v1/notifications` → **403**. Root-caused with live evidence
+at every step, not guessed — ruled out, in order, with a live check for
+each: JWT/auth.uid() mismatch (decoded the actual session JWT from
+cookies, confirmed it matched `pairs.manager_id` exactly), missing table
+grants (compared `information_schema.role_table_grants` against the
+`goals` table, which worked — identical), missing `net` schema/function
+grants (`authenticated` had both). The actual cause, found by reading
+Postgres's own logs directly: `supabase_functions.hooks` had **RLS enabled
+with zero policies** — auto-appended by the Supabase SQL Editor when
+migration 0024 was run (`-- Added by Supabase: enable Row Level Security
+on newly created tables`, visible in the log's own recorded statement),
+never written by hand. `http_request()`'s trigger body inserts into
+`hooks` as part of every `notifications` insert, running as its invoker's
+role (not `SECURITY DEFINER`) — so a real website user's `authenticated`-role
+write got rejected by RLS on that second table and the *whole*
+`notifications` insert rolled back. Every Slack-bot code path never hit
+this because every Slack handler uses the service-role admin client, which
+bypasses RLS unconditionally — this bug was invisible to every prior test
+this project, and probably any prior one, ever ran.
+
+Also found in the same investigation, unrelated to the bug above: a
+**second, leftover AFTER INSERT trigger** on `notifications`
+(`notifications_slack_notify` → `notify_slack_on_notification()`) from an
+earlier abandoned manual attempt at this same webhook, pointing at a
+stale, different secret. Dead code, not the cause of the 403, but
+confusing duplicate machinery hitting the same endpoint.
+
+**8. Fixed and re-verified.** Live emergency fix (RLS disabled on `hooks`,
+duplicate trigger + function dropped) applied via the SQL editor. Re-ran
+the exact same real "add a goal" test: `notifications` insert succeeded,
+Vercel's logs show a real `POST /api/slack/notify` → **200** fired by
+`pg_net`, and that invocation's own trace shows the complete real Slack
+API chain (`users.lookupByEmail`, `conversations.open`,
+`chat.postMessage`) finishing successfully. **This is the first time this
+session — or maybe ever — that a real website action has been confirmed
+to produce a real Slack DM, watched end to end, not assumed.**
+
+Both fixes tracked (not just live-patched) as
+`supabase/migrations/0025_harden_supabase_functions_hooks.sql`, plus two
+defense-in-depth hardenings a follow-up read-only audit agent recommended
+after checking every other migration for the same pattern (none found):
+`http_request()` marked `SECURITY DEFINER` so its own insert into `hooks`
+always runs as the function owner regardless of who fired the outer
+insert (survives RLS ever being flipped back on by the same Studio
+auto-append behavior), and the leftover `grant all` on `hooks`/`migrations`
+to `anon`/`authenticated` narrowed to just `insert` on `hooks` (nothing
+else was ever used). **Committed as `4dfe316`.**
+
+**9. Regression guard added** — `test/migration-0025-hardening.test.mjs`.
+This bug lives entirely in live Postgres config, not app code, so it can't
+be reproduced against this suite's mocked Supabase clients; instead the
+test pins migration 0025's own text (RLS disabled on `hooks`,
+`http_request()` marked `SECURITY DEFINER`, no re-enable anywhere) so a
+future edit to that file can't silently drop either safeguard. Verified
+red before green: manually stripped `security definer` from a copy,
+confirmed the test fails with a real assertion diff, restored the real
+file (byte-identical per `git diff`), confirmed all 21 tests pass again.
+**Committed as `ffd8e5f`.**
+
+### Found and documented, not fixed (not blocking, low priority)
+
+**This Vercel project is Git-connected to the wrong repository.**
+Discovered while investigating why `git push` never auto-deploys (a fact
+already known from the previous session): Vercel's "Connected Git
+Repository" for this project is `missophs/employee---manager-chat` — a
+separate, genuinely different repo (an early prototype, last real commit 3
+weeks ago, `slack-app/` + static HTML files, not this Next.js app) — not
+`missophs/performance-pulse`, the repo every commit this session actually
+went to. This is the real, complete explanation for why pushing to GitHub
+has never deployed anything here, beyond "no webhook wired up." It doesn't
+block anything today because `vercel --prod` deploys straight from local
+files and ignores this broken Git link entirely — but it means "Create
+Deployment from a GitHub branch" in Vercel's dashboard (a button that
+exists and looks like it should work) would silently deploy the *wrong*
+project's code if anyone ever clicked it. Worth reconnecting to the
+correct repo when there's time; not urgent.
+
+### Left over from tonight, harmless
+
+**3 diagnostic test goals** still sit on the "Monte Montoya" self-test
+pair (Melissa's own second Gmail account, used all session specifically
+because it's not a real employee): "DIAGNOSTIC TEST goal -- end-to-end
+Slack check, will delete", "...goal #2 -- network capture...", "...goal #3
+-- post-fix verification...". Attempted cleanup via the UI's Remove button
+three times — blocked every time by a native browser `confirm()` dialog
+that browser-automation tools can't see or drive. Not real data, not a
+real employee, clearly labeled — safe to delete by hand whenever
+convenient (Goals tab → Monte Montoya → Remove on each).
+
+### Known limitation, not a bug (carried over, unchanged this session)
+
+The 9 employees still resolving to `@placeholder.test` emails (Ann
+Steiner, Devon Park, Sasha Reyes, Kiran Bhatt, Lena Ford, Marcus Doyle,
+Priya Nair, Theo Brandt, Wren Castillo) genuinely have no real email
+anywhere in any roster upload — they can't sign in or receive Slack DMs
+until Melissa supplies real addresses. Not something code can fix.
+
+---
+
 ## Session closeout (2026-09-07/08): a real production incident (roster re-upload silently locked Melissa out of her own team), root-caused and fixed in code (not just patched live) with a regression test that reproduces it, independent code review run and every real finding fixed, browser-autofill garbage swept from every form in the app, all test-data cleanup confirmed done — web-app only, Slack app untouched this session, everything committed AND pushed to GitHub
 
 **Deploy: confirmed live via `vercel --prod`, three times this session** —
