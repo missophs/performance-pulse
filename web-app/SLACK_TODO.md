@@ -161,23 +161,23 @@ confirmed the test fails with a real assertion diff, restored the real
 file (byte-identical per `git diff`), confirmed all 21 tests pass again.
 **Committed as `ffd8e5f`.**
 
-### Found and documented, not fixed (not blocking, low priority)
+### Fixed (2026-09-09, later same day): Vercel Git connection + missing Root Directory
 
-**This Vercel project is Git-connected to the wrong repository.**
-Discovered while investigating why `git push` never auto-deploys (a fact
-already known from the previous session): Vercel's "Connected Git
-Repository" for this project is `missophs/employee---manager-chat` — a
-separate, genuinely different repo (an early prototype, last real commit 3
-weeks ago, `slack-app/` + static HTML files, not this Next.js app) — not
-`missophs/performance-pulse`, the repo every commit this session actually
-went to. This is the real, complete explanation for why pushing to GitHub
-has never deployed anything here, beyond "no webhook wired up." It doesn't
-block anything today because `vercel --prod` deploys straight from local
-files and ignores this broken Git link entirely — but it means "Create
-Deployment from a GitHub branch" in Vercel's dashboard (a button that
-exists and looks like it should work) would silently deploy the *wrong*
-project's code if anyone ever clicked it. Worth reconnecting to the
-correct repo when there's time; not urgent.
+**Was:** Git-connected to the wrong repo (`missophs/employee---manager-chat`,
+an old prototype) instead of `missophs/performance-pulse`, so `git push`
+never deployed anything and no webhook existed. **Now:** reconnected to
+`missophs/performance-pulse` via the Vercel dashboard (Melissa logged in,
+Claude drove the UI). Deploying from the newly-connected repo immediately
+surfaced a second, previously-invisible bug: the project's **Root
+Directory** build setting was empty, so a Git-triggered build looked for
+`app/`/`pages` at the repo root and failed (`Couldn't find any pages or
+app directory`) — invisible until now because every prior deploy ran
+`vercel --prod` from inside `web-app/`, which sidesteps this setting
+entirely. Set Root Directory to `web-app`, redeployed, confirmed `Ready`
+and live at `performance-pulse-lyart.vercel.app` with commit `4212338`.
+**`git push` to `main` now actually deploys to production** — the
+long-standing "pushing doesn't deploy" limitation this file has repeated
+in multiple sessions no longer applies going forward.
 
 ### Left over from tonight, harmless
 
