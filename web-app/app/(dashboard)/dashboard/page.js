@@ -33,8 +33,7 @@ import {
 import { useRosterUpload } from "@/lib/useRosterUpload";
 import { isOpenTopic, isActiveGoal, isOpenAction, isActiveDev, isOverdue, fmtDate, fmtTime, daysBetween, today, ago } from "@/lib/format";
 import Badge from "@/components/ui/Badge";
-
-const MSG_KINDS = ["Question", "Concern", "Heads-up", "Idea", "Other"];
+import { MSG_KINDS } from "@/lib/one-on-one-content";
 
 export default function DashboardPage() {
   const { pairId, role, isMgr, myName, partnerName, supabase, isHr } = usePulse();

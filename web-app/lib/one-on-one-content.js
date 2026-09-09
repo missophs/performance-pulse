@@ -3,6 +3,11 @@
 // "coaching" nudges (no model, no backend — just keyword matching, and only
 // when the pair has assist_enabled on).
 
+// Shared with lib/slack-views.js's addMessageModal, same reasoning as
+// TOPIC_CATEGORIES below -- one list, not two independently-maintained
+// copies of the same five options.
+export const MSG_KINDS = ["Question", "Concern", "Heads-up", "Idea", "Other"];
+
 export const TOPIC_CATEGORIES = [
   "Wins",
   "Priorities",

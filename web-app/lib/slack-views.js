@@ -11,7 +11,7 @@
 // export view/message history, so the real content never transits Slack.
 
 import { isOpenTopic, ago } from "@/lib/format";
-import { TOPIC_CATEGORIES, SUGGESTIONS } from "@/lib/one-on-one-content";
+import { TOPIC_CATEGORIES, SUGGESTIONS, MSG_KINDS } from "@/lib/one-on-one-content";
 import { GOAL_SUGGESTIONS, SMART_GOAL_HELP, EMPLOYEE_GOAL_PROMPT } from "@/lib/goals-content";
 import { LD_RULES } from "@/lib/development-content";
 import { fieldBlockId } from "@/lib/slack-form-fields";
@@ -193,6 +193,15 @@ export function homeView(ctx, d) {
       button("Ask for feedback", "open_add_feedback_request"),
       button("View feedback in the app", "open_list_feedback"),
     ]),
+    // Two-way, both roles, no notify() -- matches the website's "Between you
+    // two" card exactly (sendMessage in app/(dashboard)/dashboard/page.js
+    // has no notify() call either): deliberately quiet, seen next time
+    // either side opens the app/tab, not pushed. Message text itself is
+    // never echoed here (see the file header comment) -- View messages
+    // shows kind/sender/when only, with a link to read the real text.
+    section(`*Between you two* — ${d.messages.length} sent`),
+    context("No meeting needed — send it when it's on your mind. Quiet by design: no Slack ping, just seen next time they open the app."),
+    actions([button("Send a message", "open_add_message"), button("View messages", "open_list_messages")]),
     // Both buttons just open the app -- no in-Slack list or upload flow at
     // all (Melissa's call). Uploading needs a real file, which only works on
     // the website; viewing pointed there too rather than maintaining two
@@ -741,6 +750,44 @@ export function listFeedbackModal(feedback, requests, viewerRole) {
     actions([openInApp(viewerRole === "employee" ? "Respond in the app" : "View full feedback in the app", "/performance")]),
   ];
   return modal("view_feedback", "Feedback", blocks, "Close");
+}
+
+// ------------------------------------------------------ between you two ---
+
+// Mirrors the website's "Between you two" card (app/(dashboard)/dashboard/
+// page.js) -- both roles, no draft/prefill machinery since it's one field
+// plus a kind picker, not a multi-field form like topics/goals.
+export function addMessageModal() {
+  return modal(
+    "add_message",
+    "Send a message",
+    [
+      section("No meeting needed — sent the moment you submit. Quiet by design: no Slack ping, they'll see it next time they open the app."),
+      inputBlock("kind", "Kind", staticSelect("val", MSG_KINDS, MSG_KINDS[0])),
+      inputBlock("text", "What's on your mind?", plainInput("val", { multiline: true })),
+    ],
+    "Send"
+  );
+}
+
+// Message text is deliberately never echoed into Slack, same rule as
+// feedback above (see the file header comment) -- this shows who sent what
+// kind and when, with a real link to read the actual text in the app.
+export function listMessagesModal(messages) {
+  const byKind = {};
+  messages.forEach((m) => (byKind[m.kind] = (byKind[m.kind] || 0) + 1));
+  const summary = Object.entries(byKind)
+    .map(([k, n]) => `${n} ${k}`)
+    .join(" · ");
+  const recent = messages.slice().reverse().slice(0, 6);
+  const blocks = messages.length
+    ? [
+        section(`*${messages.length} message${messages.length === 1 ? "" : "s"}*\n${summary}`),
+        { type: "divider" },
+        ...recent.map((m) => context(`*${m.kind}* · ${m.created_by_name} · ${ago(m.created_at)}`)),
+      ]
+    : [section("No messages yet.")];
+  return modal("list_messages", "Between you two", [...blocks, actions([openInApp("Read in the app", "/dashboard")])], "Close");
 }
 
 // -------------------------------------------------------------- handbook ---

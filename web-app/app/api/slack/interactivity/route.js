@@ -44,6 +44,8 @@ import {
   listHandbookLinksModal,
   listMySuggestionsModal,
   addSuggestionModal,
+  addMessageModal,
+  listMessagesModal,
   loadingModal,
   noticeModal,
 } from "@/lib/slack-views";
@@ -76,6 +78,7 @@ import {
   listCustomSuggestions,
   addCustomSuggestion,
   deleteCustomSuggestion,
+  addMessage,
   updatePair,
   getFormDraft,
   saveFormDraft,
@@ -249,6 +252,12 @@ const OPENERS = {
   open_add_suggestion: {
     title: "Write a private note",
     build: async (admin, ctx) => (ctx.isMgr ? addSuggestionModal(ctx.role) : noticeModal("Write a private note", "This is manager-only.")),
+  },
+  // Two-way, no isMgr gate -- see the homeView comment on this section.
+  open_add_message: { title: "Send a message", build: async () => addMessageModal() },
+  open_list_messages: {
+    title: "Between you two",
+    build: async (admin, ctx) => listMessagesModal((await loadHomeData(admin, ctx.pairId)).messages),
   },
 };
 
@@ -683,6 +692,16 @@ const SUBMISSIONS = {
     const text = fieldValV2(v, "text");
     const category = fieldValV2(v, "category");
     await addCustomSuggestion(admin, ctx.pairId, ctx.role, text, category);
+  },
+  // No isMgr gate (two-way) and no notify() call -- matches
+  // sendMessage/addMessage on the website exactly (see the homeView
+  // comment): deliberately quiet, not something the partner is pinged
+  // about.
+  add_message: async (admin, ctx, v) => {
+    const kind = fieldVal(v, "kind");
+    const text = (fieldVal(v, "text") || "").trim();
+    if (!text) return { error: { blockId: "text", message: "Message can't be empty." } };
+    await addMessage(admin, ctx.pairId, kind, text, ctx.role, ctx.myName);
   },
   add_achievement: async (admin, ctx, v) => {
     // fieldValV2 — see add_goal above.

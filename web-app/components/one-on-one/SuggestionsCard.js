@@ -130,9 +130,16 @@ export default function SuggestionsCard({ role, isMgr, partnerName, customSugges
         )}
       </div>
       <div className="btn-row" style={{ marginTop: 14 }}>
-        <button className="btn secondary sm" onClick={openOwnModal}>
-          Write my own suggestion
-        </button>
+        {/* Manager-only, matching Slack's "Private notes" (lib/slack-views.js
+            homeView) -- a per-role private list read as if it were a
+            suggestion TO the other person, which it never was. Existing
+            employee-saved suggestions above are still visible/removable,
+            just not addable to going forward. */}
+        {isMgr && (
+          <button className="btn secondary sm" onClick={openOwnModal}>
+            Write my own suggestion
+          </button>
+        )}
         <button className="btn ghost sm" onClick={openHardConvo}>
           Help me prepare a hard conversation
         </button>
