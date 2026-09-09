@@ -1,5 +1,116 @@
 # Slack integration — status and what's left
 
+## Session closeout (2026-09-09, later same day): both approved features tested live and working, a real Slack Home-tab bug found and fixed, website↔Slack sync proven with a live test in both directions
+
+**Bottom line: everything shipped today was tested live, not just read as
+code, and both new features work. One real bug was found along the way
+(unrelated to today's two features) and is fixed, tested, and deployed.**
+Everything below is committed to `main` and pushed to
+`performance-pulse/main` — commit `ca69e2f` is the tip, `git status` is
+clean, nothing left uncommitted. Deploy: pushing to `main` auto-deploys now
+(fixed earlier today, see the git-push-deploys section below) — the fix in
+this entry is confirmed live in production, not just committed.
+
+### The two approved features (from earlier today) — now live-verified
+
+1. **Manager-only "Write my own suggestion" on the website**, to match
+   Slack's existing manager-only equivalent. Verified live in the browser
+   as the actual manager account (button visible, modal opens and works)
+   and, separately, live as the actual employee account via the pair
+   switcher (button correctly absent). Not just code-inspected — both
+   roles were driven for real in the browser.
+2. **Slack two-way "Between you two" messages**, porting the website's
+   existing feature into Slack's Home tab. Sent a real message from Slack,
+   confirmed it appears in "View messages" with kind/sender/time only —
+   never the message text — matching the file's own privacy rule. Also
+   sent one from the **website** and confirmed it shows up in **Slack**
+   seconds later (see the sync test below). Both directions work.
+
+### Real bug found and fixed today: Slack's Home tab was silently failing to update
+
+Not part of either approved feature — a pre-existing bug in code that
+already existed, surfaced by actually testing the new Slack feature
+instead of trusting the code.
+
+- **What was broken:** the whole Slack Home tab (not just the new "Between
+  you two" section) was failing to refresh. Confirmed via Vercel's
+  function logs: `slack home publish failed: ... invalid_arguments
+  (action_id "open_app" already exists)`.
+- **Root cause:** `openInApp()` in `lib/slack-views.js`, a shared helper
+  used to build "Open in the app" buttons, hardcoded the exact same
+  internal id (`"open_app"`) on every button it built. Slack requires
+  every button id to be unique across an entire Home tab, not just within
+  one section — and the Home tab already used this helper twice just for
+  the Documents section. Any time it got used more than once, Slack
+  silently rejected the whole update and the Home tab just kept showing
+  stale content, with no error visible to anyone using Slack.
+- **Fixed at the source**, not per button: the id is now built from each
+  button's own label instead of being hardcoded, so it can never collide.
+- **A regression test was added** that checks every button id in a
+  published Home tab is unique — confirmed it fails against the old code,
+  passes on the fix (red-before-green, not just written and trusted).
+- **Verified fixed, three ways:** (1) full test suite green, 27/27; (2)
+  sent one real signed test request straight to the Slack webhook after
+  deploying — clean response, no error, versus the broken run's logged
+  error; (3) in actual Slack, reloaded the Home tab and watched "Between
+  you two" and every other section render correctly.
+
+### Sync between the website and Slack — proven live, not just described
+
+Melissa asked directly whether the website and Slack are actually in
+sync and where data lives. Real answer, tested both directions in the
+same pairing (the "Stella Weiss" pair) in the same session:
+
+- Sent a message from the **website** → opened the same conversation in
+  **Slack** → message was there within seconds, correct sender and time.
+- Sent a message from **Slack** → it appeared on the **website**'s
+  dashboard "Between you two" card.
+- **Why this works:** the website and Slack are not two systems syncing —
+  they're both reading and writing the exact same Supabase Postgres
+  database directly, every time, with no copy and no delay. There is no
+  separate "Slack version" of the data to fall out of sync. Everything
+  lives in that one cloud database (`pndaiendsthsyolaefnt.supabase.co`),
+  not on Melissa's computer — logging in from any device reaches the same
+  live data, because it was never stored on a device to begin with.
+- Both test messages were deleted from `messages` afterward — no leftover
+  test data on either surface.
+
+### Lint: 27 pre-existing errors found, assessed, none fixed today
+
+`npm run lint` turned up 27 errors — more than the 2 previously known
+about, but **all pre-existing, none in anything touched today** (confirmed
+via `git stash` comparison, same method used earlier this project to rule
+this out). Had each distinct pattern actually read, not just categorized
+by rule name:
+
+- **18 of them** (page data-loading effects, e.g. `dashboard/page.js`) are
+  the React linter being strict about a pattern that's actually safe here
+  — every page shows a loading/empty state before the effect runs, so
+  nothing wrong ever flashes on screen. No action needed.
+- **2 of them** (`ActionModal.js` and one spot in `development/page.js`,
+  both popup-form-fill effects) have a real, minor edge: a popup's fields
+  could theoretically flash empty for a fraction of a second before
+  filling in, worse on a slow connection. Low priority, not urgent.
+- **7 of them** are unescaped apostrophes in plain sentences — 100%
+  cosmetic, never visible to anyone using the app.
+
+None of this is a correctness or data-safety issue. Left on the backlog.
+
+### What's still genuinely open (unchanged from before today, not touched)
+
+- `supabase/schema.sql` reconciliation against the ~10 migrations that
+  have landed since it was last regenerated.
+- The placeholder-email swap-in flow (replacing one employee's placeholder
+  email with their real one without a full roster re-upload) — the
+  underlying need for this was misdiagnosed once this session (see the
+  earlier correction in this same conversation) before being resolved a
+  different way for testing purposes; the actual feature is still not
+  built.
+- Custom questions (admin-configurable review questions) — not scoped,
+  needs a short conversation with Melissa first.
+- Slack Marketplace listing — would need a real OAuth install flow, which
+  does not exist yet (confirmed by grep, noted in an earlier session too).
+
 ## Session closeout (2026-09-08/09): real Slack DM delivery confirmed working end-to-end for the first time — found and fixed a live Postgres RLS incident that had been silently blocking it, plus 7 other real bugs from a full Slack-layer audit and code review
 
 **Bottom line: real Slack notification delivery works now, proven by watching
