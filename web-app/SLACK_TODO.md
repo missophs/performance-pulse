@@ -26,6 +26,19 @@ Until those two secrets are added, the workflow's existing database dump
 still runs fine on its own schedule — only the new storage step will
 fail (or simply not run) until then. Commit `605f063`, pushed to `main`.
 
+**Addendum — code review found two real bugs in this step, fixed in
+`3e4afbd`:** (1) the list request's HTTP status was never checked, so
+the *actual* behavior without the two secrets above (or on any other API
+failure) isn't a visible failure — the step reports success while
+backing up zero files, silently, correcting the "will fail" framing just
+above. Now checked, with a `::warning::` annotation on a bad status. (2)
+Object names that include a subfolder — true for every file in the
+`documents` bucket per this file's own `<pair_id>/<uuid>-<name>`
+convention above — failed to download, since `curl -o` doesn't create
+parent directories; `dest`'s per-object parent dir is now created before
+each download. Both verified locally (dry-run of each branch, `bash -n`,
+a full YAML parse) before pushing, not just read as code.
+
 ## Removed 2026-09-10: `slack-app/` (the old, never-installed prototype) deleted
 
 Confirmed dead before deletion: its claimed live OAuth endpoint
