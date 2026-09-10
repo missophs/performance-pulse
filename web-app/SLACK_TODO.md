@@ -1,5 +1,18 @@
 # Slack integration — status and what's left
 
+## Removed 2026-09-10: `slack-app/` (the old, never-installed prototype) deleted
+
+Confirmed dead before deletion: its claimed live OAuth endpoint
+(`performance-pulse-lyart.vercel.app/slack/events`) returned the same HTTP
+307 as the bare domain root — not a real route — while `web-app/`'s actual
+route (`.../api/slack/events`) correctly returned 405 to the same kind of
+request, proving it's the one that's really live. Matches the standing note
+at "Where things stand (2026-08-29)" further down: "`slack-app/` in the repo
+root is an old, never-installed prototype — 'the app' always means
+`web-app/`." Nothing else in the repo referenced it (no root `package.json`
+workspace entry, no README mention, no CI step) — full history is still in
+git if it's ever needed again.
+
 ## Session closeout (2026-09-10): daily DB backup fixed (missing secret), schedule changed to weekly, and a demo reference brief built restating the Slack↔web sync claim
 
 **Bottom line:** the GitHub Actions daily database backup had been failing every run since it
