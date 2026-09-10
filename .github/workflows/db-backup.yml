@@ -19,10 +19,17 @@ name: Weekly database backup
 #
 # Setup required (one-time, in the GitHub repo's own settings, not
 # here): Settings -> Secrets and variables -> Actions -> New repository
-# secret, named SUPABASE_DB_URL, value from the Supabase dashboard
-# (Project Settings -> Database -> Connection string -> URI, with the
-# password filled in). Never paste that value into a chat, a commit, or
-# anywhere outside that one GitHub secret field.
+# secret, for each of:
+#   SUPABASE_DB_URL             Project Settings -> Database -> Connection
+#                                string -> URI (Session pooler, not Direct
+#                                connection -- runners are IPv4-only).
+#   SUPABASE_SERVICE_ROLE_KEY   Project Settings -> API -> service_role key.
+#   SUPABASE_URL                Project Settings -> API -> Project URL.
+#     (this one isn't actually secret -- it's the same public URL the app
+#     itself ships to the browser -- but GitHub secrets are the easiest
+#     place that's already wired up to reach this workflow.)
+# Never paste any of these into a chat, a commit, or anywhere outside
+# their own GitHub secret field.
 
 on:
   schedule:
@@ -36,6 +43,8 @@ jobs:
       contents: write
     env:
       supabase_db_url: ${{ secrets.SUPABASE_DB_URL }}
+      supabase_url: ${{ secrets.SUPABASE_URL }}
+      supabase_service_role_key: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: supabase/setup-cli@v1
@@ -52,6 +61,27 @@ jobs:
         run: supabase db dump --db-url "$supabase_db_url" -f "$BACKUP_DIR/schema.sql"
       - name: Backup data
         run: supabase db dump --db-url "$supabase_db_url" -f "$BACKUP_DIR/data.sql" --data-only --use-copy
+      # db dump only covers the Postgres database -- it never touches
+      # Supabase Storage, so uploaded files (documents, the handbook PDF)
+      # were silently unprotected until this step. One page of results per
+      # bucket (up to 1000 files) is plenty for this pilot's scale.
+      - name: Backup storage buckets (documents, handbook)
+        run: |
+          for bucket in documents handbook; do
+            dest="$BACKUP_DIR/storage/$bucket"
+            mkdir -p "$dest"
+            names=$(curl -s -X POST "$supabase_url/storage/v1/object/list/$bucket" \
+              -H "apikey: $supabase_service_role_key" \
+              -H "Authorization: Bearer $supabase_service_role_key" \
+              -H "Content-Type: application/json" \
+              -d '{"limit": 1000}' | jq -r '.[]?.name // empty')
+            for name in $names; do
+              curl -sf "$supabase_url/storage/v1/object/$bucket/$name" \
+                -H "apikey: $supabase_service_role_key" \
+                -H "Authorization: Bearer $supabase_service_role_key" \
+                -o "$dest/$name" || echo "::warning::failed to download $bucket/$name"
+            done
+          done
       - uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "Weekly database backup"
