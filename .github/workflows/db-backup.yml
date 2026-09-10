@@ -1,4 +1,4 @@
-name: Daily database backup
+name: Weekly database backup
 
 # The Supabase project is on the free tier, which has no automated
 # backups (Pro tier gets a rolling 7 days; that costs $25/mo, not
@@ -26,7 +26,7 @@ name: Daily database backup
 
 on:
   schedule:
-    - cron: "0 9 * * *" # 9am UTC daily
+    - cron: "0 9 * * 0" # 9am UTC every Sunday
   workflow_dispatch: {}
 
 jobs:
@@ -54,5 +54,5 @@ jobs:
         run: supabase db dump --db-url "$supabase_db_url" -f "$BACKUP_DIR/data.sql" --data-only --use-copy
       - uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Daily database backup"
+          commit_message: "Weekly database backup"
           commit_user_name: "Database Backup Bot"
