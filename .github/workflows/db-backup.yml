@@ -70,12 +70,20 @@ jobs:
           for bucket in documents handbook; do
             dest="$BACKUP_DIR/storage/$bucket"
             mkdir -p "$dest"
-            names=$(curl -s -X POST "$supabase_url/storage/v1/object/list/$bucket" \
+            http_code=$(curl -s -o /tmp/list-$bucket.json -w '%{http_code}' -X POST "$supabase_url/storage/v1/object/list/$bucket" \
               -H "apikey: $supabase_service_role_key" \
               -H "Authorization: Bearer $supabase_service_role_key" \
               -H "Content-Type: application/json" \
-              -d '{"limit": 1000}' | jq -r '.[]?.name // empty')
+              -d '{"limit": 1000}')
+            if [ "$http_code" != "200" ]; then
+              echo "::warning::failed to list $bucket (HTTP $http_code) -- nothing backed up for this bucket"
+              continue
+            fi
+            names=$(jq -r '.[]?.name // empty' /tmp/list-$bucket.json)
             for name in $names; do
+              # Object names can include subfolders (e.g. documents/<pair_id>/<uuid>-<file>),
+              # so the destination's parent dir has to exist before curl -o can write there.
+              mkdir -p "$(dirname "$dest/$name")"
               curl -sf "$supabase_url/storage/v1/object/$bucket/$name" \
                 -H "apikey: $supabase_service_role_key" \
                 -H "Authorization: Bearer $supabase_service_role_key" \
