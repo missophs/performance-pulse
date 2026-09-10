@@ -1,5 +1,45 @@
 # Slack integration — status and what's left
 
+## Session closeout (2026-09-10): daily DB backup fixed (missing secret), schedule changed to weekly, and a demo reference brief built restating the Slack↔web sync claim
+
+**Bottom line:** the GitHub Actions daily database backup had been failing every run since it
+was set up — `SUPABASE_DB_URL` was never added as a repo secret, so `pg_dumpall` fell back to a
+local socket that doesn't exist on the runner. Root cause fixed and verified live (manually
+triggered run succeeded). Cadence changed from daily to weekly at Melissa's request, since daily
+was arbitrary and the failure emails were unwanted. Separately, while prepping for a demo,
+restated (did not re-test — relying on the 2026-09-09 live test above) that Slack↔app sync is
+not a "nice to have to build": it already works, both directions, one live database, no separate
+Slack copy.
+
+- Root cause: `.github/workflows/db-backup.yml`'s schedule step needs `SUPABASE_DB_URL`. It had
+  never been added under Settings → Secrets and variables → Actions — confirmed via the actual
+  repo page ("This repository has no secrets").
+- Fix: reset the Supabase DB password (confirmed via a repo-wide grep that nothing else depends
+  on it — only this workflow references a raw Postgres connection string), switched the
+  connection method from the default IPv6-only "Direct connection" to the IPv4-compatible
+  "Session pooler" (GitHub-hosted runners are IPv4-only, so the direct-connection string would
+  have failed even with a correct password), and saved the resulting URI as the
+  `SUPABASE_DB_URL` repo secret.
+- Verified live: manually triggered run #8 (`https://github.com/missophs/performance-pulse/actions/runs/34488640231`)
+  — succeeded in 47s, only a harmless Node-version deprecation warning left.
+- Schedule: `cron: "0 9 * * *"` → `cron: "0 9 * * 0"` (daily → weekly, Sundays 9am UTC);
+  workflow name and commit-message text renamed from "Daily" to "Weekly" to match. Commit
+  `679d04e`, pushed to `main`.
+- Demo prep: built a one-page reference brief (architecture diagram, data map, anticipated Q&A)
+  for Melissa to use live in a demo — published as a private Claude Artifact, not committed to
+  this repo (it's a personal cheat sheet, not product documentation). Its core claim — Slack and
+  the web app share one live database with no separate "Slack copy" — is not new work, it's the
+  same finding already proven live in the 2026-09-09 entry below; restated here because
+  Melissa's framing going into the demo ("this needs to be how it's structured") assumed it
+  wasn't already true. **Melissa has not yet reviewed the brief for accuracy — treat its content
+  as pending her check, not as independently re-verified in this entry.**
+
+**Reinforces the existing next step below, doesn't add a new one:** self-serve Slack install
+("Slack Marketplace listing... does not exist yet," in "still genuinely open" further down) is
+worth flagging as the priority *because* of the demo framing — if "add this to your own Slack"
+comes up live, the honest answer today is "not self-serve yet." Scoping that OAuth install flow
+is the next real Slack-integration work, separate from anything fixed this session.
+
 ## Session closeout (2026-09-09, later same day): both approved features tested live and working, a real Slack Home-tab bug found and fixed, website↔Slack sync proven with a live test in both directions
 
 **Bottom line: everything shipped today was tested live, not just read as
