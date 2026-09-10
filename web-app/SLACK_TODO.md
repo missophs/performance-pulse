@@ -1,5 +1,31 @@
 # Slack integration — status and what's left
 
+## Session closeout (2026-09-10, later): backup gap found and fixed — Supabase Storage files weren't covered
+
+Melissa asked to confirm "everything is backed up everywhere." The
+existing weekly workflow (`db-backup.yml`, fixed earlier today — see
+below) only runs `supabase db dump`, which backs up the Postgres
+database and nothing else. Checked directly against the live database
+(read-only REST query) and confirmed a real file is actually at risk:
+the uploaded employee handbook PDF sits in the `handbook` Supabase
+Storage bucket (`storage_path` set, real filename), completely outside
+that dump's reach. `documents` bucket is currently empty but uses the
+same upload path, so it's the same gap waiting to happen.
+
+Fixed: added a step to the same workflow that lists and downloads every
+object in both the `documents` and `handbook` buckets via the Storage
+REST API, into `db-backups/<date>/storage/<bucket>/`. Needs two new
+repo secrets before it can actually run — **not yet added, this is a
+real next step, not done yet**:
+- `SUPABASE_URL` — Project Settings → API → Project URL (not actually
+  secret, just needs a place to live that reaches the workflow).
+- `SUPABASE_SERVICE_ROLE_KEY` — Project Settings → API → service_role
+  key.
+
+Until those two secrets are added, the workflow's existing database dump
+still runs fine on its own schedule — only the new storage step will
+fail (or simply not run) until then. Commit `605f063`, pushed to `main`.
+
 ## Removed 2026-09-10: `slack-app/` (the old, never-installed prototype) deleted
 
 Confirmed dead before deletion: its claimed live OAuth endpoint
@@ -37,7 +63,7 @@ Slack copy.
   — succeeded in 47s, only a harmless Node-version deprecation warning left.
 - Schedule: `cron: "0 9 * * *"` → `cron: "0 9 * * 0"` (daily → weekly, Sundays 9am UTC);
   workflow name and commit-message text renamed from "Daily" to "Weekly" to match. Commit
-  `679d04e`, pushed to `main`.
+  `fb22b90`, pushed to `main`.
 - Demo prep: built a one-page reference brief (architecture diagram, data map, anticipated Q&A)
   for Melissa to use live in a demo — published as a private Claude Artifact, not committed to
   this repo (it's a personal cheat sheet, not product documentation). Its core claim — Slack and
