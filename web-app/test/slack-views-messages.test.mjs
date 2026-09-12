@@ -74,7 +74,7 @@ test("homeView: renders the Between you two section for both roles, with a real 
     myName: "Me",
     partnerName: "Partner",
   };
-  const baseData = { topics: [], actions: [], goals: [], devPlans: [], achievements: [], feedback: [], feedbackRequests: [], documents: [], messages: [] };
+  const baseData = { topics: [], actions: [], goals: [], devPlans: [], achievements: [], feedback: [], feedbackRequests: [], documents: [], customSuggestions: [], messages: [] };
 
   for (const isMgr of [true, false]) {
     const ctx = { ...baseCtx, isMgr, role: isMgr ? "manager" : "employee", otherRole: isMgr ? "employee" : "manager" };
@@ -100,7 +100,7 @@ test("homeView: every action_id in the published view is unique", () => {
     myName: "Me",
     partnerName: "Partner",
   };
-  const baseData = { topics: [], actions: [], goals: [], devPlans: [], achievements: [], feedback: [], feedbackRequests: [], documents: [], messages: [] };
+  const baseData = { topics: [], actions: [], goals: [], devPlans: [], achievements: [], feedback: [], feedbackRequests: [], documents: [], customSuggestions: [], messages: [] };
 
   for (const isMgr of [true, false]) {
     const ctx = { ...baseCtx, isMgr, role: isMgr ? "manager" : "employee", otherRole: isMgr ? "employee" : "manager" };

@@ -56,6 +56,11 @@ const inputBlock = (blockId, label, element, optional = false) => ({
 const section = (md, accessory) => ({ type: "section", text: { type: "mrkdwn", text: md }, ...(accessory ? { accessory } : {}) });
 const context = (md) => ({ type: "context", elements: [{ type: "mrkdwn", text: md }] });
 const actions = (elements, blockId) => ({ type: "actions", elements, ...(blockId ? { block_id: blockId } : {}) });
+// Green means "you've actually used this," never "click me" (Melissa's
+// call, 2026-09-12) -- a create button starts default/white and only turns
+// primary/green once the count backing it is real, derived from data
+// homeView already loads, not a new tracked flag.
+const usedStyle = (count) => (count > 0 ? "primary" : undefined);
 const button = (text, actionId, value, style) => ({
   type: "button",
   text: { type: "plain_text", text, emoji: true },
@@ -160,14 +165,14 @@ export function homeView(ctx, d) {
           section(`*${ctx.partnerName}* is your employee — they'll be your 1:1 partner.`, button("Edit their name", "open_edit_employee_label")),
         ]
       : [context(`*${ctx.partnerName}* is your manager — they'll be your 1:1 partner.`)]),
-    ...(ctx.isMgr ? [actions([button("Add a new employee", "open_add_employee", "", "primary")])] : []),
+    ...(ctx.isMgr ? [actions([button("Add a new employee", "open_add_employee", "", usedStyle(ctx.pairs.length - 1))])] : []),
     context(`Next 1:1: ${next1on1}  ·  ${openTopics.length} open topic${openTopics.length === 1 ? "" : "s"}  ·  ${openActions.length} open action${openActions.length === 1 ? "" : "s"}`),
     { type: "divider" },
     section("*My 1:1*\nPrepare, talk, and wrap up — right here."),
     actions([
-      button("Add a topic", "open_add_topic", "", "primary"),
+      button("Add a topic", "open_add_topic", "", usedStyle(d.topics.length)),
       button(`Topics (${openTopics.length})`, "open_list_topics"),
-      button("Add an action", "open_add_action", "", "primary"),
+      button("Add an action", "open_add_action", "", usedStyle(d.actions.length)),
       button(`Actions (${openActions.length})`, "open_list_actions"),
       button("Wrap up a 1:1", "open_wrap_up"),
       button("Prepare a hard conversation", "open_add_hardconvo"),
@@ -182,16 +187,16 @@ export function homeView(ctx, d) {
     ...(ctx.isMgr
       ? [
           section(`*Private notes* — only you see this, never ${ctx.partnerName}.`),
-          actions([button("View notes", "open_list_suggestions"), button("Write a note", "open_add_suggestion", "", "primary")]),
+          actions([button("View notes", "open_list_suggestions"), button("Write a note", "open_add_suggestion", "", usedStyle(d.customSuggestions.length))]),
         ]
       : []),
     { type: "divider" },
     section(`*Goals* — ${d.goals.length} on record`),
-    actions([button("Add a goal", "open_add_goal", "", "primary"), button("View goals", "open_list_goals")]),
+    actions([button("Add a goal", "open_add_goal", "", usedStyle(d.goals.length)), button("View goals", "open_list_goals")]),
     section(`*Learning & development* — ${d.devPlans.length} plan${d.devPlans.length === 1 ? "" : "s"}`),
-    actions([button("Add a plan", "open_add_devplan", "", "primary"), button("View plans", "open_list_devplans")]),
+    actions([button("Add a plan", "open_add_devplan", "", usedStyle(d.devPlans.length)), button("View plans", "open_list_devplans")]),
     section(`*Achievements* — ${d.achievements.length} logged`),
-    actions([button("Log one", "open_add_achievement", "", "primary"), button("View achievements", "open_list_achievements")]),
+    actions([button("Log one", "open_add_achievement", "", usedStyle(d.achievements.length)), button("View achievements", "open_list_achievements")]),
     section(`*Feedback* — ${d.feedback.length} entries${openRequests.length ? `, ${openRequests.length} request${openRequests.length === 1 ? "" : "s"} waiting` : ""}`),
     context(
       ctx.isMgr
@@ -199,8 +204,13 @@ export function homeView(ctx, d) {
         : "*Ask for feedback:* ask your manager to evaluate you. *View feedback in the app:* read the full history, including anything they've given you."
     ),
     actions([
-      ...(ctx.isMgr ? [button("Give feedback", "open_add_feedback", "", "primary")] : []),
-      button("Ask for feedback", "open_add_feedback_request", "", ctx.isMgr ? undefined : "primary"),
+      ...(ctx.isMgr ? [button("Give feedback", "open_add_feedback", "", usedStyle(d.feedback.length))] : []),
+      button(
+        "Ask for feedback",
+        "open_add_feedback_request",
+        "",
+        ctx.isMgr ? undefined : usedStyle(d.feedbackRequests.filter((r) => r.from_role === ctx.role).length)
+      ),
       button("View feedback in the app", "open_list_feedback"),
     ]),
     // Two-way, both roles, no notify() -- matches the website's "Between you
@@ -211,7 +221,7 @@ export function homeView(ctx, d) {
     // shows kind/sender/when only, with a link to read the real text.
     section(`*Between you two* — ${d.messages.length} sent`),
     context("No meeting needed — send it when it's on your mind. Quiet by design: no Slack ping, just seen next time they open the app."),
-    actions([button("Send a message", "open_add_message", "", "primary"), button("View messages", "open_list_messages")]),
+    actions([button("Send a message", "open_add_message", "", usedStyle(d.messages.length)), button("View messages", "open_list_messages")]),
     // Both buttons just open the app -- no in-Slack list or upload flow at
     // all (Melissa's call). Uploading needs a real file, which only works on
     // the website; viewing pointed there too rather than maintaining two
