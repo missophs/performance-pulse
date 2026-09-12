@@ -125,6 +125,11 @@ export function homeView(ctx, d) {
   const openTopics = d.topics.filter(isOpenTopic);
   const openActions = d.actions.filter((a) => a.status !== "Done");
   const openRequests = d.feedbackRequests.filter((r) => r.status === "open");
+  // Same closed-state pair used on the website for goals/dev plans
+  // (app/(dashboard)/performance/page.js, lib/badges.js DEV_STATES).
+  const isOpenGoalOrPlan = (g) => g.status !== "Complete" && g.status !== "Deferred";
+  const openGoals = d.goals.filter(isOpenGoalOrPlan);
+  const openDevPlans = d.devPlans.filter(isOpenGoalOrPlan);
   const next1on1 = ctx.pair.next_1on1_date ? `${ctx.pair.next_1on1_date}${ctx.pair.next_1on1_time ? " " + ctx.pair.next_1on1_time : ""}` : "not scheduled";
 
   const blocks = [
@@ -170,7 +175,7 @@ export function homeView(ctx, d) {
     { type: "divider" },
     section("*My 1:1*\nPrepare, talk, and wrap up — right here."),
     actions([
-      button("Add a topic", "open_add_topic", "", usedStyle(d.topics.length)),
+      button("Add a topic", "open_add_topic", "", usedStyle(openTopics.length)),
       button(`Topics (${openTopics.length})`, "open_list_topics"),
       button("Add an action", "open_add_action", "", usedStyle(openActions.length)),
       button(`Actions (${openActions.length})`, "open_list_actions"),
@@ -192,9 +197,9 @@ export function homeView(ctx, d) {
       : []),
     { type: "divider" },
     section(`*Goals* — ${d.goals.length} on record`),
-    actions([button("Add a goal", "open_add_goal", "", usedStyle(d.goals.length)), button("View goals", "open_list_goals")]),
+    actions([button("Add a goal", "open_add_goal", "", usedStyle(openGoals.length)), button("View goals", "open_list_goals")]),
     section(`*Learning & development* — ${d.devPlans.length} plan${d.devPlans.length === 1 ? "" : "s"}`),
-    actions([button("Add a plan", "open_add_devplan", "", usedStyle(d.devPlans.length)), button("View plans", "open_list_devplans")]),
+    actions([button("Add a plan", "open_add_devplan", "", usedStyle(openDevPlans.length)), button("View plans", "open_list_devplans")]),
     section(`*Achievements* — ${d.achievements.length} logged`),
     actions([button("Log one", "open_add_achievement", "", usedStyle(d.achievements.length)), button("View achievements", "open_list_achievements")]),
     section(`*Feedback* — ${d.feedback.length} entries${openRequests.length ? `, ${openRequests.length} request${openRequests.length === 1 ? "" : "s"} waiting` : ""}`),
@@ -209,7 +214,7 @@ export function homeView(ctx, d) {
         "Ask for feedback",
         "open_add_feedback_request",
         "",
-        ctx.isMgr ? undefined : usedStyle(d.feedbackRequests.filter((r) => r.from_role === ctx.role).length)
+        ctx.isMgr ? undefined : usedStyle(openRequests.filter((r) => r.from_role === ctx.role).length)
       ),
       button("View feedback in the app", "open_list_feedback"),
     ]),
