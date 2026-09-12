@@ -182,7 +182,7 @@ export function homeView(ctx, d) {
     ...(ctx.isMgr
       ? [
           section(`*Private notes* — only you see this, never ${ctx.partnerName}.`),
-          actions([button("View notes", "open_list_suggestions"), button("Write a note", "open_add_suggestion")]),
+          actions([button("View notes", "open_list_suggestions"), button("Write a note", "open_add_suggestion", "", "primary")]),
         ]
       : []),
     { type: "divider" },
@@ -211,7 +211,7 @@ export function homeView(ctx, d) {
     // shows kind/sender/when only, with a link to read the real text.
     section(`*Between you two* — ${d.messages.length} sent`),
     context("No meeting needed — send it when it's on your mind. Quiet by design: no Slack ping, just seen next time they open the app."),
-    actions([button("Send a message", "open_add_message"), button("View messages", "open_list_messages")]),
+    actions([button("Send a message", "open_add_message", "", "primary"), button("View messages", "open_list_messages")]),
     // Both buttons just open the app -- no in-Slack list or upload flow at
     // all (Melissa's call). Uploading needs a real file, which only works on
     // the website; viewing pointed there too rather than maintaining two
