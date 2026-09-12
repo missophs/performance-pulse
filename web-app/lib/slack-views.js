@@ -160,14 +160,14 @@ export function homeView(ctx, d) {
           section(`*${ctx.partnerName}* is your employee — they'll be your 1:1 partner.`, button("Edit their name", "open_edit_employee_label")),
         ]
       : [context(`*${ctx.partnerName}* is your manager — they'll be your 1:1 partner.`)]),
-    ...(ctx.isMgr ? [actions([button("Add a new employee", "open_add_employee")])] : []),
+    ...(ctx.isMgr ? [actions([button("Add a new employee", "open_add_employee", "", "primary")])] : []),
     context(`Next 1:1: ${next1on1}  ·  ${openTopics.length} open topic${openTopics.length === 1 ? "" : "s"}  ·  ${openActions.length} open action${openActions.length === 1 ? "" : "s"}`),
     { type: "divider" },
     section("*My 1:1*\nPrepare, talk, and wrap up — right here."),
     actions([
       button("Add a topic", "open_add_topic", "", "primary"),
       button(`Topics (${openTopics.length})`, "open_list_topics"),
-      button("Add an action", "open_add_action"),
+      button("Add an action", "open_add_action", "", "primary"),
       button(`Actions (${openActions.length})`, "open_list_actions"),
       button("Wrap up a 1:1", "open_wrap_up"),
       button("Prepare a hard conversation", "open_add_hardconvo"),
@@ -187,11 +187,11 @@ export function homeView(ctx, d) {
       : []),
     { type: "divider" },
     section(`*Goals* — ${d.goals.length} on record`),
-    actions([button("Add a goal", "open_add_goal"), button("View goals", "open_list_goals")]),
+    actions([button("Add a goal", "open_add_goal", "", "primary"), button("View goals", "open_list_goals")]),
     section(`*Learning & development* — ${d.devPlans.length} plan${d.devPlans.length === 1 ? "" : "s"}`),
-    actions([button("Add a plan", "open_add_devplan"), button("View plans", "open_list_devplans")]),
+    actions([button("Add a plan", "open_add_devplan", "", "primary"), button("View plans", "open_list_devplans")]),
     section(`*Achievements* — ${d.achievements.length} logged`),
-    actions([button("Log one", "open_add_achievement"), button("View achievements", "open_list_achievements")]),
+    actions([button("Log one", "open_add_achievement", "", "primary"), button("View achievements", "open_list_achievements")]),
     section(`*Feedback* — ${d.feedback.length} entries${openRequests.length ? `, ${openRequests.length} request${openRequests.length === 1 ? "" : "s"} waiting` : ""}`),
     context(
       ctx.isMgr
@@ -199,8 +199,8 @@ export function homeView(ctx, d) {
         : "*Ask for feedback:* ask your manager to evaluate you. *View feedback in the app:* read the full history, including anything they've given you."
     ),
     actions([
-      ...(ctx.isMgr ? [button("Give feedback", "open_add_feedback")] : []),
-      button("Ask for feedback", "open_add_feedback_request"),
+      ...(ctx.isMgr ? [button("Give feedback", "open_add_feedback", "", "primary")] : []),
+      button("Ask for feedback", "open_add_feedback_request", "", ctx.isMgr ? undefined : "primary"),
       button("View feedback in the app", "open_list_feedback"),
     ]),
     // Two-way, both roles, no notify() -- matches the website's "Between you
