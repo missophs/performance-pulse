@@ -1,5 +1,76 @@
 # Slack integration — status and what's left
 
+## Session closeout (2026-09-12): Slack Home tab "used" styling wasn't open/closed for Topics/Goals/Dev plans, only Actions — fixed and live-verified in Chrome; Melissa then wiped her own pair to start fresh
+
+**Bottom line:** the earlier same-day commits (`c106660` → `4fe5469` →
+`b3a56ab`) established the rule "green means you've used this, white by
+default" and got it right for Actions (tracks *open* actions, matching
+`Actions (N)`), but left Add a topic / Add a goal / Add a plan / Ask for
+feedback on a *lifetime* count — so on Melissa's real account, which has
+real history, those stayed green forever regardless of whether anything
+was actually outstanding. That's what "I just logged in and all the
+buttons are still green" was reporting; not a caching or deploy issue,
+and not (as first suspected) a Slack platform quirk either.
+
+- Root cause + fix: `lib/slack-views.js` `homeView()` — Topics, Goals, and
+  Dev plans each already have the identical open/closed `status` field
+  Actions uses (`isOpenTopic`; `status !== "Complete" && status !==
+  "Deferred"` for goals/dev plans, matching
+  `app/(dashboard)/performance/page.js` and `lib/badges.js` DEV_STATES).
+  Added `openGoals`/`openDevPlans` filters and pointed `usedStyle()` at
+  open counts instead of `d.goals.length` / `d.devPlans.length` /
+  `d.topics.length`. Also fixed "Ask for feedback," which filtered
+  `feedbackRequests` by `from_role` only and never checked `status ===
+  "open"` — an already-answered request kept the button lit. Commit
+  `a4a3185`, pushed to `main`.
+- Verified, in order: `npm test` (27/27) and lint clean on the changed
+  file; then a throwaway script run with the real `.env.local`
+  credentials against Melissa's actual Supabase rows, calling the real
+  `homeView()` and `views.publish` directly — confirmed correct mixed
+  styling, not "all green." Because the numbers alone didn't settle it
+  for Melissa, went further: drove her actual logged-in Chrome session
+  into the real Slack Home tab, screenshotted it (4 of ~13 buttons green,
+  each backed by a real open count), then reproduced her exact reported
+  action end-to-end — clicked "Add a plan" (white, 0 plans ever), filled
+  in and saved a real dev plan, watched the Home tab republish live: only
+  "Add a plan" turned green, every other button stayed exactly where it
+  was. That confirmed the fix is correct and "any button I save turns
+  everything green" was not actually happening — worth remembering
+  before assuming her plain-language description names the mechanism
+  correctly; it named the symptom.
+- One near-miss worth recording: navigating straight to the Supabase SQL
+  editor by URL first hit Supabase's own sign-in page (this Chrome
+  profile wasn't authenticated at that path yet even though the org's
+  other tabs were), and a typed script briefly landed in the password
+  field before it was noticed and cleared — nothing was submitted. Don't
+  click a form's submit/sign-in control on Melissa's behalf even when a
+  browser has autofilled it; confirm the destination page actually
+  loaded (not a redirect to a login screen) before typing anything.
+
+**Melissa then asked to wipe her own pair's data entirely to start
+fresh** — a deliberate reset, not a bug fix. Every pair-scoped table
+(`topics`, `actions`, `goals`, `development_plans`, `achievements`,
+`feedback_entries`, `feedback_requests`, `messages`,
+`custom_suggestions`, `documents`, `activity_log`, `review_drafts`,
+`form_drafts`, `checkins`, `meetings`, `career_answers`, `concerns`,
+`slack_pair_selections`) has `pair_id ... references pairs(id) on delete
+cascade`, so `delete from pairs where id =
+'21fd3120-01f1-4734-a4bf-fe9dff338746'` (the Melissa/"Monte Montoya"
+pair — manager `melissaw212@gmail.com`, employee
+`melissahr212@gmail.com`) removes everything in one statement. Per the
+hard rule against permanently deleting data, Claude did not run this —
+the query was typed into Melissa's own already-authenticated Supabase
+SQL editor tab and **she** clicked Run. Verified afterward, by a
+read-only `count(*)` query, that all eight checked tables (`pairs` plus
+seven of the child tables) read 0 rows.
+
+**Current state, important for the next session:** the pair no longer
+exists. The account needs to be re-onboarded (recreate the pairing, or
+set up a new one) before Slack or the website will show anything —
+Melissa said she'd do that tomorrow. Don't assume any of the historical
+data referenced elsewhere in this file (Melissa's goals, topics, etc.)
+still exists.
+
 ## Session closeout (2026-09-10, later): backup gap found and fixed — Supabase Storage files weren't covered
 
 Melissa asked to confirm "everything is backed up everywhere." The
