@@ -172,7 +172,7 @@ export function homeView(ctx, d) {
     actions([
       button("Add a topic", "open_add_topic", "", usedStyle(d.topics.length)),
       button(`Topics (${openTopics.length})`, "open_list_topics"),
-      button("Add an action", "open_add_action", "", usedStyle(d.actions.length)),
+      button("Add an action", "open_add_action", "", usedStyle(openActions.length)),
       button(`Actions (${openActions.length})`, "open_list_actions"),
       button("Wrap up a 1:1", "open_wrap_up"),
       button("Prepare a hard conversation", "open_add_hardconvo"),
