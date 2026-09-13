@@ -76,7 +76,7 @@ jobs:
               -H "Content-Type: application/json" \
               -d '{"prefix": "", "limit": 1000}')
             if [ "$http_code" != "200" ]; then
-              echo "::warning::failed to list $bucket (HTTP $http_code) -- nothing backed up for this bucket"
+              echo "::warning::failed to list $bucket (HTTP $http_code): $(tr '\n' ' ' < /tmp/list-$bucket.json) -- nothing backed up for this bucket"
               continue
             fi
             names=$(jq -r '.[]?.name // empty' /tmp/list-$bucket.json)
