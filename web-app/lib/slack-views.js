@@ -569,15 +569,16 @@ export function addGoalModal(ctx, draft, saved = false) {
 }
 
 // Shows real text (matches Topics, per Melissa's decision, SLACK_TODO.md item
-// 0b) — Edit/Delete both open to both partners, since Goals no longer has a
-// meaningful "creator" concept now owner is always the employee.
-export function listGoalsModal(goals) {
+// 0b) — Edit stays open to both partners, but per Melissa's 2026-09-13
+// decision, Delete is manager-only: an employee can tweak a goal with their
+// manager but should never be able to unilaterally remove one the manager set.
+export function listGoalsModal(goals, isMgr) {
   const blocks = goals.length
     ? goals.flatMap((g) => [
         section(
           `*${g.text}*\n${g.status} · ${g.progress || 0}%${g.target_date ? ` · target ${g.target_date}` : ""}${g.why ? `\n_${g.why}_` : ""}${g.measure ? `\n*How you'll know it's met:* ${g.measure}` : ""}`
         ),
-        actions([button("Edit", "goal_edit", g.id), button("Delete", "goal_delete", g.id, "danger")]),
+        actions([button("Edit", "goal_edit", g.id), ...(isMgr ? [button("Delete", "goal_delete", g.id, "danger")] : [])]),
       ])
     : [section("No goals yet. Add one from the Home tab.")];
   // Same reasoning as listTopicsModal above -- real text, why, and measure
@@ -640,11 +641,12 @@ export function addDevPlanModal(ctx, draft, saved = false) {
 // SLACK_TODO.md item 0b) — stays redacted to structural fields only (type,
 // status, target date), same reasoning as the pre-existing Actions
 // redaction. Delete only, no Edit (item 0d's scope is Goals + Actions).
-export function listDevPlansModal(plans) {
+// Delete is manager-only, same reasoning and same date as listGoalsModal above.
+export function listDevPlansModal(plans, isMgr) {
   const blocks = plans.length
     ? plans.flatMap((p, i) => [
         section(`*Plan ${i + 1}* — ${p.type}${p.status ? ` · ${p.status}` : ""}${p.target_date ? ` · target ${p.target_date}` : ""}`),
-        actions([button("Delete", "devplan_delete", p.id, "danger")]),
+        ...(isMgr ? [actions([button("Delete", "devplan_delete", p.id, "danger")])] : []),
       ])
     : [section("No development plans yet. Add one from the Home tab.")];
   blocks.push({ type: "divider" }, actions([openInApp("Open plans in the app for the full text")]));

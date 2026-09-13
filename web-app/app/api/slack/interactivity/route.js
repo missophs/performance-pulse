@@ -218,8 +218,8 @@ const OPENERS = {
   },
   open_list_topics: { title: "Open topics", build: async (admin, ctx) => listTopicsModal((await loadHomeData(admin, ctx.pairId)).topics, ctx.role) },
   open_list_actions: { title: "Open actions", build: async (admin, ctx) => listActionsModal((await loadHomeData(admin, ctx.pairId)).actions) },
-  open_list_goals: { title: "Goals", build: async (admin, ctx) => listGoalsModal((await loadHomeData(admin, ctx.pairId)).goals) },
-  open_list_devplans: { title: "Development plans", build: async (admin, ctx) => listDevPlansModal((await loadHomeData(admin, ctx.pairId)).devPlans) },
+  open_list_goals: { title: "Goals", build: async (admin, ctx) => listGoalsModal((await loadHomeData(admin, ctx.pairId)).goals, ctx.isMgr) },
+  open_list_devplans: { title: "Development plans", build: async (admin, ctx) => listDevPlansModal((await loadHomeData(admin, ctx.pairId)).devPlans, ctx.isMgr) },
   open_list_achievements: { title: "Achievements", build: async (admin, ctx) => listAchievementsModal((await loadHomeData(admin, ctx.pairId)).achievements) },
   open_list_feedback: {
     title: "Feedback",
@@ -428,7 +428,14 @@ const QUICK_ACTIONS = {
     refreshList: (data) => listActionsModal(data.actions),
   },
   goal_delete: {
+    // Manager-only per Melissa's 2026-09-13 decision — an employee can edit
+    // a goal but must never be able to remove one the manager set. Gated
+    // here, not just in the UI, because Slack handlers run on the
+    // service-role admin client and bypass RLS entirely (see the
+    // governance note in CLAUDE.md); the matching database-level rule is
+    // in supabase/migrations/0026_manager_only_delete_goals_devplans.sql.
     run: async (admin, ctx, id) => {
+      if (!ctx.isMgr) return;
       const goal = await verifyOwnedRow(admin, "goals", "pair_id, text", id, ctx);
       if (!goal) return;
       await deleteGoal(admin, id);
@@ -436,17 +443,19 @@ const QUICK_ACTIONS = {
       // no "kind" — deleting a goal doesn't fire a real Slack DM.
       await notify(admin, ctx.pairId, `Goal removed: ${goal.text}`, ctx.role, ctx.otherRole);
     },
-    refreshList: (data) => listGoalsModal(data.goals),
+    refreshList: (data, ctx) => listGoalsModal(data.goals, ctx.isMgr),
   },
   devplan_delete: {
+    // Manager-only, same reasoning and same date as goal_delete above.
     run: async (admin, ctx, id) => {
+      if (!ctx.isMgr) return;
       const plan = await verifyOwnedRow(admin, "development_plans", "pair_id, area", id, ctx);
       if (!plan) return;
       await deleteDevelopmentPlan(admin, id);
       // Matches the website (development/page.js handleDeleteDev).
       await notify(admin, ctx.pairId, `Development plan removed: ${plan.area}`, ctx.role, ctx.otherRole);
     },
-    refreshList: (data) => listDevPlansModal(data.devPlans),
+    refreshList: (data, ctx) => listDevPlansModal(data.devPlans, ctx.isMgr),
   },
   achievement_delete: {
     run: async (admin, ctx, id) => {
@@ -840,7 +849,7 @@ const SUBMISSIONS = {
     );
     if (view.previous_view_id) {
       const data = await loadHomeData(admin, ctx.pairId);
-      await slackApi("views.update", { view_id: view.previous_view_id, view: listGoalsModal(data.goals) }).catch((e) => console.error("edit goal list refresh:", e));
+      await slackApi("views.update", { view_id: view.previous_view_id, view: listGoalsModal(data.goals, ctx.isMgr) }).catch((e) => console.error("edit goal list refresh:", e));
     }
   },
   edit_action: async (admin, ctx, v, view) => {

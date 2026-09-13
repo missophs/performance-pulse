@@ -118,6 +118,7 @@ export default function GoalsPage() {
   }
 
   async function handleDelete(g) {
+    if (!isMgr) return;
     if (!window.confirm(`Remove "${g.text}"?`)) return;
     await deleteGoal(supabase, g.id);
     await safeNotify(`Goal removed: ${g.text}`);
@@ -181,7 +182,7 @@ export default function GoalsPage() {
                   </div>
                   <div className="item-actions">
                     <button className="btn secondary sm" onClick={() => openEdit(g)}>Update</button>
-                    <button className="btn ghost sm" onClick={() => handleDelete(g)}>Remove</button>
+                    {isMgr && <button className="btn ghost sm" onClick={() => handleDelete(g)}>Remove</button>}
                   </div>
                 </li>
               );

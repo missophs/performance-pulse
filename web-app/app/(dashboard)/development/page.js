@@ -177,6 +177,7 @@ function DevelopmentPageInner() {
   }
 
   async function handleDeleteDev(d) {
+    if (!isMgr) return;
     if (!window.confirm(`Remove "${d.area}"?`)) return;
     await deleteDevelopmentPlan(supabase, d.id);
     await safeNotify(`Development plan removed: ${d.area}`);
@@ -241,7 +242,7 @@ function DevelopmentPageInner() {
                   </div>
                   <div className="item-actions">
                     <button className="btn secondary sm" onClick={() => openEditDev(d)}>Update</button>
-                    <button className="btn ghost sm" onClick={() => handleDeleteDev(d)}>Remove</button>
+                    {isMgr && <button className="btn ghost sm" onClick={() => handleDeleteDev(d)}>Remove</button>}
                   </div>
                 </li>
               );
