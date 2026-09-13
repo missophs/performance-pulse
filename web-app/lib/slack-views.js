@@ -170,7 +170,14 @@ export function homeView(ctx, d) {
           section(`*${ctx.partnerName}* is your employee — they'll be your 1:1 partner.`, button("Edit their name", "open_edit_employee_label")),
         ]
       : [context(`*${ctx.partnerName}* is your manager — they'll be your 1:1 partner.`)]),
-    ...(ctx.isMgr ? [actions([button("Add a new employee", "open_add_employee", "", usedStyle(ctx.pairs.length - 1))])] : []),
+    // No usedStyle() here on purpose: "Add a new employee" always creates a
+    // brand-new pairing, so there's no open/closed count of THIS pair's own
+    // history that could mean "already used" for it the way there is for
+    // "Add a topic"/"Add an action" -- ctx.pairs.length - 1 (a count of
+    // OTHER pairs) is unrelated to this button and lit it green permanently
+    // for any manager with 2+ reports, which is exactly the decorative
+    // highlight the 2026-09-12 rule forbids (see CLAUDE.md/memory).
+    ...(ctx.isMgr ? [actions([button("Add a new employee", "open_add_employee")])] : []),
     context(`Next 1:1: ${next1on1}  ·  ${openTopics.length} open topic${openTopics.length === 1 ? "" : "s"}  ·  ${openActions.length} open action${openActions.length === 1 ? "" : "s"}`),
     { type: "divider" },
     section("*My 1:1*\nPrepare, talk, and wrap up — right here."),

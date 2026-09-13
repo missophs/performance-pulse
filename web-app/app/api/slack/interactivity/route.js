@@ -117,15 +117,41 @@ async function refreshHome(admin, ctx, data) {
   }
 }
 
+// One generic "Saved in Performance Pulse." for every kind of submission
+// reads as pure clutter once a session does more than one or two saves --
+// a long DM history of identical, content-free checkmarks (found live,
+// 2026-09-13). Naming what was actually saved fixes that without touching
+// notification delivery at all.
+const CONFIRM_LABELS = {
+  edit_employee_label: "Employee's name updated.",
+  wrap_up_conversation: "Final wrap up saved.",
+  add_employee: "Employee added.",
+  add_topic: "Topic saved.",
+  add_action: "Action saved.",
+  add_goal: "Goal saved.",
+  add_devplan: "Development plan saved.",
+  add_hardconvo: "Topic added to the agenda.",
+  add_suggestion: "Private note saved.",
+  add_message: "Message saved.",
+  add_achievement: "Achievement logged.",
+  add_feedback: "Feedback saved.",
+  add_feedback_request: "Feedback request sent.",
+  edit_topic: "Topic updated.",
+  edit_goal: "Goal updated.",
+  edit_action: "Action updated.",
+  wrap_up: "1:1 summary saved.",
+};
+
 // A successful view_submission just closes the modal — identical to what
 // Cancel does — so there was no way to tell a real save from nothing
 // happening. This pings the submitter's own DM with the app right after, the
 // same way refreshHome pings the Home tab. Runs via after() so it never
 // risks the 3s interaction window Slack drops the request after.
-async function confirmSaved(admin, ctx) {
+async function confirmSaved(admin, ctx, callbackId) {
+  const label = CONFIRM_LABELS[callbackId] || "Saved in Performance Pulse.";
   const opened = await slackApi("conversations.open", { users: ctx.slackUserId }).catch((e) => console.error("confirm dm open:", e));
   if (!opened?.channel?.id) return;
-  await slackApi("chat.postMessage", { channel: opened.channel.id, text: "✅ Saved in Performance Pulse." }).catch((e) => console.error("confirm dm send:", e));
+  await slackApi("chat.postMessage", { channel: opened.channel.id, text: `✅ ${label}` }).catch((e) => console.error("confirm dm send:", e));
 }
 
 // -------------------------------------------------------- open a modal -----
@@ -526,7 +552,7 @@ const SUBMISSIONS = {
   // Manager-only: writes pairs.employee_label, never the employee's own
   // profiles.full_name -- see editEmployeeLabelModal in lib/slack-views.js.
   edit_employee_label: async (admin, ctx, v) => {
-    if (!ctx.isMgr) return;
+    if (!ctx.isMgr) return { skip: true };
     const label = (fieldVal(v, "label") || "").trim();
     await updatePair(admin, ctx.pairId, { employee_label: label || null });
     // So the Home-tab refresh right after this shows the new label
@@ -546,9 +572,9 @@ const SUBMISSIONS = {
   // governance note in CLAUDE.md and the comment on that handler.
   wrap_up_conversation: async (admin, ctx, v, view) => {
     const pinnedPairId = view?.private_metadata;
-    if (!pinnedPairId || !ctx.pairs.some((p) => p.id === pinnedPairId)) return;
+    if (!pinnedPairId || !ctx.pairs.some((p) => p.id === pinnedPairId)) return { skip: true };
     const pairCtx = pinnedPairId === ctx.pairId ? ctx : await resolvePairContext(admin, ctx.email, pinnedPairId);
-    if (!pairCtx) return; // pair closed/deleted between open and submit
+    if (!pairCtx) return { skip: true }; // pair closed/deleted between open and submit
     const note = (fieldVal(v, "note") || "").trim();
     const { topics, goals, actions } = await wrapUpConversation(admin, pairCtx.pairId, fromSlack(pairCtx));
     const otherEmail = pairCtx.isMgr ? pairCtx.pair.employee_email : pairCtx.pair.manager_email;
@@ -563,7 +589,7 @@ const SUBMISSIONS = {
   // (resolveSlackUser re-runs fresh then) -- same lazy staleness a reopened
   // pairing already accepts for the other side.
   add_employee: async (admin, ctx, v) => {
-    if (!ctx.isMgr) return;
+    if (!ctx.isMgr) return { skip: true };
     const email = (fieldVal(v, "email") || "").trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return { error: { blockId: "email", message: "That doesn't look like a valid email." } };
@@ -697,7 +723,7 @@ const SUBMISSIONS = {
   // the website — a saved suggestion is a private note-to-self, not
   // something the partner is told about.
   add_suggestion: async (admin, ctx, v) => {
-    if (!ctx.isMgr) return; // manager-only -- re-checked same as the opener
+    if (!ctx.isMgr) return { skip: true }; // manager-only -- re-checked same as the opener
     const text = fieldValV2(v, "text");
     const category = fieldValV2(v, "category");
     await addCustomSuggestion(admin, ctx.pairId, ctx.role, text, category);
@@ -756,7 +782,7 @@ const SUBMISSIONS = {
     // the Home tab button being hidden isn't enough on its own (governance
     // note in CLAUDE.md). An employee answering a real request still passes,
     // since `request` is truthy for them.
-    if (!request && !ctx.isMgr) return;
+    if (!request && !ctx.isMgr) return { skip: true };
     // fieldValV2 — see add_goal above.
     await addFeedback(admin, ctx.pairId, {
       giverRole: ctx.role,
@@ -791,7 +817,7 @@ const SUBMISSIONS = {
   },
   edit_topic: async (admin, ctx, v, view) => {
     const id = view?.private_metadata;
-    if (!id) return;
+    if (!id) return { skip: true };
     const text = (fieldVal(v, "text") || "").trim();
     if (!text) return { error: { blockId: "text", message: "Topic can't be empty." } };
     // Runs on the admin (service-role) client, which bypasses RLS entirely —
@@ -806,7 +832,7 @@ const SUBMISSIONS = {
     // a same-pair-but-other-role topic id would silently pass the pair_id
     // check alone. See the governance note in CLAUDE.md.
     const owned = await verifyOwnedRow(admin, "topics", "pair_id, created_by_role", id, ctx, (row) => row.created_by_role === ctx.role);
-    if (!owned) return;
+    if (!owned) return { skip: true };
     await updateTopic(admin, id, { text, why: fieldVal(v, "why"), category: fieldVal(v, "category") }, fromSlack(ctx));
     // Pushed modals close back to the list beneath them on their own, but
     // that list (payload.view.previous_view_id) still has the pre-edit text
@@ -821,14 +847,14 @@ const SUBMISSIONS = {
   },
   edit_goal: async (admin, ctx, v, view) => {
     const id = view?.private_metadata;
-    if (!id) return;
+    if (!id) return { skip: true };
     const text = (fieldVal(v, "text") || "").trim();
     if (!text) return { error: { blockId: "text", message: "Goal can't be empty." } };
     // Fetch progress/obstacles/support too, not just for the ownership
     // check — the edit modal has no fields for them, so they'd otherwise get
     // silently wiped by saveGoal's upsert.
     const existing = await verifyOwnedRow(admin, "goals", "pair_id, progress, obstacles, support", id, ctx);
-    if (!existing) return;
+    if (!existing) return { skip: true };
     await saveGoal(
       admin,
       ctx.pairId,
@@ -854,13 +880,13 @@ const SUBMISSIONS = {
   },
   edit_action: async (admin, ctx, v, view) => {
     const id = view?.private_metadata;
-    if (!id) return;
+    if (!id) return { skip: true };
     const text = (fieldVal(v, "text") || "").trim();
     if (!text) return { error: { blockId: "text", message: "Action can't be empty." } };
     // Fetch status/related too — the edit modal has no fields for them, so
     // they'd otherwise get silently wiped by saveAction's upsert.
     const existing = await verifyOwnedRow(admin, "actions", "pair_id, status, related", id, ctx);
-    if (!existing) return;
+    if (!existing) return { skip: true };
     await saveAction(
       admin,
       ctx.pairId,
@@ -883,9 +909,9 @@ const SUBMISSIONS = {
     // that pair's own role/name context for the whole save. See the
     // governance note in CLAUDE.md and the comment on wrapUpModal.
     const pinnedPairId = view?.private_metadata;
-    if (!pinnedPairId || !ctx.pairs.some((p) => p.id === pinnedPairId)) return;
+    if (!pinnedPairId || !ctx.pairs.some((p) => p.id === pinnedPairId)) return { skip: true };
     const pairCtx = pinnedPairId === ctx.pairId ? ctx : await resolvePairContext(admin, ctx.email, pinnedPairId);
-    if (!pairCtx) return; // pair closed/deleted between open and submit
+    if (!pairCtx) return { skip: true }; // pair closed/deleted between open and submit
     const discussed = (fieldVal(v, "discussed") || "").trim();
     const agreed = (fieldVal(v, "agreed") || "").trim();
     if (!discussed && !agreed) return { error: { blockId: "discussed", message: "Add at least what you discussed or what you agreed on." } };
@@ -1109,13 +1135,23 @@ async function handleInteraction(admin, slackUserId, payload) {
       if (result?.error) {
         return Response.json({ response_action: "errors", errors: { [result.error.blockId]: result.error.message } });
       }
-      // The save already happened above; closing the modal shouldn't wait on
-      // the Home-tab republish (see refreshHome) or the confirmation DM (see
-      // confirmSaved) -- ctx's own in-place mutations (e.g. edit_employee_label's
-      // ctx.partnerName) land before this runs, so the refresh still shows
-      // the new value.
-      after(() => refreshHome(admin, ctx));
-      after(() => confirmSaved(admin, ctx));
+      // A handler's guard (permission check, a stale pinned pair id, a
+      // verifyOwnedRow lookup that found nothing) returns { skip: true } to
+      // mean "nothing was saved" -- distinct from a real save returning
+      // undefined. Without this, every guard's silent no-op still fell
+      // through to the same confirmSaved() below, which (now that it names
+      // the specific thing supposedly saved, not a generic message) would
+      // tell the submitter something happened when it didn't. Found in
+      // review 2026-09-13.
+      if (!result?.skip) {
+        // The save already happened above; closing the modal shouldn't wait on
+        // the Home-tab republish (see refreshHome) or the confirmation DM (see
+        // confirmSaved) -- ctx's own in-place mutations (e.g. edit_employee_label's
+        // ctx.partnerName) land before this runs, so the refresh still shows
+        // the new value.
+        after(() => refreshHome(admin, ctx));
+        after(() => confirmSaved(admin, ctx, payload.view?.callback_id));
+      }
     }
     return Response.json({}); // close the modal
   }
