@@ -134,6 +134,14 @@ export function homeView(ctx, d) {
 
   const blocks = [
     { type: "header", text: { type: "plain_text", text: "Performance Pulse", emoji: true } },
+    // Slack is the primary way people use this (that's why it was built),
+    // but everything saved here already lives in the same database the
+    // website reads -- this is just a fast way to get to the website too,
+    // for the option to look at either one (Melissa, 2026-09-13). Still
+    // requires the normal Google sign-in there -- a one-time auto-sign-in
+    // link was tried and rejected as a security downgrade (anyone who saw
+    // the link could get in without it).
+    actions([openInApp("Open Performance Pulse", "/dashboard")]),
     ...(ctx.pairs.length > 1
       ? [
           actions(
