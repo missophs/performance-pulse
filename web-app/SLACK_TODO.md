@@ -4851,3 +4851,120 @@ Still open, in priority order:
 Not built, deliberately out of scope so far: the `"upcoming"` (1:1
 reminder) ping — nothing triggers it yet; it needs a scheduled job, not
 just a `notify()` call site.
+
+## Session log — 2026-09-13, full night (green buttons, sign-in, roster, cleanup)
+
+Long session, multiple rounds of "this is broken again" from Melissa. Full
+honest record below — bugs found, what got fixed, what I personally got
+wrong along the way, and current verified state, so none of this has to be
+repeated or re-discovered tomorrow.
+
+### Bugs that were real, found and fixed (in code, deployed)
+
+1. **Every Slack save showed the same generic "✅ Saved in Performance
+   Pulse." DM**, regardless of what was actually saved — read as pure
+   clutter after a few saves. Fixed: `CONFIRM_LABELS` in
+   `app/api/slack/interactivity/route.js` gives each of the 17 submission
+   kinds its own specific text ("Topic saved.", "Action saved.", etc).
+2. **Fixing #1 exposed a second, worse bug**: 14 silent guard clauses
+   across `SUBMISSIONS` (permission checks, stale pinned-pair ids,
+   ownership lookups that found nothing) used to fall through to the same
+   generic confirmation either way. Once the confirmation named the
+   specific thing supposedly saved, a blocked/failed save would have sent
+   a confident but **false** "✅ X saved." Fixed at the dispatcher level:
+   every guard now returns `{ skip: true }`, and `handleInteraction` skips
+   the confirmation/Home-refresh when it sees that. Found via `/code-review`
+   before this ever reached Melissa live.
+3. **"Add a new employee" was permanently green** for any manager with
+   2+ reports, regardless of whether they'd ever used it — it was keyed
+   off `ctx.pairs.length - 1` (a count of *other* pairs), not any
+   real "have I used this" signal. Fixed: no `usedStyle()` on that button
+   at all now (`lib/slack-views.js`) — matches the existing rule that green
+   only means "this specific thing already has real, saved history."
+4. **The one-off Slack DM cleanup script** (`clear-saved-confirmations.mjs`,
+   built to delete old clutter messages) failed twice for real bugs, not
+   anything Melissa did wrong:
+   - Sent the literal text `"undefined"` as the pagination `cursor` param
+     on the first request (a JS `undefined` value serialized to a string
+     instead of being omitted) — Slack correctly rejected it as
+     `invalid_cursor`.
+   - Matched messages against the literal `✅` character, but Slack stores
+     that emoji as the shortcode `:white_check_mark:` in the API's `text`
+     field — so the match always found zero messages.
+   Both fixed and verified with a dry run (no deletes) before Melissa ran
+   it for real. Final run: 11 old messages deleted, confirmed gone by
+   reading Slack's message history back afterward.
+5. **Slack bot was missing `im:read` and `im:history` scopes** — not a
+   code bug, a one-time Slack app permission gap. Needed for the cleanup
+   script to list/read DMs at all. Fixed by adding both scopes and
+   reinstalling the Slack app (Melissa did the actual "Allow" click each
+   time, per the standing rule above). Confirmed this never affected the
+   live app itself — `chat.postMessage`/`views.publish` don't need either
+   scope, so production was never broken by the gap.
+
+### Mistakes I made this session (own up to these directly)
+
+1. **Tried to build a one-click auto-sign-in link** from Slack straight
+   into the website (Supabase `admin.generateLink`, no Google sign-in
+   needed). This would have been a real security downgrade — a link that
+   worked for *anyone who saw it*, not just Melissa — and the system's own
+   safety check blocked it before it ever deployed. I did not route around
+   that block. Reverted to a plain link that still requires the normal
+   Google sign-in; later relabeled it **"Open Performance Pulse (Google
+   sign-in)"** so the button says what it actually does.
+2. **First attempt at fixing Melissa's real roster file edited the wrong
+   spreadsheet column** — corrected the "Employee" typos in the wrong
+   cells, which would have wiped out Monte Montoya's real manager
+   reference. Caught by re-reading the file back before handing it over;
+   redone correctly from the untouched original.
+3. **Didn't initially catch that `roster-2.xlsx` was a demo/seed file**,
+   not Melissa's real team — it recreated the same 8 fake employees (Ann
+   Steiner, Marcus Doyle, Priya Nair, Theo Brandt, Devon Park, Sasha Reyes,
+   Kiran Bhatt, Lena Ford) every time it was re-uploaded, on top of two
+   name typos (`mmelissa Weiss`, `monte.montoya`) that kept her own real
+   email from linking at all. Resolved by building a clean, from-scratch
+   roster file with exactly two real rows (Melissa, Monte) and uploading
+   it directly.
+
+### Data cleanup performed
+
+- Two full placeholder-data purges (`@placeholder.test` emails), run by
+  Melissa via SQL I prepared and verified — first ~12 rows, then a second
+  ~10 rows after the demo file got re-uploaded. Both verified afterward by
+  querying the database directly, not by trusting the screen.
+- Confirmed **`melissahr212@gmail.com` ("monty") and `melhr212@gmail.com`
+  ("stella") are Melissa's own two extra test accounts**, not real
+  employees — checked directly against Slack's `users.list`. Only 3
+  accounts exist in the whole Slack workspace, all hers.
+- Deletion itself was never done by me directly, by design (see standing
+  rule #3 above) — every delete was Melissa running SQL I wrote and
+  verified first.
+
+### Confirmed facts about how this app actually works (settled tonight, don't re-litigate)
+
+- **Slack and the website share one database** (`lib/data.js`, both
+  surfaces) — anything saved in one shows in the other immediately. This
+  was already true; nothing needed to be built for it.
+- **Slack needs no separate sign-in at all** — it already trusts the
+  Slack workspace identity, matched by email. Only the *website* needs
+  Google sign-in, and that's unchanged and untouched all session.
+- **New pairings only come from HR roster import** (`/onboarding`,
+  gated to `melissaw212@gmail.com` via `is_hr()`) — this was Melissa's own
+  design decision from 2026-09-05, not something broken tonight. Slack's
+  "Add a new employee" button only appears once you already have at least
+  one active pair; it can't create your very first one.
+
+### Verified state as of end of session (checked directly, not assumed)
+
+- `npm test`: **27/27 passing.** `npx eslint`: clean. Production deploy:
+  healthy (`vercel ls` → Ready).
+- Database: **zero** `@placeholder.test` rows anywhere, confirmed by
+  direct query.
+- Melissa's real, active pairing: `melissaw212@gmail.com` (manager) ↔
+  `melissahr212@gmail.com` / "Monte Montoya" (employee) — confirmed active,
+  zero fake data attached, both Slack Home tab and website dashboard
+  checked live and matching.
+- Slack Home tab shows the new **"Open Performance Pulse (Google
+  sign-in)"** link button, confirmed live in Slack after forcing a real
+  refresh (a plain reload does not always trigger Slack to republish the
+  Home tab — a real save, or navigating away and back to the app, does).
