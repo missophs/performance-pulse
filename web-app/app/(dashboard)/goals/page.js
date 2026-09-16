@@ -145,9 +145,13 @@ export default function GoalsPage() {
       <div className="card">
         <div className="card-head">
           <h2>Goals</h2>
-          <button className="btn sm" onClick={openAdd}>Add a goal</button>
+          <button className="btn sm" onClick={openAdd}>{isMgr ? `Add a goal for ${employeeName}` : "Add my goal"}</button>
         </div>
-        <p className="card-note">You have the opportunity to add a goal of your own below, too.</p>
+        <p className="card-note">
+          {isMgr
+            ? `Goals always belong to ${employeeName} — this adds one for them. ${employeeName} can add their own too.`
+            : "Goals are always yours to work toward, even ones your manager helps set."}
+        </p>
         {loading ? (
           <p className="card-note">Loading…</p>
         ) : goals.length === 0 ? (
@@ -193,7 +197,7 @@ export default function GoalsPage() {
 
       <Modal
         open={modalOpen}
-        title={editing ? "Edit goal" : "Add a goal"}
+        title={editing ? "Edit goal" : isMgr ? `Add a goal for ${employeeName}` : "Add my goal"}
         note="Goals work best when you both can tell whether they happened."
         onClose={closeModal}
         onSave={handleSave}

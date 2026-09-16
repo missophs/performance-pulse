@@ -564,6 +564,15 @@ export function addGoalModal(ctx, draft, saved = false) {
     "add_goal",
     "Add a goal",
     [
+      // Whose goal this becomes was never stated anywhere in this modal --
+      // goals always belong to the employee (see the website's Goals page,
+      // "they would never give their manager assigned goals") regardless of
+      // who's adding it, but nothing said so before you opened it. Found
+      // confusing live, 2026-09-16. Title stays generic -- Slack modal
+      // titles cap at 24 chars (see wrapUpConversationModal's own note on
+      // this same file for why that trap matters), so the name goes here
+      // in the body instead.
+      context(ctx?.isMgr ? `This becomes a goal for *${ctx.partnerName}*, not you.` : "This becomes *your* goal — your manager can help set it, but it's always yours."),
       context(SMART_GOAL_CONTEXT),
       // Verbatim match to the website's Add Goal modal (Melissa's
       // instruction) — shown only to the employee, same as there.
