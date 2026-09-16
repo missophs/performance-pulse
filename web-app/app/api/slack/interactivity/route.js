@@ -1078,7 +1078,7 @@ async function deferredModal(method, opener, payload) {
     const swap = (view) => slackApi("views.update", { view_id: viewId, view }).catch((e) => console.error("opener view update:", e));
     try {
       const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-      const ctx = payload.user?.id ? await resolveSlackUser(admin, payload.user.id) : null;
+      const ctx = payload.user?.id ? await resolveSlackUser(admin, payload.user.id, payload.team?.id) : null;
       if (!ctx) {
         await swap(noticeModal(opener.title, "We couldn't match your Slack account to a Performance Pulse profile. Open the app once to link it, then try again."));
         return;
@@ -1095,7 +1095,7 @@ async function deferredModal(method, opener, payload) {
 }
 
 async function handleInteraction(admin, slackUserId, payload) {
-  const ctx = slackUserId ? await resolveSlackUser(admin, slackUserId) : null;
+  const ctx = slackUserId ? await resolveSlackUser(admin, slackUserId, payload.team?.id) : null;
   if (!ctx) return Response.json({ ok: true }); // not linked — nothing we can do
 
   if (payload.type === "block_actions") {
@@ -1186,7 +1186,7 @@ async function handleInteraction(admin, slackUserId, payload) {
       if (chosenId && chosenId !== ctx.pairId) {
         try {
           await setSlackPairSelection(admin, ctx.slackUserId, chosenId, ctx.pairs.map((p) => p.id));
-          const newCtx = await resolveSlackUser(admin, ctx.slackUserId);
+          const newCtx = await resolveSlackUser(admin, ctx.slackUserId, payload.team?.id);
           if (newCtx) await refreshHome(admin, newCtx);
         } catch (e) {
           console.error("switch pair:", e);

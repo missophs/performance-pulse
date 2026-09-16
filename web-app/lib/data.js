@@ -810,11 +810,25 @@ export async function deleteConcern(supabase, id) {
 
 // ------------------------------------------------------ slack installations --
 
+// Self-serve entry point (migration 0030): a team_id this app has never
+// seen gets its own new company row, so a brand-new customer's install
+// doesn't need Melissa to manually provision anything. Reinstalling an
+// already-known workspace (adding a scope, rotating the token) keeps its
+// existing company_id rather than forking a second company for the same
+// real business.
 export async function saveSlackInstallation(supabase, { teamId, teamName, accessToken, botUserId, installedBySlackUserId }) {
+  const { data: existing } = await supabase.from("slack_installations").select("company_id").eq("team_id", teamId).maybeSingle();
+  let companyId = existing?.company_id;
+  if (!companyId) {
+    const { data: company, error: companyErr } = await supabase.from("companies").insert({ name: teamName || teamId }).select("id").single();
+    if (companyErr) throw companyErr;
+    companyId = company.id;
+  }
   const { error } = await supabase
     .from("slack_installations")
-    .upsert({ team_id: teamId, team_name: teamName, access_token: accessToken, bot_user_id: botUserId, installed_by_slack_user_id: installedBySlackUserId, installed_at: new Date().toISOString() });
+    .upsert({ team_id: teamId, team_name: teamName, access_token: accessToken, bot_user_id: botUserId, installed_by_slack_user_id: installedBySlackUserId, company_id: companyId, installed_at: new Date().toISOString() });
   if (error) throw error;
+  return companyId;
 }
 
 export async function getLatestSlackInstallation(supabase) {

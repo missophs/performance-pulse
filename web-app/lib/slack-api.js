@@ -1,26 +1,38 @@
 // Thin wrapper around Slack's Web API. Server-only.
 //
-// Token resolution (SLACK_TODO.md item 0h-2): prefers the most recently
-// OAuth-installed token (slack_installations, see lib/slack-oauth.js and
-// app/api/slack/oauth/callback/route.js) over the old hardcoded
-// SLACK_BOT_TOKEN env var, cached in memory for TOKEN_CACHE_MS so this
-// doesn't add a DB round trip to every single Slack call. With no
-// installation row yet -- today's state, for the workspace already in use
-// -- this falls back to the env var exactly as before, so shipping this
-// changes nothing until a real OAuth install happens.
+// Token resolution (SLACK_TODO.md item 0h-2, extended for real multi-tenant
+// use -- migration 0030): each company has its own row in
+// slack_installations, so the token to use depends on WHICH company's
+// request this is, not just "whichever installed most recently." Callers
+// that know their company (resolved from a Slack payload's team_id via
+// lib/slack-user.js, or from a pairs row's company_id) pass it as
+// opts.companyId; slackApi looks up that company's token specifically.
+// Callers that don't pass one (anything not yet threaded through) fall back
+// to the single most-recently-installed token, then the SLACK_BOT_TOKEN env
+// var -- this app's original single-company behavior, unchanged for any
+// call site this session didn't touch.
+//
+// Cached per companyId (keyed "" for the no-company fallback) for
+// TOKEN_CACHE_MS, so this doesn't add a DB round trip to every single Slack
+// call.
 
 import { createClient } from "@supabase/supabase-js";
 
 const SLACK_API = "https://slack.com/api";
 const TOKEN_CACHE_MS = 60_000;
-let tokenCache = { token: null, expiresAt: 0 };
+const tokenCache = new Map(); // companyId (or "") -> { token, expiresAt }
 
-async function resolveBotToken() {
-  if (tokenCache.token && Date.now() < tokenCache.expiresAt) return tokenCache.token;
+async function resolveBotToken(companyId) {
+  const cacheKey = companyId || "";
+  const cached = tokenCache.get(cacheKey);
+  if (cached && Date.now() < cached.expiresAt) return cached.token;
+
   let token = process.env.SLACK_BOT_TOKEN;
   try {
     const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-    const { data } = await admin.from("slack_installations").select("access_token").order("installed_at", { ascending: false }).limit(1).maybeSingle();
+    let query = admin.from("slack_installations").select("access_token").order("installed_at", { ascending: false }).limit(1);
+    query = companyId ? query.eq("company_id", companyId) : query;
+    const { data } = await query.maybeSingle();
     if (data?.access_token) token = data.access_token;
   } catch (e) {
     // slack_installations may not exist yet (migration 0029 not applied)
@@ -28,7 +40,7 @@ async function resolveBotToken() {
     // env var rather than breaking every Slack call over a lookup failure.
     console.error("slack bot token lookup, falling back to env var:", e.message);
   }
-  tokenCache = { token, expiresAt: Date.now() + TOKEN_CACHE_MS };
+  tokenCache.set(cacheKey, { token, expiresAt: Date.now() + TOKEN_CACHE_MS });
   return token;
 }
 // Slack's interactivity endpoint calls this synchronously inside its 3s
@@ -43,13 +55,14 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // Older methods (users.info, etc.) reject a raw JSON body with
 // user_not_found/invalid_arguments; form-encoding works for every method,
 // so long as object/array values are JSON-stringified first.
-export async function slackApi(method, body, _isRetry = false) {
+export async function slackApi(method, body, opts = {}) {
+  const { companyId, _isRetry = false } = opts;
   const form = new URLSearchParams();
   for (const [key, value] of Object.entries(body || {})) {
     if (value === undefined) continue;
     form.set(key, typeof value === "string" ? value : JSON.stringify(value));
   }
-  const token = await resolveBotToken();
+  const token = await resolveBotToken(companyId);
   const res = await fetch(`${SLACK_API}/${method}`, {
     method: "POST",
     headers: {
@@ -73,7 +86,7 @@ export async function slackApi(method, body, _isRetry = false) {
       const retryAfterSec = parseInt(res.headers.get("Retry-After"), 10);
       const waitMs = Math.min((Number.isFinite(retryAfterSec) ? retryAfterSec : 1) * 1000, MAX_RETRY_WAIT_MS);
       await sleep(waitMs);
-      return slackApi(method, body, true);
+      return slackApi(method, body, { companyId, _isRetry: true });
     }
     // Still rate-limited after the one retry — bail out with the same
     // greppable marker as any other dead-integration failure, instead of

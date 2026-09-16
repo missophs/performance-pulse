@@ -38,7 +38,7 @@ export async function POST(request) {
   if (event?.type === "app_home_opened" && event.tab === "home") {
     const supabaseAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
     try {
-      const ctx = await resolveSlackUser(supabaseAdmin, event.user);
+      const ctx = await resolveSlackUser(supabaseAdmin, event.user, body.team_id);
       const view = ctx ? homeView(ctx, await loadHomeData(supabaseAdmin, ctx.pairId)) : notLinkedHomeView();
       await slackApi("views.publish", { user_id: event.user, view });
     } catch (err) {

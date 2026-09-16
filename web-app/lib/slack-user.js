@@ -33,7 +33,7 @@ export function pairRoleFields(pair, email) {
  * screen must show which pairing is current, per the item 2 "label problem"
  * writeup, so `pairs` is what the Home tab switcher renders from.
  */
-export async function resolveSlackUser(supabaseAdmin, slackUserId) {
+export async function resolveSlackUser(supabaseAdmin, slackUserId, teamId) {
   const info = await slackApi("users.info", { user: slackUserId });
   // employee_email/manager_email are citext, so the .eq() filter below already
   // matches case-insensitively. Still lowercased here because the JS-side
@@ -42,17 +42,34 @@ export async function resolveSlackUser(supabaseAdmin, slackUserId) {
   const email = info.user?.profile?.email?.toLowerCase();
   if (!email) return null;
 
+  // Multi-tenant scoping (migration 0030): with more than one company's
+  // data in these tables, matching by email ALONE is no longer enough --
+  // two different companies could each provision the same address (a
+  // contractor, a generic role inbox). teamId comes straight from Slack's
+  // own payload/event body, so it's a verified signal of which company is
+  // actually asking. No teamId, or no installation row for it yet (a
+  // request from before migration 0030/0029 was applied, or the env-var
+  // fallback path with no installations table at all) -- fall through
+  // unscoped rather than fail closed, matching this app's original
+  // single-company behavior.
+  let companyId = null;
+  if (teamId) {
+    const { data: install } = await supabaseAdmin.from("slack_installations").select("company_id").eq("team_id", teamId).maybeSingle();
+    companyId = install?.company_id || null;
+  }
+
   // PostgREST .or() parses this as a filter expression, not a literal — a
   // comma or parenthesis in the value would otherwise break the clause or
   // change what it matches. Quote the value and escape internal quotes per
   // https://postgrest.org/en/stable/references/api/tables_views.html#operators
   const safeEmail = `"${email.replace(/"/g, '\\"')}"`;
-  const { data: pairs, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from("pairs")
     .select("*, employee:profiles!employee_id(id, full_name), manager:profiles!manager_id(id, full_name)")
     .or(`employee_email.eq.${safeEmail},manager_email.eq.${safeEmail}`)
-    .is("closed_at", null)
-    .order("created_at", { ascending: true });
+    .is("closed_at", null);
+  if (companyId) query = query.eq("company_id", companyId);
+  const { data: pairs, error } = await query.order("created_at", { ascending: true });
   if (error) throw error;
   if (!pairs?.length) return null;
 
