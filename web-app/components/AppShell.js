@@ -130,7 +130,9 @@ function ShellBody({ counts, children }) {
                 You manage {partnerName}
               </button>
             ) : (
-              <span className="badge b-purple" title="Your role in this 1:1">Employee of {partnerName}</span>
+              <Link href="/one-on-one" className="badge b-purple" title="Go to your 1:1 conversation">
+                Employee of {partnerName} &rarr; My 1:1
+              </Link>
             )}
             <NotificationBell />
             <span
