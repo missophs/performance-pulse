@@ -23,10 +23,18 @@ export default function LoginPage() {
   async function signInWithGoogle() {
     setError("");
     const supabase = createClient();
+    // proxy.js already preserves ?from=slack onto this /login redirect for
+    // an unauthenticated Slack-originated visit, but that's as far as it
+    // got without this: redirectTo was a bare URL, so the round trip through
+    // Google + Supabase's own callback dropped it, and /dashboard never knew
+    // to show the return-to-Slack banner. auth/callback/route.js already
+    // reads ?next= and redirects there -- just needed to actually send it.
+    const from = new URLSearchParams(window.location.search).get("from");
+    const next = from === "slack" ? "/dashboard?from=slack" : "/dashboard";
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
         // Without this, Google silently reuses whichever Google account is
         // already active in the browser instead of showing the account
         // picker -- there's no way to switch accounts from this button
