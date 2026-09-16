@@ -45,6 +45,10 @@ function ShellBody({ counts, children }) {
   // to discover it exists (found live 2026-09-16: viewing the pairing where
   // you're the manager gave no hint you also have a manager elsewhere).
   const myManagerPair = pairs?.find((p) => p.role === "employee" && p.id !== pairId);
+  // Symmetric case: viewing a pairing where you're the EMPLOYEE gave no
+  // hint you also manage someone elsewhere (Melissa's follow-up,
+  // 2026-09-16, right after the first half of this was fixed).
+  const myEmployeePair = pairs?.find((p) => p.role === "manager" && p.id !== pairId);
 
   const [switching, setSwitching] = useState(false);
   const [editingLabel, setEditingLabel] = useState(false);
@@ -137,6 +141,16 @@ function ShellBody({ counts, children }) {
                 title="You're also someone's employee -- click to switch to that 1:1"
               >
                 Your manager: {myManagerPair.partnerName}
+              </button>
+            )}
+            {myEmployeePair && (
+              <button
+                className="btn ghost sm"
+                onClick={() => switchPair(myEmployeePair.id)}
+                disabled={switching}
+                title="You also manage someone else -- click to switch to that 1:1"
+              >
+                You manage: {myEmployeePair.partnerName}
               </button>
             )}
             <Link href="/onboarding/add" className="btn ghost sm" title={isMgr ? "Set up a 1:1 with another employee you manage" : "Set up a 1:1 with another manager"}>
