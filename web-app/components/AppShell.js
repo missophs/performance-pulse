@@ -122,18 +122,7 @@ function ShellBody({ counts, children }) {
 
       <main>
         {fromSlack && (
-          <div
-            style={{
-              background: "#e6f4ea",
-              color: "#1a3c25",
-              padding: "10px 16px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 12,
-              fontSize: 13,
-            }}
-          >
+          <div className="slack-return-banner">
             <span>You&apos;re signed in as {myName}. You can close this tab and go back to Slack.</span>
             <div style={{ display: "flex", gap: 8 }}>
               <button
