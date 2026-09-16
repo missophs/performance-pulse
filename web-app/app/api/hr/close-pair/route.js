@@ -23,6 +23,15 @@ export async function POST(req) {
   const { pairId } = await req.json();
   if (!pairId) return Response.json({ error: "No pairId." }, { status: 400 });
 
-  await closePair(admin(), pairId, "Closed by HR from the org chart");
+  // pairId is client-supplied with no ownership check otherwise, and this
+  // runs on the service-role client (bypasses RLS) -- same governance rule
+  // as every Slack handler (see CLAUDE.md): verify it belongs to this HR
+  // admin's own company before acting on it, so one company's org chart
+  // can't force-close another company's pairing by guessing/replaying an id.
+  const a = admin();
+  const { data: pair } = await a.from("pairs").select("company_id").eq("id", pairId).maybeSingle();
+  if (!pair || pair.company_id !== hr.companyId) return Response.json({ error: "No pairId." }, { status: 400 });
+
+  await closePair(a, pairId, "Closed by HR from the org chart");
   return Response.json({ ok: true });
 }

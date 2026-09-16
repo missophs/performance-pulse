@@ -82,6 +82,7 @@ export async function POST(req) {
   const { data: knownReal } = await a
     .from("pairs")
     .select("employee_label, employee_email")
+    .eq("company_id", hr.companyId)
     .not("employee_email", "ilike", "%@placeholder.test")
     .order("created_at", { ascending: false });
   // Two different employees sharing a (normalized) name would otherwise
@@ -112,7 +113,7 @@ export async function POST(req) {
   const reassignments = [];
   for (const { employee, manager } of rows) {
     try {
-      const result = await createPairFromRoster(a, emailFor(employee), emailFor(manager), placeholderEmail(manager), employee);
+      const result = await createPairFromRoster(a, emailFor(employee), emailFor(manager), placeholderEmail(manager), employee, hr.companyId);
       if (result.reassigned) reassignments.push(`${employee}: ${result.fromManagerEmail} → ${manager}`);
       else if (result.updated) corrected++;
       else if (result.skipped) skipped++;

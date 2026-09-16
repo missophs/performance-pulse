@@ -186,12 +186,19 @@ export async function resolveEmployeeNameToEmail(admin, name) {
 // place rather than leaving the old one open and inserting a second, which
 // used to leave the employee showing up under both managers at once
 // (found 2026-09-06).
-export async function createPairFromRoster(admin, employeeEmail, managerEmail, managerPlaceholder, employeeLabel) {
+export async function createPairFromRoster(admin, employeeEmail, managerEmail, managerPlaceholder, employeeLabel, companyId) {
   // One query covers both the exact-duplicate check and the stale-placeholder
   // self-heal check (both only ever matched non-closed rows for this
   // employee_email) -- two round trips collapsed into one, 2026-09-05.
+  // Scoped to companyId (migration 0031) so two different companies'
+  // rosters can't see or self-heal into each other's pairs over a shared
+  // employee_email -- omitted (tests, pre-0031 callers) falls through to
+  // pairs.company_id's own DB default, matching this app's original
+  // single-company behavior.
+  let existingQuery = admin.from("pairs").select("id, manager_email").eq("employee_email", employeeEmail).is("closed_at", null);
+  if (companyId) existingQuery = existingQuery.eq("company_id", companyId);
   const [{ data: existingRows, error: existingErr }, { data: mgr, error: mgrErr }] = await Promise.all([
-    admin.from("pairs").select("id, manager_email").eq("employee_email", employeeEmail).is("closed_at", null),
+    existingQuery,
     admin.from("profiles").select("id").eq("email", managerEmail).maybeSingle(),
   ]);
   if (existingErr) throw existingErr;
@@ -273,6 +280,7 @@ export async function createPairFromRoster(admin, employeeEmail, managerEmail, m
     manager_id: mgr?.id || null,
     manager_email: managerEmail,
     employee_label: employeeLabel || null,
+    ...(companyId ? { company_id: companyId } : {}),
   });
   if (error) {
     if (error.code === "23505") return { skipped: true };
@@ -312,10 +320,17 @@ export async function reopenPair(supabase, pairId) {
 // restriction the org chart's per-row Close button already bypasses, for
 // the same reason -- most of these pairings' managers can't sign in to
 // close them themselves.
-export async function closeAllPairs(admin, note) {
+export async function closeAllPairs(admin, note, companyId) {
+  // Scoped to companyId (migration 0031) -- without this, one company's "reset
+  // roster" button would close every OTHER company's active pairings too, not
+  // just its own. companyId is required here (unlike createPairFromRoster's
+  // optional scoping) since there's no per-row fallback that makes an
+  // unscoped bulk close safe once more than one company's data exists.
+  if (!companyId) throw new Error("closeAllPairs requires a companyId");
   const { data, error } = await admin
     .from("pairs")
     .update({ closed_at: new Date().toISOString(), closing_note: note || null })
+    .eq("company_id", companyId)
     .is("closed_at", null)
     .select("id");
   if (error) throw error;
@@ -1441,11 +1456,10 @@ export async function deleteHandbookLink(supabase, link) {
 // by manager so HR can see who reports to whom without re-opening the
 // spreadsheet. Names prefer a real profile's full_name (once that person
 // has signed in), falling back to employee_label or the bare email.
-export async function getOrgChart(admin) {
-  const { data: pairs, error } = await admin
-    .from("pairs")
-    .select("id, employee_email, manager_email, employee_label")
-    .is("closed_at", null);
+export async function getOrgChart(admin, companyId) {
+  let query = admin.from("pairs").select("id, employee_email, manager_email, employee_label").is("closed_at", null);
+  if (companyId) query = query.eq("company_id", companyId);
+  const { data: pairs, error } = await query;
   if (error) throw error;
 
   const emails = [...new Set(pairs.flatMap((p) => [p.employee_email, p.manager_email]))];

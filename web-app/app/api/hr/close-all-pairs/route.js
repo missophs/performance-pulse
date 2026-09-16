@@ -17,6 +17,6 @@ export async function POST() {
   const hr = await requireHr();
   if (!hr.ok) return Response.json({ error: hr.error }, { status: hr.status });
 
-  const closed = await closeAllPairs(admin(), "Removed roster (HR bulk close)");
+  const closed = await closeAllPairs(admin(), "Removed roster (HR bulk close)", hr.companyId);
   return Response.json({ ok: true, closed });
 }

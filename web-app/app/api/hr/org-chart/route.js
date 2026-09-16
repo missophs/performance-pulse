@@ -15,6 +15,6 @@ export async function POST() {
   const hr = await requireHr();
   if (!hr.ok) return Response.json({ error: hr.error }, { status: hr.status });
 
-  const orgChart = await getOrgChart(admin());
+  const orgChart = await getOrgChart(admin(), hr.companyId);
   return Response.json({ orgChart });
 }
