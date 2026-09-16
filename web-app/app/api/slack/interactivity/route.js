@@ -118,36 +118,17 @@ async function refreshHome(admin, ctx, data) {
   }
 }
 
-// A successful save used to DM the submitter a "✅ X saved." checkmark for
-// EVERY kind of save (confirmSaved/CONFIRM_LABELS, trimmed down 2026-09-16)
-// -- pure clutter for a save that already shows itself on the refreshed
-// Home tab (an add bumps a visible count: "Topics (3)", "Goals -- 4 on
-// record", etc., via refreshHome below). But an *edit* changes no count at
-// all (editing a topic's text doesn't move "3 open topics"), and a private
-// note has no Home-tab count shown anywhere -- for those, closing the modal
-// was visually identical to hitting Cancel, the exact ambiguity this DM
-// originally existed to solve (found live 2026-09-13). So this only still
-// fires for the handful of callback ids where nothing else confirms the
-// save; every add/notify-backed save relies on the visible refresh instead.
-// The notify()/dmByEmail() calls that alert the OTHER pair member (new
-// topic, new action, wrap-up, etc.) are untouched by any of this -- that's
-// the ping the other person actually needs, to know there's something new
-// to look at or respond to.
-const SILENT_CONFIRM_LABELS = {
-  edit_employee_label: "Employee's name updated.",
-  edit_topic: "Topic updated.",
-  edit_goal: "Goal updated.",
-  edit_action: "Action updated.",
-  add_suggestion: "Private note saved.",
-};
-
-async function confirmSaved(admin, ctx, callbackId) {
-  const label = SILENT_CONFIRM_LABELS[callbackId];
-  if (!label) return;
-  const opened = await slackApi("conversations.open", { users: ctx.slackUserId }).catch((e) => console.error("confirm dm open:", e));
-  if (!opened?.channel?.id) return;
-  await slackApi("chat.postMessage", { channel: opened.channel.id, text: `✅ ${label}` }).catch((e) => console.error("confirm dm send:", e));
-}
+// No self-DM on save, for any callback id, ever (confirmSaved removed
+// 2026-09-16). SLACK_TODO.md's own standing rule already covered this:
+// "Topic-add pings batched into one DM per Prepare session instead of one
+// per click" -- one DM per click is exactly what confirmSaved did, self or
+// not. A trimmed version briefly kept it for edits/private notes (nothing
+// else on the Home tab confirms those), but a DM triggers a real Slack
+// notification sound -- unacceptable on every button press, no exceptions.
+// Accepted tradeoff: an edit or private note now gives no separate
+// confirmation beyond the modal closing. notify()/dmByEmail() calls that
+// alert the OTHER pair member are untouched -- that ping is for someone
+// who needs to know to respond, not the actor confirming their own click.
 
 // -------------------------------------------------------- open a modal -----
 
@@ -188,7 +169,7 @@ const OPENERS = {
   open_add_action: { title: "Add an action", build: async (admin, ctx) => addActionModal(ctx) },
   open_add_hardconvo: { title: "Hard conversation", build: async () => addHardConvoModal() },
   open_wrap_up: { title: "Wrap up", build: async (admin, ctx) => wrapUpModal((await loadHomeData(admin, ctx.pairId)).topics, ctx.pairId) },
-  open_close_pair: { title: "Clear out old topics & actions", build: async (admin, ctx) => wrapUpConversationModal(ctx.pairId) },
+  open_close_pair: { title: "Clear out old topics", build: async (admin, ctx) => wrapUpConversationModal(ctx.pairId) },
   // Button is manager-only in homeView too — this re-checks server-side in
   // case of a stale/replayed action, same defense-in-depth as every other
   // role-gated opener here.
@@ -1145,12 +1126,10 @@ async function handleInteraction(admin, slackUserId, payload) {
       // Found in review 2026-09-13.
       if (!result?.skip) {
         // The save already happened above; closing the modal shouldn't wait
-        // on the Home-tab republish or the confirmation DM (see
-        // confirmSaved) -- ctx's own in-place mutations (e.g.
+        // on the Home-tab republish -- ctx's own in-place mutations (e.g.
         // edit_employee_label's ctx.partnerName) land before this runs, so
         // the refresh still shows the new value.
         after(() => refreshHome(admin, ctx));
-        after(() => confirmSaved(admin, ctx, payload.view?.callback_id));
       }
     }
     return Response.json({}); // close the modal

@@ -934,7 +934,7 @@ export function addEmployeeModal() {
 export function wrapUpConversationModal(pairId) {
   return modal(
     "wrap_up_conversation",
-    "Clear out old topics & actions",
+    "Clear out old topics",
     [
       section(
         "This closes out any open topics, goals, and actions — marking them Discussed / Complete / Done — so your Home tab starts fresh. Nothing is deleted, your pairing keeps going exactly as before, and either of you can add a new topic or action right away — this doesn't end the conversation."
