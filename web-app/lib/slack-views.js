@@ -141,7 +141,14 @@ export function homeView(ctx, d) {
     // requires the normal Google sign-in there -- a one-time auto-sign-in
     // link was tried and rejected as a security downgrade (anyone who saw
     // the link could get in without it).
-    actions([openInApp("Open Performance Pulse (Google sign-in)", "/dashboard?from=slack")]),
+    // Label deliberately doesn't say "(Google sign-in)" (Melissa, 2026-09-16):
+    // this view only ever renders for a Slack user resolveSlackUser() already
+    // matched to a real account (app/api/slack/events/route.js's ctx check --
+    // an unlinked user gets notLinkedHomeView() instead, never this one), so
+    // for its actual audience this is never a signup step, and the old label
+    // read as "you have to log in" even to someone already signed in -- the
+    // one thing Slack's static Home tab text can never actually know.
+    actions([openInApp("Open Performance Pulse", "/dashboard?from=slack")]),
     ...(ctx.pairs.length > 1
       ? [
           actions(
