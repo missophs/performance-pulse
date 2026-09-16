@@ -44,6 +44,7 @@ export default async function DashboardLayout({ children }) {
     const realPartnerName = partnerNameById.get(partnerIdOf(p)) || (r === "employee" ? "Your manager" : "Your employee");
     return {
       id: p.id,
+      role: r,
       partnerName: r === "manager" && p.employee_label ? p.employee_label : realPartnerName,
       employeeLabel: r === "manager" ? p.employee_label || "" : "",
     };

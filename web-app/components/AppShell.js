@@ -39,6 +39,13 @@ function ShellBody({ counts, children }) {
   const pathname = usePathname();
   const router = useRouter();
 
+  // If this account is on a pairing where it's the EMPLOYEE, that's true
+  // no matter which pairing is currently active -- surfaced persistently so
+  // a manager-with-their-own-manager doesn't have to open the pair switcher
+  // to discover it exists (found live 2026-09-16: viewing the pairing where
+  // you're the manager gave no hint you also have a manager elsewhere).
+  const myManagerPair = pairs?.find((p) => p.role === "employee" && p.id !== pairId);
+
   const [switching, setSwitching] = useState(false);
   const [editingLabel, setEditingLabel] = useState(false);
   const [labelInput, setLabelInput] = useState(employeeLabel);
@@ -121,6 +128,16 @@ function ShellBody({ counts, children }) {
                   ))}
                 </select>
               </>
+            )}
+            {myManagerPair && (
+              <button
+                className="btn ghost sm"
+                onClick={() => switchPair(myManagerPair.id)}
+                disabled={switching}
+                title="You're also someone's employee -- click to switch to that 1:1"
+              >
+                Your manager: {myManagerPair.partnerName}
+              </button>
             )}
             <Link href="/onboarding/add" className="btn ghost sm" title={isMgr ? "Set up a 1:1 with another employee you manage" : "Set up a 1:1 with another manager"}>
               + Add {isMgr ? "employee" : "manager"}
