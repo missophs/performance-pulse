@@ -969,7 +969,7 @@
       goals:[], development:[], career:[], concerns:[], actions:[],
       notifications:[], reviewDrafts:{ employee:"", manager:"" },
       feedbackRequests:[], customSuggestions:[], documents:[], handbook:[], hrEmail:"", messages:[],
-      assist:false
+      assist:true
     };
   }
 
@@ -978,10 +978,7 @@
     try{
       var raw = localStorage.getItem(KEY);
       if(raw){
-        /* One-time rename: saved data from before the demo names were replaced.
-           A plain string swap catches every field the old names appear in —
-           people, byName, owners, notification text. */
-        raw = raw.replace(/Maya Rivera/g, "Melissa Weiss").replace(/Alex Kim/g, "Monte Montoya");
+        /* One-time rename: saved data from before status labels changed. */
         raw = raw.replace(/Action Needed/g, "Needs Assistance");
         var p = JSON.parse(raw), d = blank();
         for(var k in d){ if(p[k] === undefined) p[k] = d[k]; }
@@ -3618,7 +3615,7 @@
       ? " · Next 1:1 " + new Date(data.next1on1.date + "T00:00:00").toLocaleDateString(undefined,{month:"short",day:"numeric"})
       : "";
     document.getElementById("whoName").innerHTML =
-      esc(me()) + "<small>" + (isMgr() ? "Manager — viewing " + esc(empName()) : "Employee") + esc(n1chip) + "</small>";
+      esc(me()) + "<small>" + (isMgr() ? "Viewing " + esc(empName()) : "Employee") + esc(n1chip) + "</small>";
 
     document.getElementById("tabConcerns").style.display = isMgr() ? "" : "none";
     if(!isMgr() && subs.performance === "concerns") subs.performance = "achievements";
