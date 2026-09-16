@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { PulseProvider, usePulse } from "@/components/PulseContext";
 import { createClient } from "@/lib/supabase/client";
 import { initials } from "@/lib/format";
@@ -38,6 +38,15 @@ function ShellBody({ counts, children }) {
   const { userId, pairId, pairs, role, myName, partnerName, employeeLabel, isMgr, supabase } = usePulse();
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // A page can't switch focus to a different app (Slack) -- browsers don't
+  // allow that, for the same reason a random tab can't steal your
+  // attention. This is the honest ceiling: tell you the sign-in worked and
+  // offer to close the tab (works when the tab has an `opener`, i.e. it was
+  // opened by a link/button click rather than typed in fresh -- true for
+  // the Slack Home tab's "Open Performance Pulse" button, not guaranteed in
+  // every browser). Melissa's ask, 2026-09-16, after testing that link.
+  const [fromSlack, setFromSlack] = useState(searchParams.get("from") === "slack");
 
   // If this account is on a pairing where it's the EMPLOYEE, that's true
   // no matter which pairing is currently active -- surfaced persistently so
@@ -112,6 +121,36 @@ function ShellBody({ counts, children }) {
       </aside>
 
       <main>
+        {fromSlack && (
+          <div
+            style={{
+              background: "#e6f4ea",
+              color: "#1a3c25",
+              padding: "10px 16px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              fontSize: 13,
+            }}
+          >
+            <span>You&apos;re signed in as {myName}. You can close this tab and go back to Slack.</span>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                className="btn ghost sm"
+                onClick={() => {
+                  setFromSlack(false);
+                  router.replace(pathname);
+                }}
+              >
+                Dismiss
+              </button>
+              <button className="btn sm" onClick={() => window.close()}>
+                Close this tab
+              </button>
+            </div>
+          </div>
+        )}
         <div className="topbar">
           <div className="process-flow">PREPARE &rarr; TALK &rarr; REFLECT &rarr; ACT &rarr; FOLLOW UP</div>
           <div className="role-switch">

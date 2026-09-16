@@ -141,7 +141,7 @@ export function homeView(ctx, d) {
     // requires the normal Google sign-in there -- a one-time auto-sign-in
     // link was tried and rejected as a security downgrade (anyone who saw
     // the link could get in without it).
-    actions([openInApp("Open Performance Pulse (Google sign-in)", "/dashboard")]),
+    actions([openInApp("Open Performance Pulse (Google sign-in)", "/dashboard?from=slack")]),
     ...(ctx.pairs.length > 1
       ? [
           actions(
