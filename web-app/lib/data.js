@@ -1020,16 +1020,30 @@ export async function deleteAction(supabase, id) {
 // so each one can get a real logActivity entry with its own label and old
 // status, same as closing them one at a time would -- a bulk action
 // shouldn't leave a thinner trail in History than doing it by hand.
-export async function wrapUpConversation(supabase, pairId, ctx = {}) {
+// selectedIds narrows this to exactly what was checked in the modal's
+// checkboxes (Melissa, 2026-09-16: "I might not wanna clear out the
+// conversation, especially if the person didn't respond") -- it used to
+// close every open item for the pair unconditionally. Each list is
+// intersected with an .in("id", ...) filter below, so a stale/tampered id
+// (already closed elsewhere, or from a different pair) can't do anything
+// the pair_id + status filters wouldn't already have allowed.
+export async function wrapUpConversation(supabase, pairId, selectedIds, ctx = {}) {
   const now = new Date().toISOString();
+  const { topicIds: pickedTopicIds = [], goalIds: pickedGoalIds = [], actionIds: pickedActionIds = [] } = selectedIds || {};
   // Topics' open/default status is lowercase "open" (see TOPIC_STATES,
   // lib/one-on-one-content.js) -- unlike actions, whose open status really is
   // "Open". Easy to get backwards; this comment is here so it doesn't happen
   // again.
   const [{ data: openTopics }, { data: openGoals }, { data: openActions }] = await Promise.all([
-    supabase.from("topics").select("id, text, status").eq("pair_id", pairId).eq("status", "open"),
-    supabase.from("goals").select("id, text, status").eq("pair_id", pairId).in("status", ["Not Started", "In Progress", "At Risk"]),
-    supabase.from("actions").select("id, text, status").eq("pair_id", pairId).eq("status", "Open"),
+    pickedTopicIds.length
+      ? supabase.from("topics").select("id, text, status").eq("pair_id", pairId).eq("status", "open").in("id", pickedTopicIds)
+      : Promise.resolve({ data: [] }),
+    pickedGoalIds.length
+      ? supabase.from("goals").select("id, text, status").eq("pair_id", pairId).in("status", ["Not Started", "In Progress", "At Risk"]).in("id", pickedGoalIds)
+      : Promise.resolve({ data: [] }),
+    pickedActionIds.length
+      ? supabase.from("actions").select("id, text, status").eq("pair_id", pairId).eq("status", "Open").in("id", pickedActionIds)
+      : Promise.resolve({ data: [] }),
   ]);
   const topicIds = (openTopics || []).map((t) => t.id);
   const goalIds = (openGoals || []).map((g) => g.id);

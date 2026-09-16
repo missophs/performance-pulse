@@ -170,7 +170,7 @@ const OPENERS = {
   open_add_action: { title: "Add an action", build: async (admin, ctx) => addActionModal(ctx) },
   open_add_hardconvo: { title: "Hard conversation", build: async () => addHardConvoModal() },
   open_wrap_up: { title: "Wrap up", build: async (admin, ctx) => wrapUpModal((await loadHomeData(admin, ctx.pairId)).topics, ctx.pairId) },
-  open_close_pair: { title: "Mark this as done", build: async (admin, ctx) => wrapUpConversationModal(ctx.pairId) },
+  open_close_pair: { title: "Mark this as done", build: async (admin, ctx) => wrapUpConversationModal(ctx.pairId, await loadHomeData(admin, ctx.pairId)) },
   // Button is manager-only in homeView too — this re-checks server-side in
   // case of a stale/replayed action, same defense-in-depth as every other
   // role-gated opener here.
@@ -553,9 +553,16 @@ const SUBMISSIONS = {
     const pairCtx = pinnedPairId === ctx.pairId ? ctx : await resolvePairContext(admin, ctx.email, pinnedPairId);
     if (!pairCtx) return { skip: true }; // pair closed/deleted between open and submit
     const note = (fieldVal(v, "note") || "").trim();
-    const { topics, goals, actions } = await wrapUpConversation(admin, pairCtx.pairId, fromSlack(pairCtx));
+    // Each checked option is "type:id" (see wrapUpConversationModal) -- one
+    // parse covers all three checkbox blocks. Only what was actually picked
+    // closes; anything left unchecked is never touched (Melissa, 2026-09-16).
+    const picked = [...(fieldVal(v, "done_topics") || []), ...(fieldVal(v, "done_goals") || []), ...(fieldVal(v, "done_actions") || [])];
+    const idsOf = (type) => picked.filter((p) => p.startsWith(`${type}:`)).map((p) => p.slice(type.length + 1));
+    const selectedIds = { topicIds: idsOf("topic"), goalIds: idsOf("goal"), actionIds: idsOf("action") };
+    const { topics, goals, actions } = await wrapUpConversation(admin, pairCtx.pairId, selectedIds, fromSlack(pairCtx));
+    if (!topics && !goals && !actions && !note) return; // nothing picked, nothing written -- no need to DM an empty summary
     const otherEmail = pairCtx.isMgr ? pairCtx.pair.employee_email : pairCtx.pair.manager_email;
-    const text = `${pairCtx.myName} cleared out old topics on your 1:1 -- ${topics} topic(s), ${goals} goal(s), and ${actions} action(s) closed out. Your pairing is unaffected, and you can keep adding topics or actions any time.${note ? `\n\nNote: ${note}` : ""}`;
+    const text = `${pairCtx.myName} marked some things done on your 1:1 -- ${topics} topic(s), ${goals} goal(s), and ${actions} action(s) closed out. Your pairing is unaffected, and you can keep adding topics or actions any time.${note ? `\n\nNote: ${note}` : ""}`;
     await dmByEmail(otherEmail, { text }).catch((e) => console.error("wrap up conversation notify:", e));
   },
   // Manager-only (also gated in OPENERS above). createPairForSlack takes

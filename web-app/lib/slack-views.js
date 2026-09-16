@@ -980,14 +980,36 @@ export function addEmployeeModal(ctx) {
   );
 }
 
-export function wrapUpConversationModal(pairId) {
+// d is the same shape homeView(ctx, d) already takes (loadHomeData's
+// result) -- this used to take no data at all and just close *every* open
+// topic/goal/action for the pair sight unseen. Rebuilt as a picker (Melissa,
+// 2026-09-16: "I might not wanna clear out the conversation, especially if
+// the person didn't respond") -- nothing is pre-checked, so leaving
+// something unchecked leaves it exactly as it was, open and untouched.
+export function wrapUpConversationModal(pairId, d) {
+  const openTopics = (d?.topics || []).filter(isOpenTopic);
+  const openGoals = (d?.goals || []).filter((g) => g.status !== "Complete" && g.status !== "Deferred");
+  const openActions = (d?.actions || []).filter((a) => a.status !== "Done");
+  // Slack's checkboxes element caps out at 10 options -- same ceiling
+  // wrapUpModal's own "Topics covered" checkboxes already lives with.
+  // ponytail: 10-item cap per list, page or switch to multi_static_select
+  // if a real pair's backlog ever gets that long.
+  const topicOptions = openTopics.slice(0, 10).map((t) => opt(t.text, `topic:${t.id}`));
+  const goalOptions = openGoals.slice(0, 10).map((g) => opt(g.text, `goal:${g.id}`));
+  const actionOptions = openActions.slice(0, 10).map((a) => opt(a.text, `action:${a.id}`));
+  const nothingOpen = !topicOptions.length && !goalOptions.length && !actionOptions.length;
   return modal(
     "wrap_up_conversation",
     "Mark this as done",
     [
       section(
-        "This marks your open topics, goals, and actions Discussed / Complete / Done, so your Home tab starts fresh. Nothing is deleted, your pairing keeps going exactly as before, and either of you can add a new topic or action right away — this doesn't end the conversation."
+        nothingOpen
+          ? "Nothing open right now — you're all caught up. Add a note below if you still want to send one."
+          : "Check off what's actually done. Anything still waiting on a response — leave it unchecked and it stays open, untouched."
       ),
+      ...(topicOptions.length ? [inputBlock("done_topics", "Topics", { type: "checkboxes", action_id: "val", options: topicOptions }, true)] : []),
+      ...(goalOptions.length ? [inputBlock("done_goals", "Goals", { type: "checkboxes", action_id: "val", options: goalOptions }, true)] : []),
+      ...(actionOptions.length ? [inputBlock("done_actions", "Actions", { type: "checkboxes", action_id: "val", options: actionOptions }, true)] : []),
       // inputBlock's 4th arg is Slack's own `optional` flag -- this was
       // hardcoded false (required) since the very first version of this
       // modal despite the label and placeholder both saying "Optional,"
