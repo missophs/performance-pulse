@@ -81,6 +81,7 @@ import {
   deleteCustomSuggestion,
   addMessage,
   updatePair,
+  closePair,
   getFormDraft,
   saveFormDraft,
   clearFormDraft,
@@ -174,9 +175,9 @@ const OPENERS = {
   // case of a stale/replayed action, same defense-in-depth as every other
   // role-gated opener here.
   open_add_employee: {
-    title: "Add a new employee",
+    title: "Add or change employee",
     build: async (admin, ctx) =>
-      ctx.isMgr ? addEmployeeModal() : noticeModal("Add a new employee", "Only managers can add a new employee."),
+      ctx.isMgr ? addEmployeeModal(ctx) : noticeModal("Add or change employee", "Only managers can do this."),
   },
   open_add_goal: { title: "Add a goal", build: async (admin, ctx) => addGoalModal(ctx, normalizeDraft(GOAL_FIELDS, await draftFor(admin, ctx, "goal"))) },
   open_add_devplan: {
@@ -580,8 +581,20 @@ const SUBMISSIONS = {
     if (email === ctx.email) {
       return { error: { blockId: "email", message: "That's your own email." } };
     }
+    // "archive" closes the pairing this modal was opened from (ctx.pairId,
+    // already verified as this manager's own -- never a Slack-supplied id),
+    // same closePair() the website/HR route uses. "keep" leaves it
+    // untouched -- the original "Add a new employee" behavior. New pair
+    // created FIRST, archive only on success -- if createPairForSlack fails
+    // (e.g. a duplicate-pairing constraint), nothing is archived, so a
+    // failed attempt never leaves the manager with the old employee gone
+    // and no replacement.
+    const keepCurrent = fieldVal(v, "keep_current");
     try {
       await createPairForSlack(admin, ctx.profileId, ctx.email, email);
+      if (keepCurrent === "archive") {
+        await closePair(admin, ctx.pairId, `Replaced by ${email}`);
+      }
     } catch (e) {
       return { error: { blockId: "email", message: e.message } };
     }

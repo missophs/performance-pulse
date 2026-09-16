@@ -185,7 +185,7 @@ export function homeView(ctx, d) {
     // OTHER pairs) is unrelated to this button and lit it green permanently
     // for any manager with 2+ reports, which is exactly the decorative
     // highlight the 2026-09-12 rule forbids (see CLAUDE.md/memory).
-    ...(ctx.isMgr ? [actions([button("Add a new employee", "open_add_employee")])] : []),
+    ...(ctx.isMgr ? [actions([button("Add or change employee", "open_add_employee")])] : []),
     context(`Next 1:1: ${next1on1}  ·  ${openTopics.length} open topic${openTopics.length === 1 ? "" : "s"}  ·  ${openActions.length} open action${openActions.length === 1 ? "" : "s"}`),
     { type: "divider" },
     section("*My 1:1*\nPrepare, talk, and wrap up — right here."),
@@ -917,24 +917,53 @@ export function wrapUpModal(topics, pairId) {
 // to say it ended the whole pairing -- that hasn't been true since this was
 // refactored to a soft clear, but the comment (and the UI copy/styling)
 // never caught up, which is exactly what read as "this ends things" to a
-// real user (flagged 2026-09-16). The actual hard-close action is
-// closePair() in lib/data.js, used only by the website/HR admin route --
-// never called from Slack.
+// real user (flagged 2026-09-16). closePair() in lib/data.js is the
+// hard-close action this modal doesn't do -- it's still called from the
+// website/HR admin route, and now ALSO from this file's own add_employee
+// handler for the "archive it" choice below, when a manager is replacing
+// someone rather than adding a second report.
 // -------------------------------------------------- add a new employee -----
 
 // Manager-only, mirrors the website's "Add another pairing" (/onboarding/add)
 // but scoped to manager-adds-employee, the one real request this exists for
 // (SLACK_TODO.md) -- see createPairForSlack (lib/data.js) for why this can't
 // just reuse the website's create_pair RPC.
-export function addEmployeeModal() {
+//
+// "Add a new employee" and "Edit their name" used to be two separate,
+// confusing buttons that didn't cover the actual case a manager runs into
+// most: an employee leaving and being replaced. This modal now asks
+// explicitly what should happen to the CURRENT pairing (ctx.pairId) --
+// kept open (the old "just add a second report" case) or archived (the new
+// "replace them" case) -- rather than silently always keeping it open,
+// which is what "Add a new employee" always did before. Renaming/label
+// editing for an employee who ISN'T being replaced still lives on
+// editEmployeeLabelModal; this modal is only about the roster itself.
+export function addEmployeeModal(ctx) {
   return modal(
     "add_employee",
-    "Add a new employee",
+    "Add or change employee",
     [
       section(
         "Starts a new 1:1 pairing with you as their manager. Type their work email, or their exact name if HR already has them on the roster — it links right away if they already use Performance Pulse, or the moment they sign up otherwise."
       ),
       inputBlock("email", "Their work email or roster name", plainInput("val", { placeholder: "name@company.com, or their full name" }), true),
+      inputBlock(
+        "keep_current",
+        `Your current pairing with ${ctx.partnerName}`,
+        {
+          type: "radio_buttons",
+          action_id: "val",
+          options: [
+            { text: { type: "plain_text", text: "Keep it open — adding another employee" }, value: "keep" },
+            // Slack caps option text at 75 chars -- a long real name here
+            // could blow that, found in review 2026-09-16 (same class of
+            // silent-Slack-limit bug as the wrap-up modal title earlier
+            // tonight). "Archive it — replacing " leaves ~50 chars of
+            // headroom for the name, comfortably more than any real name.
+            { text: { type: "plain_text", text: `Archive it — replacing ${ctx.partnerName}`.slice(0, 75) }, value: "archive" },
+          ],
+        }
+      ),
     ],
     "Add employee"
   );
