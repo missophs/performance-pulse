@@ -71,6 +71,7 @@ import {
   saveWrapUp,
   wrapUpConversation,
   createPairForSlack,
+  resolveEmployeeNameToEmail,
   notify,
   listMeetings,
   listHandbookLinks,
@@ -117,38 +118,32 @@ async function refreshHome(admin, ctx, data) {
   }
 }
 
-// One generic "Saved in Performance Pulse." for every kind of submission
-// reads as pure clutter once a session does more than one or two saves --
-// a long DM history of identical, content-free checkmarks (found live,
-// 2026-09-13). Naming what was actually saved fixes that without touching
-// notification delivery at all.
-const CONFIRM_LABELS = {
+// A successful save used to DM the submitter a "✅ X saved." checkmark for
+// EVERY kind of save (confirmSaved/CONFIRM_LABELS, trimmed down 2026-09-16)
+// -- pure clutter for a save that already shows itself on the refreshed
+// Home tab (an add bumps a visible count: "Topics (3)", "Goals -- 4 on
+// record", etc., via refreshHome below). But an *edit* changes no count at
+// all (editing a topic's text doesn't move "3 open topics"), and a private
+// note has no Home-tab count shown anywhere -- for those, closing the modal
+// was visually identical to hitting Cancel, the exact ambiguity this DM
+// originally existed to solve (found live 2026-09-13). So this only still
+// fires for the handful of callback ids where nothing else confirms the
+// save; every add/notify-backed save relies on the visible refresh instead.
+// The notify()/dmByEmail() calls that alert the OTHER pair member (new
+// topic, new action, wrap-up, etc.) are untouched by any of this -- that's
+// the ping the other person actually needs, to know there's something new
+// to look at or respond to.
+const SILENT_CONFIRM_LABELS = {
   edit_employee_label: "Employee's name updated.",
-  wrap_up_conversation: "Final wrap up saved.",
-  add_employee: "Employee added.",
-  add_topic: "Topic saved.",
-  add_action: "Action saved.",
-  add_goal: "Goal saved.",
-  add_devplan: "Development plan saved.",
-  add_hardconvo: "Topic added to the agenda.",
-  add_suggestion: "Private note saved.",
-  add_message: "Message saved.",
-  add_achievement: "Achievement logged.",
-  add_feedback: "Feedback saved.",
-  add_feedback_request: "Feedback request sent.",
   edit_topic: "Topic updated.",
   edit_goal: "Goal updated.",
   edit_action: "Action updated.",
-  wrap_up: "1:1 summary saved.",
+  add_suggestion: "Private note saved.",
 };
 
-// A successful view_submission just closes the modal — identical to what
-// Cancel does — so there was no way to tell a real save from nothing
-// happening. This pings the submitter's own DM with the app right after, the
-// same way refreshHome pings the Home tab. Runs via after() so it never
-// risks the 3s interaction window Slack drops the request after.
 async function confirmSaved(admin, ctx, callbackId) {
-  const label = CONFIRM_LABELS[callbackId] || "Saved in Performance Pulse.";
+  const label = SILENT_CONFIRM_LABELS[callbackId];
+  if (!label) return;
   const opened = await slackApi("conversations.open", { users: ctx.slackUserId }).catch((e) => console.error("confirm dm open:", e));
   if (!opened?.channel?.id) return;
   await slackApi("chat.postMessage", { channel: opened.channel.id, text: `✅ ${label}` }).catch((e) => console.error("confirm dm send:", e));
@@ -193,7 +188,7 @@ const OPENERS = {
   open_add_action: { title: "Add an action", build: async (admin, ctx) => addActionModal(ctx) },
   open_add_hardconvo: { title: "Hard conversation", build: async () => addHardConvoModal() },
   open_wrap_up: { title: "Wrap up", build: async (admin, ctx) => wrapUpModal((await loadHomeData(admin, ctx.pairId)).topics, ctx.pairId) },
-  open_close_pair: { title: "Final wrap up", build: async (admin, ctx) => wrapUpConversationModal(ctx.pairId) },
+  open_close_pair: { title: "Clear out old topics & actions", build: async (admin, ctx) => wrapUpConversationModal(ctx.pairId) },
   // Button is manager-only in homeView too — this re-checks server-side in
   // case of a stale/replayed action, same defense-in-depth as every other
   // role-gated opener here.
@@ -561,10 +556,10 @@ const SUBMISSIONS = {
   },
   // Closes out open topics/goals/actions for the pair (see wrapUpConversation
   // in lib/data.js) -- the pairing itself is never touched, unlike the old
-  // behavior this replaced. The submitter gets the standard confirmSaved DM
-  // from the shared dispatcher; this handles telling the OTHER side
-  // directly, by email, since nothing about their Home tab data changes on
-  // its own without a fresh open.
+  // behavior this replaced. Nothing about the OTHER side's Home tab data
+  // changes on its own without a fresh open, so this DMs them directly, by
+  // email, to make sure they actually see it and know they can keep adding
+  // to the pairing.
   // Same staleness risk as wrap_up above: a multi-pair manager can switch
   // their active pair via "switch_pair" while this modal is still open, so
   // ctx.pairId can be a DIFFERENT pair than the one open_close_pair actually
@@ -578,7 +573,7 @@ const SUBMISSIONS = {
     const note = (fieldVal(v, "note") || "").trim();
     const { topics, goals, actions } = await wrapUpConversation(admin, pairCtx.pairId, fromSlack(pairCtx));
     const otherEmail = pairCtx.isMgr ? pairCtx.pair.employee_email : pairCtx.pair.manager_email;
-    const text = `${pairCtx.myName} did a final wrap up on your 1:1 conversation -- ${topics} topic(s), ${goals} goal(s), and ${actions} action(s) closed out. Your pairing is unaffected.${note ? `\n\nNote: ${note}` : ""}`;
+    const text = `${pairCtx.myName} cleared out old topics on your 1:1 -- ${topics} topic(s), ${goals} goal(s), and ${actions} action(s) closed out. Your pairing is unaffected, and you can keep adding topics or actions any time.${note ? `\n\nNote: ${note}` : ""}`;
     await dmByEmail(otherEmail, { text }).catch((e) => console.error("wrap up conversation notify:", e));
   },
   // Manager-only (also gated in OPENERS above). createPairForSlack takes
@@ -590,9 +585,16 @@ const SUBMISSIONS = {
   // pairing already accepts for the other side.
   add_employee: async (admin, ctx, v) => {
     if (!ctx.isMgr) return { skip: true };
-    const email = (fieldVal(v, "email") || "").trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return { error: { blockId: "email", message: "That doesn't look like a valid email." } };
+    const raw = (fieldVal(v, "email") || "").trim();
+    // Accept either a real email or an exact name already on the HR roster
+    // (see resolveEmployeeNameToEmail, lib/data.js) -- a manager typing a
+    // name they got wrong just fails the same "not a valid email, and no
+    // roster match" check below, rather than silently creating a pairing to
+    // a fabricated address.
+    const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw);
+    const email = looksLikeEmail ? raw.toLowerCase() : await resolveEmployeeNameToEmail(admin, raw).catch(() => null);
+    if (!email) {
+      return { error: { blockId: "email", message: "That doesn't look like a valid email or an exact name already on the roster." } };
     }
     if (email === ctx.email) {
       return { error: { blockId: "email", message: "That's your own email." } };
@@ -1138,17 +1140,15 @@ async function handleInteraction(admin, slackUserId, payload) {
       // A handler's guard (permission check, a stale pinned pair id, a
       // verifyOwnedRow lookup that found nothing) returns { skip: true } to
       // mean "nothing was saved" -- distinct from a real save returning
-      // undefined. Without this, every guard's silent no-op still fell
-      // through to the same confirmSaved() below, which (now that it names
-      // the specific thing supposedly saved, not a generic message) would
-      // tell the submitter something happened when it didn't. Found in
-      // review 2026-09-13.
+      // undefined. Without this, every guard's silent no-op would still
+      // trigger the Home-tab refresh below as if something had changed.
+      // Found in review 2026-09-13.
       if (!result?.skip) {
-        // The save already happened above; closing the modal shouldn't wait on
-        // the Home-tab republish (see refreshHome) or the confirmation DM (see
-        // confirmSaved) -- ctx's own in-place mutations (e.g. edit_employee_label's
-        // ctx.partnerName) land before this runs, so the refresh still shows
-        // the new value.
+        // The save already happened above; closing the modal shouldn't wait
+        // on the Home-tab republish or the confirmation DM (see
+        // confirmSaved) -- ctx's own in-place mutations (e.g.
+        // edit_employee_label's ctx.partnerName) land before this runs, so
+        // the refresh still shows the new value.
         after(() => refreshHome(admin, ctx));
         after(() => confirmSaved(admin, ctx, payload.view?.callback_id));
       }

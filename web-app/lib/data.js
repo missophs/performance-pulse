@@ -120,6 +120,37 @@ export function resolveRosterEmails(allRows, knownReal) {
   return { nameToEmail, nameCollisions: [...nameCollisions] };
 }
 
+// Lets the Slack "Add a new employee" modal accept an already-known roster
+// name instead of forcing a typed email every time (Melissa's report,
+// 2026-09-16: managers often don't know a report's exact work email offhand,
+// and typing one wrong silently created a brand-new, wrong pairing instead
+// of linking to the person HR already put on the roster). Reuses the same
+// "real, non-placeholder email" definition as resolveRosterEmails' knownReal
+// param, but as a single-name lookup against the live table instead of a
+// bulk-upload pass. Returns null (not a guess) on zero or multiple matches
+// so the caller falls back to asking for a real email rather than risking a
+// wrong link.
+export async function resolveEmployeeNameToEmail(admin, name) {
+  const norm = name.trim().toLowerCase().replace(/\s+/g, " ");
+  if (!norm) return null;
+  // ilike's pattern is Postgres ILIKE, so an unescaped % or _ in a typed
+  // name would act as a wildcard instead of a literal character -- e.g.
+  // garbage input of just "%" would match every non-placeholder employee
+  // instead of failing to match anything (found in review 2026-09-16,
+  // before this ever shipped). Escaping makes this an exact,
+  // case-insensitive match only.
+  const escaped = norm.replace(/[\\%_]/g, (c) => `\\${c}`);
+  const { data: rows, error } = await admin
+    .from("pairs")
+    .select("employee_label, employee_email")
+    .not("employee_email", "ilike", "%@placeholder.test")
+    .ilike("employee_label", escaped);
+  if (error) throw error;
+  const distinctEmails = new Set((rows || []).map((r) => r.employee_email?.toLowerCase()));
+  if (distinctEmails.size !== 1) return null;
+  return [...distinctEmails][0];
+}
+
 // HR roster import: creates one pair per (employee, manager) row from an
 // uploaded org chart, admin-side, since HR is on neither side of most of
 // these pairs (unlike createPair/createPairForSlack, which always attach

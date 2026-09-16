@@ -253,8 +253,8 @@ export function homeView(ctx, d) {
     section("*History*\nEverything past — meetings, goals, feedback, all of it — lives in the app."),
     actions([openInApp("Open History in the app", "/history")]),
     { type: "divider" },
-    section("Clear out open topics, goals, and actions so this doesn't sit stuck — the pairing stays:"),
-    actions([button("Final wrap up for this conversation", "open_close_pair", "", "danger")]),
+    section("Clear out open topics, goals, and actions so this doesn't sit stuck — the pairing stays, and either of you can keep adding to it any time:"),
+    actions([button("Clear out old topics & actions", "open_close_pair")]),
     { type: "divider" },
     context(":lock: Everything here is shared only between you and your 1:1 partner — never with HR."),
   ];
@@ -900,9 +900,17 @@ export function wrapUpModal(topics, pairId) {
 
 // -------------------------------------------------- close this pairing -----
 
-// Ends the whole manager-employee pairing, not one meeting -- that's
-// wrapUpModal above, and it's unchanged. Reopenable (see reopenPair in
-// lib/data.js), so this is a serious step but not an irreversible one.
+// Despite the name, this does NOT end the pairing or the conversation --
+// see wrapUpConversation in lib/data.js. It only clears out the *backlog*
+// (marks open topics/goals/actions Discussed/Complete/Done) so the Home tab
+// isn't cluttered with old items; either side can add new topics/actions
+// immediately after, same as always. A stale version of this comment used
+// to say it ended the whole pairing -- that hasn't been true since this was
+// refactored to a soft clear, but the comment (and the UI copy/styling)
+// never caught up, which is exactly what read as "this ends things" to a
+// real user (flagged 2026-09-16). The actual hard-close action is
+// closePair() in lib/data.js, used only by the website/HR admin route --
+// never called from Slack.
 // -------------------------------------------------- add a new employee -----
 
 // Manager-only, mirrors the website's "Add another pairing" (/onboarding/add)
@@ -915,9 +923,9 @@ export function addEmployeeModal() {
     "Add a new employee",
     [
       section(
-        "Starts a new 1:1 pairing with you as their manager. If they already use Performance Pulse it links right away — otherwise it's ready the moment they sign up with this email."
+        "Starts a new 1:1 pairing with you as their manager. Type their work email, or their exact name if HR already has them on the roster — it links right away if they already use Performance Pulse, or the moment they sign up otherwise."
       ),
-      inputBlock("email", "Their work email", plainInput("val", { placeholder: "name@company.com" }), true),
+      inputBlock("email", "Their work email or roster name", plainInput("val", { placeholder: "name@company.com, or their full name" }), true),
     ],
     "Add employee"
   );
@@ -926,14 +934,14 @@ export function addEmployeeModal() {
 export function wrapUpConversationModal(pairId) {
   return modal(
     "wrap_up_conversation",
-    "Final wrap up",
+    "Clear out old topics & actions",
     [
       section(
-        "This closes out any open topics, goals, and actions — marking them Discussed / Complete / Done — so your Home tab starts fresh. Nothing is deleted, and your pairing itself is not affected; you'll keep working together exactly as before."
+        "This closes out any open topics, goals, and actions — marking them Discussed / Complete / Done — so your Home tab starts fresh. Nothing is deleted, your pairing keeps going exactly as before, and either of you can add a new topic or action right away — this doesn't end the conversation."
       ),
       inputBlock("note", "Anything worth noting as this closes", plainInput("val", { multiline: true, placeholder: "Optional — goes in the note to your partner." }), false),
     ],
-    "Close out conversation",
+    "Clear it out",
     pairId
   );
 }

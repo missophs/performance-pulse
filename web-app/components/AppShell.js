@@ -105,19 +105,22 @@ function ShellBody({ counts, children }) {
           <div className="process-flow">PREPARE &rarr; TALK &rarr; REFLECT &rarr; ACT &rarr; FOLLOW UP</div>
           <div className="role-switch">
             {pairs?.length > 1 && (
-              <select
-                className="pair-switch"
-                value={pairId}
-                disabled={switching}
-                onChange={(e) => switchPair(e.target.value)}
-                title="Switch which 1:1 you're viewing"
-              >
-                {pairs.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.partnerName}
-                  </option>
-                ))}
-              </select>
+              <>
+                <span style={{ opacity: 0.85, fontSize: 13 }}>Viewing 1:1 with:</span>
+                <select
+                  className="pair-switch"
+                  value={pairId}
+                  disabled={switching}
+                  onChange={(e) => switchPair(e.target.value)}
+                  title="You're on more than one 1:1 — switch which one you're viewing"
+                >
+                  {pairs.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.partnerName}
+                    </option>
+                  ))}
+                </select>
+              </>
             )}
             <Link href="/onboarding/add" className="btn ghost sm" title={isMgr ? "Set up a 1:1 with another employee you manage" : "Set up a 1:1 with another manager"}>
               + Add {isMgr ? "employee" : "manager"}
@@ -127,7 +130,7 @@ function ShellBody({ counts, children }) {
                 You manage {partnerName}
               </button>
             ) : (
-              <span className="badge b-purple" title="Your role in this 1:1">Employee</span>
+              <span className="badge b-purple" title="Your role in this 1:1">Employee of {partnerName}</span>
             )}
             <NotificationBell />
             <span
