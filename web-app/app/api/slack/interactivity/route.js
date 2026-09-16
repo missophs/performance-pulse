@@ -170,7 +170,7 @@ const OPENERS = {
   open_add_action: { title: "Add an action", build: async (admin, ctx) => addActionModal(ctx) },
   open_add_hardconvo: { title: "Hard conversation", build: async () => addHardConvoModal() },
   open_wrap_up: { title: "Wrap up", build: async (admin, ctx) => wrapUpModal((await loadHomeData(admin, ctx.pairId)).topics, ctx.pairId) },
-  open_close_pair: { title: "Clear out old topics", build: async (admin, ctx) => wrapUpConversationModal(ctx.pairId) },
+  open_close_pair: { title: "Mark this as done", build: async (admin, ctx) => wrapUpConversationModal(ctx.pairId) },
   // Button is manager-only in homeView too — this re-checks server-side in
   // case of a stale/replayed action, same defense-in-depth as every other
   // role-gated opener here.

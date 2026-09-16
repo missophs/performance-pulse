@@ -260,8 +260,12 @@ export function homeView(ctx, d) {
     section("*History*\nEverything past — meetings, goals, feedback, all of it — lives in the app."),
     actions([openInApp("Open History in the app", "/history")]),
     { type: "divider" },
-    section("Clear out open topics, goals, and actions so this doesn't sit stuck — the pairing stays, and either of you can keep adding to it any time:"),
-    actions([button("Clear out old topics & actions", "open_close_pair")]),
+    // Wording rewritten (Melissa, 2026-09-16): "Clear out" read as deleting
+    // the information, which this never does -- it only marks open items
+    // Discussed/Complete/Done (see wrapUpConversation, lib/data.js -- update
+    // only, never delete). "Mark ... as done" says what actually happens.
+    section("If a topic, goal, or action is done, mark it so — nothing is deleted, the pairing stays open, and either of you can keep adding to it any time:"),
+    actions([button("Mark topics & actions as done", "open_close_pair")]),
     { type: "divider" },
     context(":lock: Everything here is shared only between you and your 1:1 partner — never with HR."),
   ];
@@ -979,10 +983,10 @@ export function addEmployeeModal(ctx) {
 export function wrapUpConversationModal(pairId) {
   return modal(
     "wrap_up_conversation",
-    "Clear out old topics",
+    "Mark this as done",
     [
       section(
-        "This closes out any open topics, goals, and actions — marking them Discussed / Complete / Done — so your Home tab starts fresh. Nothing is deleted, your pairing keeps going exactly as before, and either of you can add a new topic or action right away — this doesn't end the conversation."
+        "This marks your open topics, goals, and actions Discussed / Complete / Done, so your Home tab starts fresh. Nothing is deleted, your pairing keeps going exactly as before, and either of you can add a new topic or action right away — this doesn't end the conversation."
       ),
       // inputBlock's 4th arg is Slack's own `optional` flag -- this was
       // hardcoded false (required) since the very first version of this
@@ -993,7 +997,7 @@ export function wrapUpConversationModal(pairId) {
       // because nothing before tonight actually submitted this modal.
       inputBlock("note", "Anything worth noting as this closes", plainInput("val", { multiline: true, placeholder: "Optional — goes in the note to your partner." }), true),
     ],
-    "Clear it out",
+    "Mark as done",
     pairId
   );
 }
