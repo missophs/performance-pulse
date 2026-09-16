@@ -27,6 +27,11 @@ import {
   listGoals,
   listDevelopmentPlans,
   listCareerAnswers,
+  listConcerns,
+  addConcern,
+  shareConcern,
+  respondToConcern,
+  deleteConcern,
   notify,
 } from "@/lib/data";
 
@@ -39,6 +44,7 @@ const EMP_FB = ["What's working", "What could improve", "Support I need", "What 
 const TABS = [
   { id: "achievements", label: "Achievements" },
   { id: "feedback", label: "Feedback" },
+  { id: "concerns", label: "Concerns" },
   { id: "review", label: "Review prep" },
 ];
 
@@ -57,13 +63,14 @@ export default function PerformancePage() {
   const [goals, setGoals] = useState([]);
   const [devPlans, setDevPlans] = useState([]);
   const [career, setCareer] = useState([]);
+  const [concerns, setConcerns] = useState([]);
   const [reviewDraft, setReviewDraft] = useState("");
 
   const assistOn = pair ? pair.assist_enabled !== false : true;
 
   async function loadAll() {
     setLoading(true);
-    const [p, ach, fb, fbReq, g, dp, ca, rd] = await Promise.all([
+    const [p, ach, fb, fbReq, g, dp, ca, co, rd] = await Promise.all([
       getPair(supabase, pairId),
       listAchievements(supabase, pairId),
       listFeedback(supabase, pairId),
@@ -71,6 +78,7 @@ export default function PerformancePage() {
       listGoals(supabase, pairId),
       listDevelopmentPlans(supabase, pairId),
       listCareerAnswers(supabase, pairId),
+      listConcerns(supabase, pairId),
       getReviewDraft(supabase, pairId, role),
     ]);
     setPair(p);
@@ -80,6 +88,7 @@ export default function PerformancePage() {
     setGoals(g);
     setDevPlans(dp);
     setCareer(ca);
+    setConcerns(co);
     setReviewDraft(rd?.draft || "");
     setLoading(false);
   }
@@ -278,6 +287,73 @@ export default function PerformancePage() {
 
   async function closeRequest(id) {
     await setFeedbackRequestStatus(supabase, id, "closed", { actorName: myName, actorRole: role, source: "web" });
+    loadAll();
+  }
+
+  /* ------------------------------------------------------------- concerns - */
+
+  const [ccOpen, setCcOpen] = useState(false);
+  const [ccWhat, setCcWhat] = useState("");
+  const [ccDate, setCcDate] = useState(today());
+  const [ccExpectation, setCcExpectation] = useState("");
+  const [ccCommunicated, setCcCommunicated] = useState("");
+  const [ccPreviously, setCcPreviously] = useState("");
+  const [ccSupport, setCcSupport] = useState("");
+  const ccWhatRef = useRef(null);
+
+  const [ccRespondingId, setCcRespondingId] = useState(null);
+  const [ccResponseText, setCcResponseText] = useState("");
+
+  function openConcernModal() {
+    setCcWhat("");
+    setCcDate(today());
+    setCcExpectation("");
+    setCcCommunicated("");
+    setCcPreviously("");
+    setCcSupport("");
+    setCcOpen(true);
+  }
+
+  async function saveConcern() {
+    const what = ccWhat.trim();
+    if (!what) {
+      ccWhatRef.current?.focus();
+      return;
+    }
+    await addConcern(supabase, pairId, {
+      what, concernDate: ccDate, expectation: ccExpectation.trim(), communicated: ccCommunicated.trim(),
+      previously: ccPreviously.trim(), support: ccSupport.trim(), createdByName: myName,
+    });
+    setCcOpen(false);
+    toast("Saved", "Not visible to them until you share it.");
+    loadAll();
+  }
+
+  async function shareConcernNow(id) {
+    await shareConcern(supabase, id);
+    await notify(supabase, pairId, `${myName} shared something with you in Concerns`, role, otherRole, "performance", "concern");
+    toast("Shared", `${partnerName} can now see this and respond.`);
+    loadAll();
+  }
+
+  async function removeConcern(id) {
+    await deleteConcern(supabase, id);
+    loadAll();
+  }
+
+  function openConcernRespond(c) {
+    setCcRespondingId(c.id);
+    setCcResponseText(c.response || "");
+  }
+
+  async function submitConcernResponse(c) {
+    const text = ccResponseText.trim();
+    if (!text) return;
+    await respondToConcern(supabase, c.id, text);
+    setCcRespondingId(null);
+    setCcResponseText("");
+    await notify(supabase, pairId, `${myName} responded in Concerns`, role, otherRole, "performance", "concern");
+    toast("Sent", `${partnerName} can see your response.`);
     loadAll();
   }
 
@@ -499,6 +575,70 @@ export default function PerformancePage() {
         </div>
       )}
 
+      {subTab === "concerns" && (
+        <div className="subview active">
+          <div className="card">
+            <div className="card-head">
+              <h2>Concerns</h2>
+              {isMgr && <button className="btn sm" onClick={openConcernModal}>Note a concern</button>}
+            </div>
+            <p className="card-note">
+              {isMgr
+                ? `Drafts stay private until you share one — ${partnerName} never sees it until then.`
+                : `Nothing here unless ${partnerName} has shared something with you. You can respond to anything shared.`}
+            </p>
+            {(isMgr ? concerns : concerns.filter((c) => c.shared_at)).length === 0 ? (
+              <div className="empty"><div className="big">Nothing here</div>{isMgr ? "Log one when something needs to be raised." : "Nothing's been shared with you."}</div>
+            ) : (
+              <ul className="list">
+                {(isMgr ? concerns : concerns.filter((c) => c.shared_at)).map((c) => (
+                  <li key={c.id}>
+                    <div className="item-body">
+                      <div className="item-text">{c.what}</div>
+                      {c.expectation && <div className="item-sub"><strong>Expected instead:</strong> {c.expectation}</div>}
+                      {c.communicated && <div className="item-sub"><strong>Already raised:</strong> {c.communicated}</div>}
+                      {c.previously && <div className="item-sub"><strong>Come up before:</strong> {c.previously}</div>}
+                      {c.support && <div className="item-sub"><strong>Support offered:</strong> {c.support}</div>}
+                      <div className="item-meta">
+                        <Badge cls={c.shared_at ? "b-green" : "b-grey"}>{c.shared_at ? "Shared" : "Draft — not shared"}</Badge>
+                        <span>{c.concern_date ? fmtDate(c.concern_date) : ago(c.created_at)}</span>
+                      </div>
+                      {c.response && <div className="item-sub"><strong>Response:</strong> {c.response}</div>}
+                      {!isMgr && c.shared_at && (
+                        ccRespondingId === c.id ? (
+                          <div style={{ marginTop: 8 }}>
+                            <textarea
+                              value={ccResponseText}
+                              onChange={(e) => setCcResponseText(e.target.value)}
+                              placeholder="Say what you think, or ask for what you need."
+                              autoFocus
+                            />
+                            <div className="btn-row" style={{ marginTop: 6 }}>
+                              <button className="btn sm" onClick={() => submitConcernResponse(c)}>Send response</button>
+                              <button className="btn ghost sm" onClick={() => setCcRespondingId(null)}>Cancel</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button className="btn ghost sm" style={{ marginTop: 6 }} onClick={() => openConcernRespond(c)}>
+                            {c.response ? "Edit your response" : "Respond"}
+                          </button>
+                        )
+                      )}
+                    </div>
+                    {isMgr && (
+                      <div className="item-actions">
+                        {!c.shared_at && <button className="btn ghost sm" onClick={() => shareConcernNow(c.id)}>Share with {partnerName}</button>}
+                        <button className="btn ghost sm" onClick={() => removeConcern(c.id)}>Remove</button>
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+
       {subTab === "review" && (
         <div className="subview active">
           <div className="card">
@@ -525,6 +665,40 @@ export default function PerformancePage() {
       )}
 
       {/* ---------------------------------------------------------- modals - */}
+
+      <Modal
+        open={ccOpen}
+        title="Note a concern"
+        note={`Only you see this until you choose to share it with ${partnerName}.`}
+        onClose={() => setCcOpen(false)}
+        onSave={saveConcern}
+        saveLabel="Save"
+      >
+        <div className="field">
+          <label htmlFor="ccWhat">What&apos;s the concern</label>
+          <textarea id="ccWhat" ref={ccWhatRef} value={ccWhat} onChange={(e) => setCcWhat(e.target.value)} placeholder="What happened, specifically." />
+        </div>
+        <div className="field">
+          <label htmlFor="ccDate">When it happened</label>
+          <input id="ccDate" type="date" value={ccDate} onChange={(e) => setCcDate(e.target.value)} />
+        </div>
+        <div className="field">
+          <label htmlFor="ccExpectation">What you expect instead</label>
+          <textarea id="ccExpectation" value={ccExpectation} onChange={(e) => setCcExpectation(e.target.value)} />
+        </div>
+        <div className="field">
+          <label htmlFor="ccCommunicated">How/when you&apos;ve already raised this</label>
+          <textarea id="ccCommunicated" value={ccCommunicated} onChange={(e) => setCcCommunicated(e.target.value)} />
+        </div>
+        <div className="field">
+          <label htmlFor="ccPreviously">Has this come up before?</label>
+          <textarea id="ccPreviously" value={ccPreviously} onChange={(e) => setCcPreviously(e.target.value)} />
+        </div>
+        <div className="field">
+          <label htmlFor="ccSupport">Support you&apos;re offering</label>
+          <textarea id="ccSupport" value={ccSupport} onChange={(e) => setCcSupport(e.target.value)} />
+        </div>
+      </Modal>
 
       <Modal
         open={achOpen}

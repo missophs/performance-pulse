@@ -23,6 +23,9 @@ import {
   addActionModal,
   listActionsModal,
   editActionModal,
+  addConcernModal,
+  listConcernsModal,
+  listDocumentsModal,
   addGoalModal,
   GOAL_FIELDS,
   listGoalsModal,
@@ -66,6 +69,9 @@ import {
   addAchievement,
   deleteAchievement,
   deleteTopics,
+  addConcern,
+  shareConcern,
+  deleteConcern,
   addFeedback,
   addFeedbackRequest,
   saveWrapUp,
@@ -76,6 +82,7 @@ import {
   listMeetings,
   listHandbookLinks,
   getHandbookFileUrl,
+  getDocumentUrl,
   listCustomSuggestions,
   addCustomSuggestion,
   deleteCustomSuggestion,
@@ -224,6 +231,14 @@ const OPENERS = {
   open_list_goals: { title: "Goals", build: async (admin, ctx) => listGoalsModal((await loadHomeData(admin, ctx.pairId)).goals, ctx.isMgr) },
   open_list_devplans: { title: "Development plans", build: async (admin, ctx) => listDevPlansModal((await loadHomeData(admin, ctx.pairId)).devPlans, ctx.isMgr) },
   open_list_achievements: { title: "Achievements", build: async (admin, ctx) => listAchievementsModal((await loadHomeData(admin, ctx.pairId)).achievements) },
+  // Manager-only, re-checked here same as every other role-gated opener
+  // (open_list_suggestions above, open_add_employee, etc.) even though the
+  // button is already hidden from the employee's Home tab.
+  open_add_concern: {
+    title: "Note a concern",
+    build: async (admin, ctx) => (ctx.isMgr ? addConcernModal(ctx) : noticeModal("Note a concern", "This is manager-only.")),
+  },
+  open_list_concerns: { title: "Concerns", build: async (admin, ctx) => listConcernsModal((await loadHomeData(admin, ctx.pairId)).concerns, ctx.isMgr) },
   open_list_feedback: {
     title: "Feedback",
     build: async (admin, ctx) => {
@@ -242,6 +257,14 @@ const OPENERS = {
       const links = await listHandbookLinks(admin);
       const resolved = await Promise.all(links.map(async (l) => ({ ...l, url: await getHandbookFileUrl(admin, l).catch(() => null) })));
       return listHandbookLinksModal(resolved);
+    },
+  },
+  open_list_documents: {
+    title: "Documents",
+    build: async (admin, ctx) => {
+      const docs = (await loadHomeData(admin, ctx.pairId)).documents;
+      const resolved = await Promise.all(docs.map(async (d) => ({ ...d, url: await getDocumentUrl(admin, d).catch(() => null) })));
+      return listDocumentsModal(resolved);
     },
   },
   // Manager-only private scratchpad -- re-checked here same as every other
@@ -429,6 +452,29 @@ const QUICK_ACTIONS = {
       await deleteAction(admin, id);
     },
     refreshList: (data) => listActionsModal(data.actions),
+  },
+  // Manager-only (concerns is manager-exclusive, migration 0007) -- gated
+  // here same as goal_delete below, since the admin client bypasses RLS.
+  // shareConcern's own is-null guard (lib/data.js) makes a double-click/
+  // retry a no-op rather than a duplicate notify().
+  concern_share: {
+    run: async (admin, ctx, id) => {
+      if (!ctx.isMgr) return;
+      const concern = await verifyOwnedRow(admin, "concerns", "pair_id, shared_at", id, ctx);
+      if (!concern || concern.shared_at) return;
+      await shareConcern(admin, id);
+      await notify(admin, ctx.pairId, `${ctx.myName} shared something with you in Concerns`, ctx.role, ctx.otherRole, "performance", "concern");
+    },
+    refreshList: (data, ctx) => listConcernsModal(data.concerns, ctx.isMgr),
+  },
+  concern_delete: {
+    run: async (admin, ctx, id) => {
+      if (!ctx.isMgr) return;
+      const concern = await verifyOwnedRow(admin, "concerns", "pair_id", id, ctx);
+      if (!concern) return;
+      await deleteConcern(admin, id);
+    },
+    refreshList: (data, ctx) => listConcernsModal(data.concerns, ctx.isMgr),
   },
   goal_delete: {
     // Manager-only per Melissa's 2026-09-13 decision — an employee can edit
@@ -754,6 +800,25 @@ const SUBMISSIONS = {
     });
     await clearFormDraft(admin, ctx.pairId, ctx.role, "achievement").catch(() => {});
     delayedNotify(admin, ctx.pairId, `${ctx.myName} logged an achievement: ${title}`, ctx.role, ctx.otherRole, "performance", "achievement");
+  },
+  // Manager-only (concerns is manager-exclusive, migration 0007) -- re-checked
+  // here same as add_feedback's ctx.isMgr guard, since the opener already
+  // being manager-gated doesn't stop a replayed/forged submission. No
+  // notify() here -- stays private until the manager explicitly shares it
+  // (concern_share above), matching the whole point of the rebuild.
+  add_concern: async (admin, ctx, v) => {
+    if (!ctx.isMgr) return { skip: true };
+    const what = fieldVal(v, "what");
+    if (!what) return { error: { blockId: "what", message: "Say what the concern is." } };
+    await addConcern(admin, ctx.pairId, {
+      what,
+      concernDate: fieldVal(v, "date"),
+      expectation: fieldVal(v, "expectation"),
+      communicated: fieldVal(v, "communicated"),
+      previously: fieldVal(v, "previously"),
+      support: fieldVal(v, "support"),
+      createdByName: ctx.myName,
+    });
   },
   // Matches the website's atomic answer-a-request behavior
   // (app/(dashboard)/performance/page.js's saveFeedback): saving the entry
@@ -1134,6 +1199,16 @@ async function handleInteraction(admin, slackUserId, payload) {
   if (payload.type === "view_submission") {
     const handler = SUBMISSIONS[payload.view?.callback_id];
     if (handler) {
+      // SLACK_TODO.md item 0h-4: view.id is stable for one open modal
+      // instance, so a duplicate submit (retry, double-click, "trouble
+      // connecting" resubmit) carries the same id. Insert-as-lock: a second
+      // attempt hits the primary key conflict and is dropped before it can
+      // double-save anything. Requires migration 0027 to be applied.
+      const { error: dupError } = await admin.from("slack_view_submissions").insert({ view_id: payload.view.id });
+      if (dupError) {
+        if (dupError.code === "23505") return Response.json({}); // already handled this submission
+        console.error("view_submission dedup insert:", dupError);
+      }
       const result = await handler(admin, ctx, payload.view.state.values, payload.view);
       if (result?.error) {
         return Response.json({ response_action: "errors", errors: { [result.error.blockId]: result.error.message } });

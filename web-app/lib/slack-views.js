@@ -224,6 +224,17 @@ export function homeView(ctx, d) {
     actions([button("Add a plan", "open_add_devplan", "", usedStyle(openDevPlans.length)), button("View plans", "open_list_devplans")]),
     section(`*Achievements* — ${d.achievements.length} logged`),
     actions([button("Log one", "open_add_achievement", "", usedStyle(d.achievements.length)), button("View achievements", "open_list_achievements")]),
+    ...(ctx.isMgr
+      ? [
+          section(`*Concerns* — ${d.concerns.length} logged${d.concerns.filter((c) => !c.shared_at).length ? `, ${d.concerns.filter((c) => !c.shared_at).length} not yet shared` : ""}`),
+          actions([button("Note a concern", "open_add_concern"), button("View concerns", "open_list_concerns")]),
+        ]
+      : d.concerns.filter((c) => c.shared_at).length
+        ? [
+            section(`*Concerns* — ${d.concerns.filter((c) => c.shared_at).length} shared with you`),
+            actions([button("View concerns", "open_list_concerns")]),
+          ]
+        : []),
     section(`*Feedback* — ${d.feedback.length} entries${openRequests.length ? `, ${openRequests.length} request${openRequests.length === 1 ? "" : "s"} waiting` : ""}`),
     context(
       ctx.isMgr
@@ -249,12 +260,11 @@ export function homeView(ctx, d) {
     section(`*Between you two* — ${d.messages.length} sent`),
     context("No meeting needed — send it when it's on your mind. Quiet by design: no Slack ping, just seen next time they open the app."),
     actions([button("Send a message", "open_add_message", "", usedStyle(d.messages.length)), button("View messages", "open_list_messages")]),
-    // Both buttons just open the app -- no in-Slack list or upload flow at
-    // all (Melissa's call). Uploading needs a real file, which only works on
-    // the website; viewing pointed there too rather than maintaining two
-    // copies of the same list.
+    // Uploading still needs a real file, so that stays website-only -- but
+    // viewing now has a real in-Slack list (listDocumentsModal), same as
+    // Handbook already does, once the missing-signed-url guard was in place.
     section(`*Documents* — ${d.documents.length}`),
-    actions([openInApp("Upload a document", "/dashboard"), openInApp("View documents", "/dashboard")]),
+    actions([openInApp("Upload a document", "/dashboard"), button("View documents", "open_list_documents")]),
     section("*Handbook*"),
     actions([button("View handbook", "open_list_handbook")]),
     section("*History*\nEverything past — meetings, goals, feedback, all of it — lives in the app."),
@@ -529,13 +539,58 @@ export function editActionModal(ctx, action) {
 export function listActionsModal(list) {
   const open = list.filter((a) => a.status !== "Done");
   const blocks = open.length
-    ? open.flatMap((a, i) => [
-        section(`*Action ${i + 1}* — ${a.owner_label}${a.due_date ? ` · due ${a.due_date}` : " · no due date"}`),
+    ? open.flatMap((a) => [
+        section(`*${a.text}*\n${a.owner_label}${a.due_date ? ` · due ${a.due_date}` : " · no due date"}${a.notes ? `\n_${a.notes}_` : ""}`),
         actions([button("Mark done", "action_mark_done", a.id, "primary"), button("Edit", "action_edit", a.id), button("Delete", "action_delete", a.id, "danger")]),
       ])
     : [section("No open actions. Add one from the Home tab.")];
-  blocks.push({ type: "divider" }, actions([openInApp("Open actions in the app for full notes")]));
   return modal("view_actions", "Open actions", blocks, "Close");
+}
+
+// -------------------------------------------------------------- concerns ---
+
+// Rebuilt 2026-09-16 (SLACK_TODO.md/CLAUDE.md's "removed entirely" note) --
+// the old version was a manager-only dead end with no response path. Now a
+// concern can be shared (manager's explicit choice; drafts stay private
+// until then), and once shared the employee sees it and can respond -- but,
+// like feedback (see this file's header comment), the real text is never
+// echoed into a Slack view. This modal only ever writes; listConcernsModal
+// below only ever shows counts/status, with a link to the app to read or
+// respond to the actual words.
+export function addConcernModal(ctx) {
+  return modal(
+    "add_concern",
+    "Note a concern",
+    [
+      context(`Only you see this until you choose to share it with ${ctx.partnerName}.`),
+      inputBlock("what", "What's the concern", plainInput("val", { multiline: true })),
+      inputBlock("date", "Date it happened", datePicker("val"), true),
+      inputBlock("expectation", "What you expect instead", plainInput("val", { multiline: true }), true),
+      inputBlock("communicated", "How/when you've already raised this", plainInput("val", { multiline: true }), true),
+      inputBlock("previously", "Has this come up before?", plainInput("val", { multiline: true }), true),
+      inputBlock("support", "Support you're offering", plainInput("val", { multiline: true }), true),
+    ],
+    "Save"
+  );
+}
+
+export function listConcernsModal(concerns, isMgr) {
+  if (isMgr) {
+    const blocks = concerns.length
+      ? concerns.flatMap((c, i) => [
+          section(`*Concern ${i + 1}*${c.concern_date ? ` — ${c.concern_date}` : ""}\n${c.shared_at ? `Shared ${c.shared_at.slice(0, 10)}${c.response ? " · responded" : " · no response yet"}` : "Not yet shared"}`),
+          actions([...(c.shared_at ? [] : [button("Share it", "concern_share", c.id, "primary")]), button("Delete", "concern_delete", c.id, "danger")]),
+        ])
+      : [section("No concerns logged. Add one from the Home tab.")];
+    blocks.push({ type: "divider" }, actions([openInApp("Read or edit the full text in the app", "/performance")]));
+    return modal("view_concerns", "Concerns", blocks, "Close");
+  }
+  const shared = concerns.filter((c) => c.shared_at);
+  const blocks = shared.length
+    ? [section(`*${shared.length} shared with you*\n${shared.filter((c) => !c.response).length} waiting on your response`)]
+    : [section("Nothing shared with you yet.")];
+  blocks.push({ type: "divider" }, actions([openInApp("Read and respond in the app", "/performance")]));
+  return modal("view_concerns", "Concerns", blocks, "Close");
 }
 
 // ---------------------------------------------------------------- goals ----
@@ -863,6 +918,28 @@ export function listMessagesModal(messages) {
 // that used to hit Documents' own in-Slack list, before it was replaced by
 // a plain link to the app -- see the comment above the Documents section in
 // homeView).
+// Same guard as listHandbookLinksModal below, for the exact same reason:
+// Documents used to have its own in-Slack list, and it broke Slack's whole
+// modal (stuck on "Loading…") the first time a signed URL failed to
+// generate, because it emitted an invalid `url` field instead of guarding
+// it -- see the file's git history and the note on listHandbookLinksModal.
+// Melissa's call at the time was to replace the whole thing with a plain
+// link to the app rather than fix the guard; SLACK_TODO.md 0g asks for the
+// real in-Slack view back now that the actual bug (missing guard, not the
+// list itself) is understood.
+export function listDocumentsModal(docs) {
+  const blocks = docs.length
+    ? docs.flatMap((d) => [
+        section(`*${d.name}*\n${ago(d.created_at)} · uploaded by ${d.created_by_name}`),
+        d.url
+          ? actions([{ type: "button", text: { type: "plain_text", text: "Open", emoji: true }, url: d.url, action_id: "open_document_link" }])
+          : context("Couldn't generate a link for this file — try again from the app."),
+      ])
+    : [section("No documents uploaded yet.")];
+  blocks.push({ type: "divider" }, actions([openInApp("Upload a document", "/dashboard")]));
+  return modal("view_documents", "Documents", blocks, "Close");
+}
+
 export function listHandbookLinksModal(links) {
   const blocks = links.length
     ? links.flatMap((l) => [

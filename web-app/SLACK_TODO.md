@@ -5158,3 +5158,25 @@ is her call to make once she's seen both live again.
 - Design-lint (`impeccable`) hook: clean on every file touched tonight —
   one real violation found and fixed by reuse (see item 9), nothing
   suppressed with `ignore-value`.
+
+## 2026-09-16, later session — day-one backlog audit + real fixes
+
+Audited every item from "Where things stand (2026-08-29, afternoon)"
+against live code, not this doc's own stale claims (it wrongly said Actions
+redaction was done — it wasn't). Fixed this session: Actions now show real
+text (matches Goals/Topics); every Slack form submit has duplicate-protect
+(migration 0027); Concerns rebuilt with a real share/response path, website
++ Slack (migration 0028) — Melissa's call: rebuild it, fix the dead end,
+don't leave it removed; Career — Melissa's call: stays removed; Documents
+has a real in-Slack list now (the old bug was a missing signed-url guard,
+not the list itself); Prepare-tab's topic-draft reader now handles the
+`_v2` key scheme (item 0l). Real OAuth install flow built (item 0h-2,
+migration 0029, `lib/slack-oauth.js`, `/api/slack/install`, `/api/slack/
+oauth/callback`, HR-only) — replaces pasting a bot token into an env var by
+hand. Needs `SLACK_CLIENT_ID`/`SLACK_CLIENT_SECRET` env vars and a Redirect
+URL added in the Slack app dashboard before it can be used; not live-tested
+end to end (no second workspace available to test against). Still not
+done: real per-workspace token *revocation* on uninstall (only meaningful
+once more than one workspace is ever actually installed at a time);
+general `view_submission` idempotency covers the whole dispatcher now, but
+wasn't live-clicked in Slack this session.

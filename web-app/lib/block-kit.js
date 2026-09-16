@@ -18,6 +18,7 @@ export const BK_KINDS = [
   { id: "achievement", label: "Achievement logged" },
   { id: "action", label: "Action due" },
   { id: "wrap", label: "1:1 wrapped up" },
+  { id: "concern", label: "Concern shared" },
 ];
 
 function bkSection(md) {
@@ -72,6 +73,7 @@ const KIND_NOUNS = {
   achievement: ["achievement", "achievements"],
   action: ["action", "actions"],
   wrap: ["1:1 wrap-up", "1:1 wrap-ups"],
+  concern: ["concern", "concerns"],
 };
 
 /**
@@ -168,6 +170,11 @@ export function buildBlockKit(kind, ctx) {
     b.push(bkSection(`You have *${mineActionsCount} open action${mineActionsCount === 1 ? "" : "s"}* from your 1:1s.`));
     b.push(bkContext("Listed in the app with owners and dates. No nagging, no scores."));
     b.push(bkOpenAction("See what's open", "open_list_actions"));
+  } else if (kind === "concern") {
+    text = `${partnerName} shared something with you in Concerns`;
+    b.push(bkSection(`*${partnerName}* shared something with you in Concerns.`));
+    b.push(bkContext("You can read it and respond whenever you're ready."));
+    b.push(bkOpenAction("Read it", "open_list_concerns"));
   } else {
     text = `Your 1:1 with ${partnerName} is wrapped up`;
     b.push(bkSection(`Your 1:1 with *${partnerName}* is wrapped up.`));

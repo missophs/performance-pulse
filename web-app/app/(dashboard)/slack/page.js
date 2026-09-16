@@ -15,6 +15,23 @@ export default function SlackPage() {
   const { pairId, isMgr, myName, partnerName, supabase } = usePulse();
   const toast = useToast();
 
+  // Query params set by app/api/slack/oauth/callback/route.js after a
+  // round trip through Slack's own consent screen -- not this page's own
+  // state, so read once on mount rather than tracked with useState.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("slack_installed")) toast("Connected", "Slack is now installed via OAuth.");
+    const err = params.get("slack_install_error");
+    if (err === "hr_only") toast("HR only", "Only HR can install or reinstall the Slack app.");
+    else if (err === "signin") toast("Sign in first", "Sign in, then try installing again.");
+    else if (err === "denied") toast("Cancelled", "The Slack install was cancelled.");
+    else if (err) toast("Couldn't install", "Something went wrong — try again.");
+    if (params.has("slack_installed") || params.has("slack_install_error")) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [loading, setLoading] = useState(true);
   const [pair, setPair] = useState(null);
   const [topics, setTopics] = useState([]);
@@ -131,6 +148,14 @@ export default function SlackPage() {
 
       <div className="privacy-banner">
         <strong>Pings never carry performance content.</strong> Slack workspace admins can export DM history, so a message here only says that something happened. The substance stays in this app, between the two of you.
+      </div>
+
+      <div className="card">
+        <h2>Slack app connection</h2>
+        <p className="card-note">HR only. Installs (or reinstalls, e.g. after adding a scope) the Slack app for the whole workspace via Slack&rsquo;s own OAuth flow — no token to copy by hand.</p>
+        <div className="btn-row">
+          <a className="btn secondary" href="/api/slack/install">Install / reinstall Slack app</a>
+        </div>
       </div>
 
       <div className="card">

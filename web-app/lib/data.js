@@ -753,6 +753,81 @@ export async function setFeedbackRequestStatus(supabase, id, status, ctx = {}) {
 
 // ------------------------------------------------------------- concerns ----
 
+export async function listConcerns(supabase, pairId) {
+  const { data, error } = await supabase
+    .from("concerns")
+    .select("*")
+    .eq("pair_id", pairId)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+export async function addConcern(supabase, pairId, { what, concernDate, expectation, communicated, previously, support, outcome, createdByName }) {
+  const { data, error } = await supabase
+    .from("concerns")
+    .insert({
+      pair_id: pairId,
+      what,
+      concern_date: concernDate || null,
+      expectation: expectation || "",
+      communicated: communicated || "",
+      previously: previously || "",
+      support: support || "",
+      outcome: outcome || "",
+      created_by_name: createdByName,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// Manager-only gate (0028_concerns_response_path.sql's guard trigger
+// blocks anything else from an employee update) -- the employee can't see
+// or respond to a concern until the manager explicitly shares it.
+export async function shareConcern(supabase, concernId) {
+  const { error } = await supabase
+    .from("concerns")
+    .update({ shared_at: new Date().toISOString() })
+    .eq("id", concernId)
+    .is("shared_at", null);
+  if (error) throw error;
+}
+
+export async function respondToConcern(supabase, concernId, response) {
+  const { error } = await supabase
+    .from("concerns")
+    .update({ response, responded_at: new Date().toISOString() })
+    .eq("id", concernId);
+  if (error) throw error;
+}
+
+export async function deleteConcern(supabase, id) {
+  const { error } = await supabase.from("concerns").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ------------------------------------------------------ slack installations --
+
+export async function saveSlackInstallation(supabase, { teamId, teamName, accessToken, botUserId, installedBySlackUserId }) {
+  const { error } = await supabase
+    .from("slack_installations")
+    .upsert({ team_id: teamId, team_name: teamName, access_token: accessToken, bot_user_id: botUserId, installed_by_slack_user_id: installedBySlackUserId, installed_at: new Date().toISOString() });
+  if (error) throw error;
+}
+
+export async function getLatestSlackInstallation(supabase) {
+  const { data, error } = await supabase
+    .from("slack_installations")
+    .select("*")
+    .order("installed_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
 // ---------------------------------------------------------- review drafts --
 
 export async function getReviewDraft(supabase, pairId, role) {

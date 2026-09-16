@@ -1,6 +1,36 @@
-// Thin wrapper around Slack's Web API. Server-only — needs SLACK_BOT_TOKEN.
+// Thin wrapper around Slack's Web API. Server-only.
+//
+// Token resolution (SLACK_TODO.md item 0h-2): prefers the most recently
+// OAuth-installed token (slack_installations, see lib/slack-oauth.js and
+// app/api/slack/oauth/callback/route.js) over the old hardcoded
+// SLACK_BOT_TOKEN env var, cached in memory for TOKEN_CACHE_MS so this
+// doesn't add a DB round trip to every single Slack call. With no
+// installation row yet -- today's state, for the workspace already in use
+// -- this falls back to the env var exactly as before, so shipping this
+// changes nothing until a real OAuth install happens.
+
+import { createClient } from "@supabase/supabase-js";
 
 const SLACK_API = "https://slack.com/api";
+const TOKEN_CACHE_MS = 60_000;
+let tokenCache = { token: null, expiresAt: 0 };
+
+async function resolveBotToken() {
+  if (tokenCache.token && Date.now() < tokenCache.expiresAt) return tokenCache.token;
+  let token = process.env.SLACK_BOT_TOKEN;
+  try {
+    const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+    const { data } = await admin.from("slack_installations").select("access_token").order("installed_at", { ascending: false }).limit(1).maybeSingle();
+    if (data?.access_token) token = data.access_token;
+  } catch (e) {
+    // slack_installations may not exist yet (migration 0029 not applied)
+    // or the DB may be briefly unreachable -- either way, fall back to the
+    // env var rather than breaking every Slack call over a lookup failure.
+    console.error("slack bot token lookup, falling back to env var:", e.message);
+  }
+  tokenCache = { token, expiresAt: Date.now() + TOKEN_CACHE_MS };
+  return token;
+}
 // Slack's interactivity endpoint calls this synchronously inside its 3s
 // response budget (see app/api/slack/interactivity/route.js), so a retry
 // wait is capped well under that instead of trusting Retry-After verbatim —
@@ -19,10 +49,11 @@ export async function slackApi(method, body, _isRetry = false) {
     if (value === undefined) continue;
     form.set(key, typeof value === "string" ? value : JSON.stringify(value));
   }
+  const token = await resolveBotToken();
   const res = await fetch(`${SLACK_API}/${method}`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}`,
+      Authorization: `Bearer ${token}`,
       "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
     },
     body: form,

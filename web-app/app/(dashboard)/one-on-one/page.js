@@ -34,6 +34,12 @@ import {
   notify,
   updatePair,
 } from "@/lib/data";
+import { normalizeDraft } from "@/lib/slack-form-fields";
+
+// Matches lib/slack-views.js's TOPIC_FIELDS -- kept as a plain literal here
+// instead of importing that file, which pulls in Slack Block Kit builder
+// code with no reason to be in this client bundle.
+const TOPIC_DRAFT_FIELDS = ["text", "why", "category"];
 import { today, fmtDate, isOverdue } from "@/lib/format";
 import { actionBadge } from "@/lib/badges";
 import { TOPIC_CATEGORIES } from "@/lib/one-on-one-content";
@@ -108,9 +114,14 @@ export default function OneOnOnePage() {
       setResumeAnswer(state.pendingAnswer || "");
     }
     if (topicDraft?.draft) {
-      setTopicText(topicDraft.draft.text || "");
-      setTopicCat(topicDraft.draft.category || TOPIC_CATEGORIES[0]);
-      setTopicWhy(topicDraft.draft.why || "");
+      // A draft saved from Slack mid-session can carry these under
+      // "_v2"-suffixed keys instead of the plain ones (see
+      // lib/slack-form-fields.js) -- this page didn't know that, so a v2
+      // draft used to show up here as empty (SLACK_TODO.md item 0l).
+      const d = normalizeDraft(TOPIC_DRAFT_FIELDS, topicDraft.draft);
+      setTopicText(d.text || "");
+      setTopicCat(d.category || TOPIC_CATEGORIES[0]);
+      setTopicWhy(d.why || "");
     }
     setLoading(false);
   }
