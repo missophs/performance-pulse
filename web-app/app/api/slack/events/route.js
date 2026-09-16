@@ -41,14 +41,16 @@ export async function POST(request) {
     try {
       const ctx = await resolveSlackUser(supabaseAdmin, event.user, body.team_id);
       let view;
+      let companyId;
       if (ctx) {
+        companyId = ctx.companyId;
         view = homeView(ctx, await loadHomeData(supabaseAdmin, ctx.pairId));
       } else {
-        const companyId = await getCompanyIdForTeam(supabaseAdmin, body.team_id);
+        companyId = await getCompanyIdForTeam(supabaseAdmin, body.team_id);
         const isFirstSetup = companyId && !(await companyHasAnyPairs(supabaseAdmin, companyId));
         view = isFirstSetup ? firstSetupHomeView() : notLinkedHomeView();
       }
-      await slackApi("views.publish", { user_id: event.user, view });
+      await slackApi("views.publish", { user_id: event.user, view }, { companyId });
     } catch (err) {
       console.error("slack home publish failed:", err);
     }

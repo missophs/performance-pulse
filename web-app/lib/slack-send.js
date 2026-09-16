@@ -8,12 +8,12 @@ import { BK_KINDS, buildBlockKit, buildDigestBlockKit } from "@/lib/block-kit";
 import { fmtDate } from "@/lib/format";
 import { slackApi } from "@/lib/slack-api";
 
-export async function dmByEmail(email, payload) {
-  const lookup = await slackApi("users.lookupByEmail", { email }).catch((e) => {
+export async function dmByEmail(email, payload, companyId) {
+  const lookup = await slackApi("users.lookupByEmail", { email }, { companyId }).catch((e) => {
     throw new Error(`No Slack account for ${email}: ${e.message}`);
   });
-  const opened = await slackApi("conversations.open", { users: lookup.user.id });
-  await slackApi("chat.postMessage", { channel: opened.channel.id, ...payload });
+  const opened = await slackApi("conversations.open", { users: lookup.user.id }, { companyId });
+  await slackApi("chat.postMessage", { channel: opened.channel.id, ...payload }, { companyId });
 }
 
 /**
@@ -66,7 +66,7 @@ export async function sendSlackPing(notification, pair, counts) {
 
   const sent = [];
   for (const r of recipientsFor(notification.to_role, pair)) {
-    await dmByEmail(r.email, buildBlockKit(kind, ctxFor(r, pair, counts, notification)));
+    await dmByEmail(r.email, buildBlockKit(kind, ctxFor(r, pair, counts, notification)), pair.company_id);
     sent.push(r.email);
   }
   return { sent };
@@ -93,7 +93,7 @@ export async function sendSlackDigest(notifications, pair, counts) {
 
   const sent = [];
   for (const r of recipientsFor(known[0].to_role, pair)) {
-    await dmByEmail(r.email, buildDigestBlockKit(kindCounts, ctxFor(r, pair, counts)));
+    await dmByEmail(r.email, buildDigestBlockKit(kindCounts, ctxFor(r, pair, counts)), pair.company_id);
     sent.push(r.email);
   }
   return { sent, batched: known.length };

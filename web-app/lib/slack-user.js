@@ -48,7 +48,13 @@ export async function getCompanyIdForTeam(supabaseAdmin, teamId) {
 }
 
 export async function resolveSlackUser(supabaseAdmin, slackUserId, teamId) {
-  const info = await slackApi("users.info", { user: slackUserId });
+  // Resolved before the users.info call (not after, as this used to read) --
+  // users.info's own bot token has to be the one belonging to THIS team, not
+  // whichever install happens to be cached under the no-companyId fallback
+  // key (lib/slack-api.js) -- otherwise a second live company can silently
+  // start reading/acting through the wrong workspace's token.
+  const companyId = await getCompanyIdForTeam(supabaseAdmin, teamId);
+  const info = await slackApi("users.info", { user: slackUserId }, { companyId });
   // employee_email/manager_email are citext, so the .eq() filter below already
   // matches case-insensitively. Still lowercased here because the JS-side
   // isMgr comparison below is a plain string ===, and pair.manager_email
@@ -60,7 +66,6 @@ export async function resolveSlackUser(supabaseAdmin, slackUserId, teamId) {
   // data in these tables, matching by email ALONE is no longer enough --
   // two different companies could each provision the same address (a
   // contractor, a generic role inbox).
-  const companyId = await getCompanyIdForTeam(supabaseAdmin, teamId);
 
   // PostgREST .or() parses this as a filter expression, not a literal — a
   // comma or parenthesis in the value would otherwise break the clause or
@@ -89,6 +94,7 @@ export async function resolveSlackUser(supabaseAdmin, slackUserId, teamId) {
   return {
     slackUserId,
     email,
+    companyId,
     pairId: pair.id,
     pair,
     pairs: pairOptions,
@@ -116,6 +122,7 @@ export async function resolvePairContext(supabaseAdmin, email, pairId) {
   return {
     pairId: pair.id,
     pair,
+    companyId: pair.company_id,
     profileId: pairRoleFields(pair, email).isMgr ? pair.manager_id : pair.employee_id,
     ...pairRoleFields(pair, email),
   };

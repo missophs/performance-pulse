@@ -122,7 +122,7 @@ async function refreshHome(admin, ctx, data) {
   // in this file uses.
   try {
     const view = homeView(ctx, data ?? (await loadHomeData(admin, ctx.pairId)));
-    await slackApi("views.publish", { user_id: ctx.slackUserId, view });
+    await slackApi("views.publish", { user_id: ctx.slackUserId, view }, { companyId: ctx.companyId });
   } catch (e) {
     console.error("home publish:", e);
   }
@@ -915,7 +915,7 @@ const SUBMISSIONS = {
     // like it silently didn't take until the next open.
     if (view.previous_view_id) {
       const data = await loadHomeData(admin, ctx.pairId);
-      await slackApi("views.update", { view_id: view.previous_view_id, view: listTopicsModal(data.topics, ctx.role) }).catch((e) =>
+      await slackApi("views.update", { view_id: view.previous_view_id, view: listTopicsModal(data.topics, ctx.role) }, { companyId: ctx.companyId }).catch((e) =>
         console.error("edit topic list refresh:", e)
       );
     }
@@ -950,7 +950,9 @@ const SUBMISSIONS = {
     );
     if (view.previous_view_id) {
       const data = await loadHomeData(admin, ctx.pairId);
-      await slackApi("views.update", { view_id: view.previous_view_id, view: listGoalsModal(data.goals, ctx.isMgr) }).catch((e) => console.error("edit goal list refresh:", e));
+      await slackApi("views.update", { view_id: view.previous_view_id, view: listGoalsModal(data.goals, ctx.isMgr) }, { companyId: ctx.companyId }).catch((e) =>
+        console.error("edit goal list refresh:", e)
+      );
     }
   },
   edit_action: async (admin, ctx, v, view) => {
@@ -970,7 +972,9 @@ const SUBMISSIONS = {
     );
     if (view.previous_view_id) {
       const data = await loadHomeData(admin, ctx.pairId);
-      await slackApi("views.update", { view_id: view.previous_view_id, view: listActionsModal(data.actions) }).catch((e) => console.error("edit action list refresh:", e));
+      await slackApi("views.update", { view_id: view.previous_view_id, view: listActionsModal(data.actions) }, { companyId: ctx.companyId }).catch((e) =>
+        console.error("edit action list refresh:", e)
+      );
     }
   },
   wrap_up: async (admin, ctx, v, view) => {
@@ -1071,10 +1075,20 @@ export async function POST(request) {
 // falls back to the "no longer available" notice below — so a click can't
 // leave "Loading…" on screen forever.
 async function deferredModal(method, opener, payload) {
-  const opened = await slackApi(method, {
-    trigger_id: payload.trigger_id,
-    view: loadingModal(opener.title),
-  }).catch((e) => {
+  // A trigger_id is only valid for the team's OWN bot token -- opening it
+  // with a different company's cached token fails outright, so this one
+  // extra indexed lookup (by team_id, no join) has to happen even on the
+  // fast, pre-ctx path, ahead of the 3s trigger_id deadline.
+  const fastAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+  const companyId = await getCompanyIdForTeam(fastAdmin, payload.team?.id).catch(() => null);
+  const opened = await slackApi(
+    method,
+    {
+      trigger_id: payload.trigger_id,
+      view: loadingModal(opener.title),
+    },
+    { companyId }
+  ).catch((e) => {
     console.error(`loading modal ${method}:`, e);
     return null;
   });
@@ -1082,9 +1096,9 @@ async function deferredModal(method, opener, payload) {
 
   after(async () => {
     const viewId = opened.view.id;
-    const swap = (view) => slackApi("views.update", { view_id: viewId, view }).catch((e) => console.error("opener view update:", e));
+    const swap = (view) => slackApi("views.update", { view_id: viewId, view }, { companyId }).catch((e) => console.error("opener view update:", e));
     try {
-      const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+      const admin = fastAdmin;
       // The one opener that must work for a Slack account with no pair yet
       // -- everything else legitimately requires ctx, since the button that
       // opened it only ever appears on an already-linked Home tab.
@@ -1116,7 +1130,7 @@ async function handleInteraction(admin, slackUserId, payload) {
     const companyId = await getCompanyIdForTeam(admin, payload.team?.id);
     const employeeEmail = fieldVal(payload.view.state.values, "employee_email")?.trim().toLowerCase();
     if (!companyId || !employeeEmail) return Response.json({ ok: true });
-    const info = await slackApi("users.info", { user: slackUserId }).catch(() => null);
+    const info = await slackApi("users.info", { user: slackUserId }, { companyId }).catch(() => null);
     const managerEmail = info?.user?.profile?.email?.toLowerCase();
     if (!managerEmail) return Response.json({ ok: true });
     try {
@@ -1148,7 +1162,9 @@ async function handleInteraction(admin, slackUserId, payload) {
       const merged = { ...existing?.draft, ...partial };
       await saveFormDraft(admin, ctx.pairId, ctx.role, spec.kind, merged).catch(() => {});
       if (payload.view?.id) {
-        await slackApi("views.update", { view_id: payload.view.id, view: spec.build(ctx, merged) }).catch((e) => console.error("save draft view update:", e));
+        await slackApi("views.update", { view_id: payload.view.id, view: spec.build(ctx, merged) }, { companyId: ctx.companyId }).catch((e) =>
+          console.error("save draft view update:", e)
+        );
       }
     } else if (QUICK_ACTIONS[action.action_id]) {
       const spec = QUICK_ACTIONS[action.action_id];
@@ -1158,7 +1174,9 @@ async function handleInteraction(admin, slackUserId, payload) {
       // The list modal is the visible result of the click, so it stays on the
       // critical path; the Home tab behind it can catch up after the response.
       if (payload.view?.id) {
-        await slackApi("views.update", { view_id: payload.view.id, view: spec.refreshList(data, ctx) }).catch((e) => console.error("view update:", e));
+        await slackApi("views.update", { view_id: payload.view.id, view: spec.refreshList(data, ctx) }, { companyId: ctx.companyId }).catch((e) =>
+          console.error("view update:", e)
+        );
       }
       after(() => refreshHome(admin, ctx, data));
     } else if (action.action_id === "suggested_pick") {
@@ -1178,7 +1196,7 @@ async function handleInteraction(admin, slackUserId, payload) {
       // matters" silently dropped that text when this used plain fieldVal.
       const why = fieldValV2(payload.view?.state?.values, "why");
       if (payload.view?.id) {
-        await slackApi("views.update", { view_id: payload.view.id, view: addTopicModal(ctx, { text, why, category }) }).catch((e) =>
+        await slackApi("views.update", { view_id: payload.view.id, view: addTopicModal(ctx, { text, why, category }) }, { companyId: ctx.companyId }).catch((e) =>
           console.error("suggestion prefill view update:", e)
         );
       }
@@ -1195,9 +1213,11 @@ async function handleInteraction(admin, slackUserId, payload) {
       const target = fieldValV2(values, "target");
       const status = fieldValV2(values, "status");
       if (payload.view?.id) {
-        await slackApi("views.update", { view_id: payload.view.id, view: addGoalModal(ctx, { text, why, measure, target, status }) }).catch((e) =>
-          console.error("goal suggestion prefill view update:", e)
-        );
+        await slackApi(
+          "views.update",
+          { view_id: payload.view.id, view: addGoalModal(ctx, { text, why, measure, target, status }) },
+          { companyId: ctx.companyId }
+        ).catch((e) => console.error("goal suggestion prefill view update:", e));
       }
     } else if (action.action_id === "devplan_suggested_pick") {
       // Same section+accessory reasoning as suggested_pick/goal_suggested_pick
@@ -1210,10 +1230,14 @@ async function handleInteraction(admin, slackUserId, payload) {
       const pick = rule?.picks[pickIdx];
       if (rule && pick && payload.view?.id) {
         const target = fieldValV2(payload.view?.state?.values, "target");
-        await slackApi("views.update", {
-          view_id: payload.view.id,
-          view: addDevPlanModal(ctx, { area: rule.area, why: rule.why, type: pick[0], activity: pick[1], support: rule.support, measure: rule.measure, target }),
-        }).catch((e) => console.error("devplan suggestion prefill view update:", e));
+        await slackApi(
+          "views.update",
+          {
+            view_id: payload.view.id,
+            view: addDevPlanModal(ctx, { area: rule.area, why: rule.why, type: pick[0], activity: pick[1], support: rule.support, measure: rule.measure, target }),
+          },
+          { companyId: ctx.companyId }
+        ).catch((e) => console.error("devplan suggestion prefill view update:", e));
       }
     } else if (action.action_id === "switch_pair") {
       const chosenId = action.selected_option?.value;
