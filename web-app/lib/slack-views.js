@@ -939,7 +939,14 @@ export function wrapUpConversationModal(pairId) {
       section(
         "This closes out any open topics, goals, and actions — marking them Discussed / Complete / Done — so your Home tab starts fresh. Nothing is deleted, your pairing keeps going exactly as before, and either of you can add a new topic or action right away — this doesn't end the conversation."
       ),
-      inputBlock("note", "Anything worth noting as this closes", plainInput("val", { multiline: true, placeholder: "Optional — goes in the note to your partner." }), false),
+      // inputBlock's 4th arg is Slack's own `optional` flag -- this was
+      // hardcoded false (required) since the very first version of this
+      // modal despite the label and placeholder both saying "Optional,"
+      // silently blocking every submission with "Please complete this
+      // required field" unless something was typed. Found live 2026-09-16
+      // testing the wrap-up flow end to end, not caught by any prior review
+      // because nothing before tonight actually submitted this modal.
+      inputBlock("note", "Anything worth noting as this closes", plainInput("val", { multiline: true, placeholder: "Optional — goes in the note to your partner." }), true),
     ],
     "Clear it out",
     pairId
