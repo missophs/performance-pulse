@@ -4968,3 +4968,193 @@ repeated or re-discovered tomorrow.
   sign-in)"** link button, confirmed live in Slack after forcing a real
   refresh (a plain reload does not always trigger Slack to republish the
   Home tab — a real save, or navigating away and back to the app, does).
+
+## Session closeout (2026-09-16): sound-per-click stopped, multi-pairing visibility fixed both directions, goal/employee-change flows made explicit, a real required-field bug found live, return-to-Slack banner shipped
+
+Started from a batch of Melissa's screenshots showing several confusing/
+broken things at once. Went through `/graphify --update` + `graphify
+query` first (per this repo's `CLAUDE.md`) instead of re-reading files
+cold, then a full `/code-review` pass on every change before pushing.
+Every fix below was pushed to `main`, confirmed deployed via `gh api
+repos/missophs/performance-pulse/commits/<sha>/status`, and live-verified
+in Melissa's real Chrome (`mcp__claude-in-chrome__*`) — not just read from
+code. Commits, oldest to newest: `57e0160`, `6d90a01`, `d597734`,
+`6713d6c`, `da8c060`.
+
+### Bugs fixed (all confirmed live, not just in code)
+
+1. **Slack notification sound fired on every single button press.**
+   Root cause: a self-DM "✅ X saved" confirmation (`confirmSaved` /
+   `CONFIRM_LABELS` in `app/api/slack/interactivity/route.js`) sent after
+   every action, which `SLACK_TODO.md`'s own standing rule already said to
+   batch instead of sending one-per-click. Melissa's explicit, repeated
+   final call: remove it entirely, not just batch it — no self-confirm DM
+   for any action anymore. (I tried a middle-ground `SILENT_CONFIRM_LABELS`
+   exception list first; she overrode that too. Fully removed.)
+2. **Wrap-up ("Final wrap up for this conversation") sounded destructive/
+   terminal**, as if it ended the pairing — it doesn't, it only clears old
+   topics. Retitled to **"Clear out old topics"**, body reworded to say
+   explicitly the conversation/pairing continues, submit button relabeled
+   "Clear it out" (`lib/slack-views.js`, `wrapUpConversationModal`).
+   Button restyled from danger/red to default.
+3. **Real pre-existing bug found only by clicking through the live UI**:
+   the wrap-up modal's note field was `inputBlock(..., false)` (required)
+   while its own placeholder text said "Optional" — every wrap-up
+   submission silently failed with "Please complete this required field."
+   This had nothing to do with tonight's other changes; confirmed
+   pre-existing via `git log -p -S` back to the modal's original creation.
+   Fixed to `true` (optional). This is the clearest example tonight of why
+   live-clicking beats reading code — the bug was invisible in a code read.
+4. **Wrap-up modal title silently truncated by Slack's 24-character cap**
+   ("Clear out old topics & a...") — Slack truncates modal title/submit/
+   close text past 24 chars instead of rejecting it, so this shipped once
+   and only showed up on a live screenshot. Shortened the title to fit,
+   then wrote and ran a one-off length-check script against every other
+   modal builder in `lib/slack-views.js` to rule out the same bug hiding
+   elsewhere (found only this one). Also proactively `.slice(0, 75)`-
+   guarded new `radio_buttons` option text against Slack's ~75-char option
+   cap before it could cause the same class of live bug.
+5. **"Add a new employee" required typing an exact email**, no roster
+   dropdown, and was misleadingly named — it's really "replace who I'm
+   paired with." Rebuilt as **"Add or change employee"**
+   (`addEmployeeModal(ctx)` in `lib/slack-views.js`, handler in
+   `app/api/slack/interactivity/route.js`): accepts either an email or an
+   exact roster name (new `resolveEmployeeNameToEmail(admin, name)` in
+   `lib/data.js`, `%`/`_`/`\` escaped before `.ilike()` — an unescaped-
+   wildcard bug my own `/code-review` caught before it shipped), plus a
+   new radio choice asking explicitly: **archive the old conversation, or
+   keep it open** (Melissa's own wording: "pick a different employee, then
+   choose from archive the conversation, or keep it open"). Order matters
+   in the handler — `createPairForSlack` runs first, `closePair(...)` only
+   runs after, specifically so a failure can't half-complete and lose data.
+6. **Monte couldn't see his own goals/topics on Slack or the web app.**
+   Root cause was NOT a permissions bug — it was the multi-pairing default
+   selection (an account can be a manager on one pairing and an employee
+   on another; both `listMyPairs()` and `resolveSlackUser()` default to
+   the OLDEST non-closed pairing unless a specific one is saved). Proven
+   definitively only after Melissa personally signed into the second
+   Google account and I watched the live reproduction — I could not have
+   confirmed this from code alone, and could not sign in myself (no saved
+   credentials, and entering credentials for her is off-limits).
+7. **No persistent indicator of "your manager" / "who you manage.**"
+   Fixed symmetrically in `components/AppShell.js`: viewing the pairing
+   where you're the manager gave no hint you also have a manager
+   elsewhere, and vice versa. Added `myManagerPair`/`myEmployeePair`
+   (derived from `pairs`, which needed a `role` field added to each
+   `pairOptions` entry in `app/(dashboard)/layout.js` — it was computed
+   but never actually returned before) and two always-visible buttons,
+   "Your manager: {name}" / "You manage: {name}", both just calling the
+   existing `switchPair(id)`. Also added a persistent "Viewing 1:1 with:"
+   label before the pair-switcher dropdown, and changed the employee-role
+   badge from static text to a clickable link to `/one-on-one`.
+8. **Goal creation didn't say whose goal was being made.** Melissa: "it
+   should say add a goal for your manager, something that shows it's
+   explicit because this is very confusing." Fixed on the web app
+   (`app/(dashboard)/goals/page.js` — button label, card note, and modal
+   title all now read `Add a goal for {employeeName}` vs. `Add my goal`)
+   and on Slack (`addGoalModal(ctx, draft)` in `lib/slack-views.js` — added
+   a `context()` block stating whose goal it is, since Slack's 24-char
+   title cap makes putting the name in the title itself impossible).
+   Noted but explicitly left alone: 4 pre-existing, unrelated lint warnings
+   in `goals/page.js`, confirmed pre-existing via `git stash` comparison —
+   out of scope for tonight.
+9. **No way to get back to Slack after signing into the web app from a
+   Slack-originated link**, and the button that opens the web app never
+   visually changes even when it worked (a real ceiling: a page can't
+   force focus onto a different application — browsers don't allow that).
+   Built the honest version instead: the "Open Performance Pulse" link now
+   carries `?from=slack`, and `AppShell.js` shows a green
+   `.slack-return-banner` ("You're signed in as {name}. You can close this
+   tab and go back to Slack.") with Dismiss / "Close this tab"
+   (`window.close()`) buttons when that param is present. Uses the
+   existing `--good`/mint success-banner color pattern already established
+   for `.privacy-note` in `app/globals.css`, not new ad hoc hex — the
+   repo's `impeccable` design-lint hook flagged two ad hoc hex values
+   (`#e6f4ea`, `#1a3c25`) on the first attempt and this was the real fix,
+   not a suppression.
+
+### Mistakes / false starts this session (own up to these directly)
+
+1. **For a stretch of tonight, fixes were committed to git but never
+   pushed/deployed** — Melissa kept reporting "nothing I fix works," and
+   the root cause was mine: changes sat committed locally while she was
+   testing production, which still had the old code. I did not catch this
+   myself until she pushed back hard enough to force a real check.
+   Established a strict commit → push → poll Vercel deploy status via
+   `gh api` → live-verify loop for every change after that, and started
+   stating explicitly, each time, what was and wasn't yet deployed.
+2. **First attempt at removing the self-confirm DM sound was a
+   compromise she hadn't asked for** — I built a `SILENT_CONFIRM_LABELS`
+   exception list that kept the confirmation (and its sound) for edits
+   and private notes, reasoning that removing it everywhere would lose the
+   "did this actually save" signal. Melissa explicitly overrode this and
+   demanded zero self-DM for every action, no exceptions. Removed
+   entirely, per her call, not mine.
+3. **Told Melissa a fix worked based on a static button label, and she
+   correctly called that out** ("It's still saying open performance
+   pulse... you saw I just did it"). The "Open Performance Pulse
+   (Google sign-in)" button's text never changes after use, by design —
+   it's a link, not a toggle — but I hadn't front-loaded that before she
+   tested it, so a working click looked identical to a broken one from her
+   side. Should have said "the label won't change; look for the new
+   authenticated tab instead" before she clicked, not after she was
+   confused.
+4. **Multiple live browser-automation clicks landed on the wrong or a
+   stale element** this session, because Slack's Home tab re-renders after
+   a modal closes (or an unrelated layout shift moved things) and I
+   reused an old element reference/coordinate instead of re-reading the
+   page fresh. Caught every time by re-querying before the next click, but
+   cost several wasted verification passes.
+5. **Almost let Melissa test the fresh sign-out → Slack → sign-in path**
+   for the new return-to-Slack banner without warning her it isn't wired
+   for that path yet — caught it in the same turn and disclosed the gap
+   before she could try it and report a false "still not working."
+
+### Known gap, disclosed, not yet built
+
+The return-to-Slack banner only works when the person was **already
+signed in** on the web app and clicked the Slack Home tab link — that's
+the case Melissa actually tested. A **fresh sign-out → Slack → Google
+OAuth → `/dashboard`** round trip does NOT currently show the banner: the
+`?from=slack` query param is dropped at the `/login` redirect and never
+restored by the OAuth callback. Told her this explicitly before she could
+test it that way and report a false "not working." Offered to extend it;
+not done, waiting on her decision.
+
+### Explicitly deferred, not yet decided
+
+Melissa raised that "Edit their name" (the existing cosmetic-relabel-only
+modal in `AppShell.js`, unrelated to `addEmployeeModal`) may now be
+redundant with the new "Add or change employee" flow. Her own words:
+"let's go through this first" — deliberately NOT removed pending a joint
+walkthrough. My prior read: they serve genuinely different purposes
+(rename-only, no data change vs. replace-and-optionally-archive), but this
+is her call to make once she's seen both live again.
+
+### Still outstanding from earlier standing items
+
+- The Slack-side (not website-side) verification of the goal manager-
+  only-delete permission check (`handleDelete` in `goals/page.js` — only
+  `isMgr` can delete) remains **unverified on Slack specifically**, per
+  Melissa's own earlier note that Slack is the surface that matters for
+  that test. Still blocked on the same constraint as item 6 above: no
+  second Slack identity/session to test as Monte. Needs her to bring up a
+  second Slack session the same way she did for the web app.
+- A full line-by-line audit of every older open item across this entire
+  document was explicitly NOT attempted tonight — I told Melissa this
+  directly rather than claim a sweep I didn't do, and asked her to name
+  specific older items if she has ones beyond what's covered above.
+
+### Verified state as of end of session (2026-09-16)
+
+- All 5 commits above pushed to `main` and confirmed deployed (Vercel
+  build status `success` for each, polled via `gh api`).
+- Live-clicked in Melissa's real Chrome: wrap-up modal submits
+  successfully (previously silently blocked), "Add or change employee"
+  modal shows the roster-name + archive/keep choice, goal-add buttons/
+  titles show the explicit owner on both roles, "Your manager"/"You
+  manage" buttons appear correctly for both pairing directions, return-
+  to-Slack banner renders correctly for the already-signed-in path.
+- Design-lint (`impeccable`) hook: clean on every file touched tonight —
+  one real violation found and fixed by reuse (see item 9), nothing
+  suppressed with `ignore-value`.
