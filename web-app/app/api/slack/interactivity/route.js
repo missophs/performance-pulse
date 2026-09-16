@@ -8,7 +8,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { after } from "next/server";
 import { verifySlackSignature } from "@/lib/slack-verify";
-import { resolveSlackUser, setSlackPairSelection, resolvePairContext } from "@/lib/slack-user";
+import { resolveSlackUser, setSlackPairSelection, resolvePairContext, getCompanyIdForTeam } from "@/lib/slack-user";
 import { slackApi } from "@/lib/slack-api";
 import { loadHomeData } from "@/lib/slack-home-data";
 import { LD_RULES } from "@/lib/development-content";
@@ -26,6 +26,7 @@ import {
   addConcernModal,
   listConcernsModal,
   listDocumentsModal,
+  setupFirstPairModal,
   addGoalModal,
   GOAL_FIELDS,
   listGoalsModal,
@@ -69,6 +70,7 @@ import {
   addAchievement,
   deleteAchievement,
   deleteTopics,
+  createFirstPairForSlack,
   addConcern,
   shareConcern,
   deleteConcern,
@@ -231,6 +233,11 @@ const OPENERS = {
   open_list_goals: { title: "Goals", build: async (admin, ctx) => listGoalsModal((await loadHomeData(admin, ctx.pairId)).goals, ctx.isMgr) },
   open_list_devplans: { title: "Development plans", build: async (admin, ctx) => listDevPlansModal((await loadHomeData(admin, ctx.pairId)).devPlans, ctx.isMgr) },
   open_list_achievements: { title: "Achievements", build: async (admin, ctx) => listAchievementsModal((await loadHomeData(admin, ctx.pairId)).achievements) },
+  // build is never actually called -- deferredModal's after() callback
+  // special-cases this action_id before it would try (and fail) to resolve
+  // ctx for a Slack account that has no pair yet. title still drives the
+  // loading placeholder.
+  open_setup_first_pair: { title: "Add your employee", build: async () => setupFirstPairModal() },
   // Manager-only, re-checked here same as every other role-gated opener
   // (open_list_suggestions above, open_add_employee, etc.) even though the
   // button is already hidden from the employee's Home tab.
@@ -1078,6 +1085,13 @@ async function deferredModal(method, opener, payload) {
     const swap = (view) => slackApi("views.update", { view_id: viewId, view }).catch((e) => console.error("opener view update:", e));
     try {
       const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+      // The one opener that must work for a Slack account with no pair yet
+      // -- everything else legitimately requires ctx, since the button that
+      // opened it only ever appears on an already-linked Home tab.
+      if (payload.actions?.[0]?.action_id === "open_setup_first_pair") {
+        await swap(setupFirstPairModal());
+        return;
+      }
       const ctx = payload.user?.id ? await resolveSlackUser(admin, payload.user.id, payload.team?.id) : null;
       if (!ctx) {
         await swap(noticeModal(opener.title, "We couldn't match your Slack account to a Performance Pulse profile. Open the app once to link it, then try again."));
@@ -1095,6 +1109,26 @@ async function deferredModal(method, opener, payload) {
 }
 
 async function handleInteraction(admin, slackUserId, payload) {
+  // Must run before the ctx-required bail-out just below: this is the one
+  // submission a not-yet-linked Slack account has to be able to make (see
+  // OPENERS.open_setup_first_pair's matching bypass above).
+  if (payload.type === "view_submission" && payload.view?.callback_id === "setup_first_pair" && slackUserId) {
+    const companyId = await getCompanyIdForTeam(admin, payload.team?.id);
+    const employeeEmail = fieldVal(payload.view.state.values, "employee_email")?.trim().toLowerCase();
+    if (!companyId || !employeeEmail) return Response.json({ ok: true });
+    const info = await slackApi("users.info", { user: slackUserId }).catch(() => null);
+    const managerEmail = info?.user?.profile?.email?.toLowerCase();
+    if (!managerEmail) return Response.json({ ok: true });
+    try {
+      await createFirstPairForSlack(admin, { companyId, managerEmail, employeeEmail });
+      const newCtx = await resolveSlackUser(admin, slackUserId, payload.team?.id);
+      if (newCtx) after(() => refreshHome(admin, newCtx));
+    } catch (e) {
+      console.error("setup_first_pair:", e);
+    }
+    return Response.json({});
+  }
+
   const ctx = slackUserId ? await resolveSlackUser(admin, slackUserId, payload.team?.id) : null;
   if (!ctx) return Response.json({ ok: true }); // not linked — nothing we can do
 

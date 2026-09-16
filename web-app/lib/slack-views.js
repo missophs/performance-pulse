@@ -308,6 +308,30 @@ export function notLinkedHomeView() {
   };
 }
 
+// Real self-serve entry point (migration 0030): shown instead of the
+// generic notLinkedHomeView above when this workspace's company has
+// installed the app but hasn't created a single pairing yet -- otherwise a
+// brand-new customer would install, open the Home tab, and hit a dead end
+// with nothing to click. Matches the app's existing "no self-serve for
+// employees" rule (SLACK_TODO.md, 2026-09-05) by staying manager-initiated:
+// whoever clicks this becomes the manager of the pair they create.
+export function firstSetupHomeView() {
+  return {
+    type: "home",
+    blocks: [
+      { type: "header", text: { type: "plain_text", text: "Welcome to Performance Pulse" } },
+      section("Nobody's set up yet on this team. Add the person you'll be having 1:1s with to get started — you'll be their manager."),
+      actions([button("Add your first employee", "open_setup_first_pair", "", "primary")]),
+    ],
+  };
+}
+
+export function setupFirstPairModal() {
+  return modal("setup_first_pair", "Add your employee", [
+    inputBlock("employee_email", "Their email address", plainInput("val", { placeholder: "name@company.com" })),
+  ]);
+}
+
 // -------------------------------------------------------------- topics -----
 
 // Suggestion values carry their category so the interactivity route doesn't

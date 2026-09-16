@@ -85,6 +85,23 @@ export async function createPairForSlack(admin, managerId, managerEmail, employe
   return data;
 }
 
+// The real self-serve entry point for a brand-new company (migration 0030):
+// unlike createPairForSlack above, the person doing this has never signed
+// into the website -- there's no profiles row for them yet, so manager_id
+// stays null (same nullable pattern this table already uses for
+// employee_id) until they eventually do and handle_new_user's email match
+// backfills it. Only ever called when companyHasAnyPairs was just false,
+// so no duplicate-pairing check is needed the way createPairForSlack's is.
+export async function createFirstPairForSlack(admin, { companyId, managerEmail, employeeEmail }) {
+  const { data, error } = await admin
+    .from("pairs")
+    .insert({ company_id: companyId, manager_email: managerEmail, employee_email: employeeEmail })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 // Pure, dependency-free name -> email resolution for the HR roster importer
 // (app/api/hr/roster/route.js). Pulled out of the route handler specifically
 // so this can be unit-tested without mocking ExcelJS or a real HTTP request
@@ -829,6 +846,14 @@ export async function saveSlackInstallation(supabase, { teamId, teamName, access
     .upsert({ team_id: teamId, team_name: teamName, access_token: accessToken, bot_user_id: botUserId, installed_by_slack_user_id: installedBySlackUserId, company_id: companyId, installed_at: new Date().toISOString() });
   if (error) throw error;
   return companyId;
+}
+
+// Drives the Slack "Add your first employee" setup screen -- a company
+// with zero pairs has literally nothing to click into yet.
+export async function companyHasAnyPairs(supabase, companyId) {
+  const { count, error } = await supabase.from("pairs").select("id", { count: "exact", head: true }).eq("company_id", companyId);
+  if (error) throw error;
+  return (count || 0) > 0;
 }
 
 export async function getLatestSlackInstallation(supabase) {

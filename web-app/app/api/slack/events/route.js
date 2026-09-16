@@ -5,10 +5,11 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { verifySlackSignature } from "@/lib/slack-verify";
-import { resolveSlackUser } from "@/lib/slack-user";
+import { resolveSlackUser, getCompanyIdForTeam } from "@/lib/slack-user";
 import { slackApi } from "@/lib/slack-api";
-import { homeView, notLinkedHomeView } from "@/lib/slack-views";
+import { homeView, notLinkedHomeView, firstSetupHomeView } from "@/lib/slack-views";
 import { loadHomeData } from "@/lib/slack-home-data";
+import { companyHasAnyPairs } from "@/lib/data";
 
 export async function POST(request) {
   const rawBody = await request.text();
@@ -39,7 +40,14 @@ export async function POST(request) {
     const supabaseAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
     try {
       const ctx = await resolveSlackUser(supabaseAdmin, event.user, body.team_id);
-      const view = ctx ? homeView(ctx, await loadHomeData(supabaseAdmin, ctx.pairId)) : notLinkedHomeView();
+      let view;
+      if (ctx) {
+        view = homeView(ctx, await loadHomeData(supabaseAdmin, ctx.pairId));
+      } else {
+        const companyId = await getCompanyIdForTeam(supabaseAdmin, body.team_id);
+        const isFirstSetup = companyId && !(await companyHasAnyPairs(supabaseAdmin, companyId));
+        view = isFirstSetup ? firstSetupHomeView() : notLinkedHomeView();
+      }
       await slackApi("views.publish", { user_id: event.user, view });
     } catch (err) {
       console.error("slack home publish failed:", err);

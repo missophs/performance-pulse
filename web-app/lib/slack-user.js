@@ -33,6 +33,20 @@ export function pairRoleFields(pair, email) {
  * screen must show which pairing is current, per the item 2 "label problem"
  * writeup, so `pairs` is what the Home tab switcher renders from.
  */
+// Shared by resolveSlackUser below and the "first setup" flow
+// (app/api/slack/events/route.js, interactivity route's setup_first_pair) --
+// teamId comes straight from Slack's own payload/event body, a verified
+// signal of which company is actually asking. Returns null with no teamId,
+// or no installation row for it yet (pre-migration-0030/0029 request, or
+// the env-var fallback path with no installations table at all) -- callers
+// fall through unscoped in that case, matching this app's original
+// single-company behavior.
+export async function getCompanyIdForTeam(supabaseAdmin, teamId) {
+  if (!teamId) return null;
+  const { data: install } = await supabaseAdmin.from("slack_installations").select("company_id").eq("team_id", teamId).maybeSingle();
+  return install?.company_id || null;
+}
+
 export async function resolveSlackUser(supabaseAdmin, slackUserId, teamId) {
   const info = await slackApi("users.info", { user: slackUserId });
   // employee_email/manager_email are citext, so the .eq() filter below already
@@ -45,18 +59,8 @@ export async function resolveSlackUser(supabaseAdmin, slackUserId, teamId) {
   // Multi-tenant scoping (migration 0030): with more than one company's
   // data in these tables, matching by email ALONE is no longer enough --
   // two different companies could each provision the same address (a
-  // contractor, a generic role inbox). teamId comes straight from Slack's
-  // own payload/event body, so it's a verified signal of which company is
-  // actually asking. No teamId, or no installation row for it yet (a
-  // request from before migration 0030/0029 was applied, or the env-var
-  // fallback path with no installations table at all) -- fall through
-  // unscoped rather than fail closed, matching this app's original
-  // single-company behavior.
-  let companyId = null;
-  if (teamId) {
-    const { data: install } = await supabaseAdmin.from("slack_installations").select("company_id").eq("team_id", teamId).maybeSingle();
-    companyId = install?.company_id || null;
-  }
+  // contractor, a generic role inbox).
+  const companyId = await getCompanyIdForTeam(supabaseAdmin, teamId);
 
   // PostgREST .or() parses this as a filter expression, not a literal — a
   // comma or parenthesis in the value would otherwise break the clause or
