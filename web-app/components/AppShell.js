@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { PulseProvider, usePulse } from "@/components/PulseContext";
@@ -47,6 +47,22 @@ function ShellBody({ counts, children }) {
   // the Slack Home tab's "Open Performance Pulse" button, not guaranteed in
   // every browser). Melissa's ask, 2026-09-16, after testing that link.
   const [fromSlack, setFromSlack] = useState(searchParams.get("from") === "slack");
+
+  // Auto-close after a couple seconds so this is automatic by default,
+  // not just an offer she has to click (Melissa's ask, 2026-09-16 -- "I
+  // want it automatic if possible"). window.close() only actually closes
+  // the tab when the browser considers it script-opened, which in practice
+  // means "no more than one entry in this tab's history" -- true for a
+  // tab that exists purely from following the Slack link, which is the
+  // only way fromSlack is ever true. If that assumption doesn't hold in
+  // some browser, this silently no-ops and the manual button below still
+  // works as the fallback -- it was never guaranteed, see the comment
+  // above fromSlack.
+  useEffect(() => {
+    if (!fromSlack) return;
+    const t = setTimeout(() => window.close(), 2000);
+    return () => clearTimeout(t);
+  }, [fromSlack]);
 
   // If this account is on a pairing where it's the EMPLOYEE, that's true
   // no matter which pairing is currently active -- surfaced persistently so
@@ -123,7 +139,7 @@ function ShellBody({ counts, children }) {
       <main>
         {fromSlack && (
           <div className="slack-return-banner">
-            <span>You&apos;re signed in as {myName}. You can close this tab and go back to Slack.</span>
+            <span>You&apos;re signed in as {myName}. This tab will close on its own in a couple seconds &mdash; or close it now.</span>
             <div style={{ display: "flex", gap: 8 }}>
               <button
                 className="btn ghost sm"
