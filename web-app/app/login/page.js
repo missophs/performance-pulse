@@ -23,18 +23,20 @@ export default function LoginPage() {
   async function signInWithGoogle() {
     setError("");
     const supabase = createClient();
-    // proxy.js already preserves ?from=slack onto this /login redirect for
-    // an unauthenticated Slack-originated visit, but that's as far as it
-    // got without this: redirectTo was a bare URL, so the round trip through
-    // Google + Supabase's own callback dropped it, and /dashboard never knew
-    // to show the return-to-Slack banner. auth/callback/route.js already
-    // reads ?next= and redirects there -- just needed to actually send it.
-    const from = new URLSearchParams(window.location.search).get("from");
-    const next = from === "slack" ? "/dashboard?from=slack" : "/dashboard";
+    // Slack is the primary surface (per the comment on the Home tab's
+    // "Open Performance Pulse" link in lib/slack-views.js) -- every sign-in
+    // here should land back on the return-to-Slack banner, not just the ones
+    // that happened to arrive with ?from=slack in the URL. That query param
+    // doesn't survive AppShell.js's own "Sign out" button (router.push
+    // ("/login"), no query) or any other bare visit to this page, so
+    // detecting and forwarding it was never going to cover every path --
+    // this route is Google-only and Slack-only, so there is no path where
+    // "back to Slack" is the wrong answer. auth/callback/route.js already
+    // reads ?next= and redirects there -- just needed to always send it.
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent("/dashboard?from=slack")}`,
         // Without this, Google silently reuses whichever Google account is
         // already active in the browser instead of showing the account
         // picker -- there's no way to switch accounts from this button
