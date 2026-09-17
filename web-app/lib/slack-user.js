@@ -47,6 +47,20 @@ export async function getCompanyIdForTeam(supabaseAdmin, teamId) {
   return install?.company_id || null;
 }
 
+// Shared by resolveSlackUser below and add_employee's Slack-native picker
+// (app/api/slack/interactivity/route.js) -- anywhere a Slack user id needs
+// to become the real work email, not the id itself. Returns null rather
+// than throwing when Slack has no email on file (a bot, a guest without one
+// visible) -- callers show a friendly error instead of a raw failure.
+export async function slackUserEmail(slackUserId, companyId) {
+  const info = await slackApi("users.info", { user: slackUserId }, { companyId });
+  // employee_email/manager_email are citext, so the .eq() filter below already
+  // matches case-insensitively. Still lowercased here because the JS-side
+  // isMgr comparison below is a plain string ===, and pair.manager_email
+  // comes back from the DB in whatever case was originally stored.
+  return info.user?.profile?.email?.toLowerCase() || null;
+}
+
 export async function resolveSlackUser(supabaseAdmin, slackUserId, teamId) {
   // Resolved before the users.info call (not after, as this used to read) --
   // users.info's own bot token has to be the one belonging to THIS team, not
@@ -54,12 +68,7 @@ export async function resolveSlackUser(supabaseAdmin, slackUserId, teamId) {
   // key (lib/slack-api.js) -- otherwise a second live company can silently
   // start reading/acting through the wrong workspace's token.
   const companyId = await getCompanyIdForTeam(supabaseAdmin, teamId);
-  const info = await slackApi("users.info", { user: slackUserId }, { companyId });
-  // employee_email/manager_email are citext, so the .eq() filter below already
-  // matches case-insensitively. Still lowercased here because the JS-side
-  // isMgr comparison below is a plain string ===, and pair.manager_email
-  // comes back from the DB in whatever case was originally stored.
-  const email = info.user?.profile?.email?.toLowerCase();
+  const email = await slackUserEmail(slackUserId, companyId);
   if (!email) return null;
 
   // Multi-tenant scoping (migration 0030): with more than one company's

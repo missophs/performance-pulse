@@ -5232,3 +5232,69 @@ Still blocking, not done:
   applied yet when it was first tried. Not an isolated test tenant until
   the OAuth install above is actually run and a fresh `company_id` is
   confirmed.
+
+## 2026-09-17 — "Edit their name" removed, employee picker goes Slack-native, governance policy added
+
+Melissa's calls this session: "Edit their name" (manager-only
+`pairs.employee_label` rename) removed for good, accepting the real
+tradeoff (a wrong display name can no longer be fixed) once "switch
+pairing" covered picking between employees. Confirmed IT — not
+managers/HR — already adds new hires to the Slack channel, so "Add or
+change employee" (`addEmployeeModal`) now uses a real Slack member picker
+(`users_select`) instead of a typed email/roster name; resolves to email
+via `slackUserEmail` (`lib/slack-user.js`, extracted from `resolveSlackUser`
+so both share one `users.info` call). `resolveEmployeeNameToEmail`
+(`lib/data.js`) deleted — its whole reason to exist (typo-prone typed
+names) went away with the free-text field.
+
+Also added a governance policy, modeled on Slack's own Marketplace rules
+(verified live against
+https://docs.slack.dev/slack-marketplace/slack-marketplace-app-guidelines-and-requirements/,
+which bars "AI mak[ing] consequential decisions without human review" and
+gives an HR agent auto-deciding as its own example of what not to build):
+a permanent line on every Home tab load, a "Governance & human review"
+section on `app/privacy/page.js`, and a dated rule in `web-app/CLAUDE.md`
+requiring any future AI-generated/AI-scored feature to keep a human
+approval step and update both of those in the same change.
+
+Committed and pushed to `main` this session (see git log) — deploys to
+production automatically per the deploy-pipeline note above.
+
+### Investigated: how to let someone outside Melissa's own company test this
+
+Melissa asked how to send this to someone (not her) to try. Two real
+paths, and a genuine gap found in the second one:
+
+**Works today, no blockers:** add the tester as a member of Melissa's own
+"performance" Slack workspace and create a real pairing for them (Slack's
+"Add or change employee," now the picker above, or the website roster
+upload) with Melissa or an existing user as their partner. They open the
+Performance Pulse Home tab in Slack and use the real, live product — not a
+demo. This does not exercise the multi-tenant "install into your own
+company's workspace" story, only the product itself.
+
+**The actual "any company can install this" test — still blocked, now on
+three things, not two:**
+1. `SLACK_CLIENT_ID`/`SLACK_CLIENT_SECRET` still not set in Vercel
+   production (unchanged from the 2026-09-16 pivot session) — Melissa
+   copies these herself from the Slack app's OAuth & Permissions page,
+   then redeploy.
+2. Slack app "Public Distribution" still not activated. Confirmed via
+   Slack's own docs this session: it's a self-service toggle in the Slack
+   app dashboard (Manage Distribution) — "No review is required... and it
+   takes effect immediately," not a Marketplace/App Directory submission.
+   Only Melissa can click it (her Slack app's admin console).
+3. **New finding, not caught in the 2026-09-16 pivot session:**
+   `/api/slack/install` gates on `requireHr()` (`lib/hr-auth.js`) — the
+   person clicking the install link must already be signed in on the
+   *website* with a `profiles` row where `is_hr = true`. A cold outside
+   tester with zero prior account has no way to reach that state
+   themselves — there's no self-serve "become HR for a brand-new company"
+   signup path. `firstSetupHomeView`/`createFirstPairForSlack` (built
+   2026-09-16) only cover the FIRST PAIRING once the bot is already in a
+   workspace, not the install step itself. Until this is designed and
+   built (or Melissa manually provisions each tester's HR profile row
+   herself, the way `backfill-install.mjs` manually provisioned the
+   `slack_installations` row earlier), only Melissa's own company can ever
+   actually run the install flow, even after items 1 and 2 above are
+   fixed.

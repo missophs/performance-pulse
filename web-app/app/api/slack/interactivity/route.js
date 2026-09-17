@@ -8,13 +8,12 @@
 import { createClient } from "@supabase/supabase-js";
 import { after } from "next/server";
 import { verifySlackSignature } from "@/lib/slack-verify";
-import { resolveSlackUser, setSlackPairSelection, resolvePairContext, getCompanyIdForTeam } from "@/lib/slack-user";
+import { resolveSlackUser, setSlackPairSelection, resolvePairContext, getCompanyIdForTeam, slackUserEmail } from "@/lib/slack-user";
 import { slackApi } from "@/lib/slack-api";
 import { loadHomeData } from "@/lib/slack-home-data";
 import { LD_RULES } from "@/lib/development-content";
 import {
   homeView,
-  editEmployeeLabelModal,
   addTopicModal,
   TOPIC_FIELDS,
   addHardConvoModal,
@@ -83,7 +82,6 @@ import {
   saveWrapUp,
   wrapUpConversation,
   createPairForSlack,
-  resolveEmployeeNameToEmail,
   notify,
   listMeetings,
   listHandbookLinks,
@@ -172,13 +170,6 @@ async function verifyOwnedRow(admin, table, columns, id, ctx, extraCheck) {
 // `title` is shown in the placeholder modal that opens instantly, so it should
 // match the title `build` returns — only the body swaps when the data lands.
 const OPENERS = {
-  // Manager-only: sets pairs.employee_label, the same per-pairing name the
-  // website's "Name to show you" field writes -- never the employee's own
-  // account name (profiles.full_name).
-  open_edit_employee_label: {
-    title: "Employee's name",
-    build: async (admin, ctx) => (ctx.isMgr ? editEmployeeLabelModal(ctx) : noticeModal("Employee's name", "Only managers can do this.")),
-  },
   open_add_topic: { title: "Add a topic", build: async (admin, ctx) => addTopicModal(ctx, normalizeDraft(TOPIC_FIELDS, await draftFor(admin, ctx, "topic"))) },
   open_add_action: { title: "Add an action", build: async (admin, ctx) => addActionModal(ctx) },
   open_add_hardconvo: { title: "Hard conversation", build: async () => addHardConvoModal() },
@@ -591,6 +582,7 @@ function fieldVal(values, blockId) {
   if (!f) return undefined;
   if ("selected_option" in f) return f.selected_option?.value;
   if ("selected_date" in f) return f.selected_date;
+  if ("selected_user" in f) return f.selected_user;
   if ("selected_options" in f) return (f.selected_options || []).map((o) => o.value);
   return f.value;
 }
@@ -603,16 +595,6 @@ function fieldVal(values, blockId) {
 const fieldValV2 = makeFieldValV2(fieldVal);
 
 const SUBMISSIONS = {
-  // Manager-only: writes pairs.employee_label, never the employee's own
-  // profiles.full_name -- see editEmployeeLabelModal in lib/slack-views.js.
-  edit_employee_label: async (admin, ctx, v) => {
-    if (!ctx.isMgr) return { skip: true };
-    const label = (fieldVal(v, "label") || "").trim();
-    await updatePair(admin, ctx.pairId, { employee_label: label || null });
-    // So the Home-tab refresh right after this shows the new label
-    // immediately, same trick as edit_name's ctx.myName above.
-    ctx.partnerName = label || ctx.pair.employee?.full_name || ctx.pair.employee_email;
-  },
   // Closes out open topics/goals/actions for the pair (see wrapUpConversation
   // in lib/data.js) -- the pairing itself is never touched, unlike the old
   // behavior this replaced. Nothing about the OTHER side's Home tab data
@@ -651,19 +633,17 @@ const SUBMISSIONS = {
   // pairing already accepts for the other side.
   add_employee: async (admin, ctx, v) => {
     if (!ctx.isMgr) return { skip: true };
-    const raw = (fieldVal(v, "email") || "").trim();
-    // Accept either a real email or an exact name already on the HR roster
-    // (see resolveEmployeeNameToEmail, lib/data.js) -- a manager typing a
-    // name they got wrong just fails the same "not a valid email, and no
-    // roster match" check below, rather than silently creating a pairing to
-    // a fabricated address.
-    const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw);
-    const email = looksLikeEmail ? raw.toLowerCase() : await resolveEmployeeNameToEmail(admin, raw).catch(() => null);
+    // Slack-native picker (users_select), not typed text -- resolved to a
+    // real email the same way every other Slack identity in this app is
+    // (slackUserEmail, lib/slack-user.js), since IT already adds new hires
+    // to the Slack channel before a manager ever pairs with them here.
+    const slackUserId = fieldVal(v, "employee_picker");
+    const email = await slackUserEmail(slackUserId, ctx.companyId).catch(() => null);
     if (!email) {
-      return { error: { blockId: "email", message: "That doesn't look like a valid email or an exact name already on the roster." } };
+      return { error: { blockId: "employee_picker", message: "Couldn't find a work email for that person in Slack." } };
     }
     if (email === ctx.email) {
-      return { error: { blockId: "email", message: "That's your own email." } };
+      return { error: { blockId: "employee_picker", message: "That's your own email." } };
     }
     // "archive" closes the pairing this modal was opened from (ctx.pairId,
     // already verified as this manager's own -- never a Slack-supplied id),
@@ -680,7 +660,7 @@ const SUBMISSIONS = {
         await closePair(admin, ctx.pairId, `Replaced by ${email}`);
       }
     } catch (e) {
-      return { error: { blockId: "email", message: e.message } };
+      return { error: { blockId: "employee_picker", message: e.message } };
     }
     // Deferred, not awaited here -- the pair is already created; a slow DM
     // send shouldn't risk pushing the view_submission response past Slack's
@@ -1366,7 +1346,7 @@ async function handleInteraction(admin, slackUserId, payload) {
       if (!result?.skip) {
         // The save already happened above; closing the modal shouldn't wait
         // on the Home-tab republish -- ctx's own in-place mutations (e.g.
-        // edit_employee_label's ctx.partnerName) land before this runs, so
+        // wrap_up's ctx.pair.next_1on1_date) land before this runs, so
         // the refresh still shows the new value.
         after(() => refreshHome(admin, ctx));
       }

@@ -81,3 +81,32 @@ guess or quietly omit it. Do not add compliance claims (GDPR, CCPA, SOC2,
 etc.) unless they're actually true — this is a plain-language description
 of real behavior, not a legal document, and should stay that way unless
 Melissa explicitly wants real legal review.
+
+# Governance: human review, no autonomous AI decisions (added 2026-09-17)
+
+Melissa's explicit product commitment, now visible to every user on the
+Slack Home tab (`homeView` in `lib/slack-views.js`) and on
+`app/privacy/page.js`'s "Governance & human review" section: Performance
+Pulse does not use AI to write, score, or decide anything about a person's
+performance, and any change to how the app behaves is reviewed and approved
+by a human before it ships — nothing here is autonomous.
+
+This mirrors Slack's own Marketplace policy (verified 2026-09-17 against
+https://docs.slack.dev/slack-marketplace/slack-marketplace-app-guidelines-and-requirements/),
+which lists as a **DON'T**: "Allow AI [to] make consequential decisions
+without human review. 'Consequential' should be understood to mean any
+decision with legal, medical, or similarly significant effects" — and gives
+its own example of what not to build: "an HR agent using AI to automatically
+approve or deny workplace accommodation requests with no human review."
+Performance Pulse has no runtime AI today (every entry is typed by a real
+person), so this rule is as much a forward commitment as a description of
+the current app.
+
+**Rule: any future feature that adds AI-generated or AI-scored content (a
+suggested rating, an auto-drafted review, an automated flag on someone's
+performance) MUST (1) keep an explicit human approval step before that
+content is ever shown as final or acted on, and (2) update both the Home
+tab governance line and `app/privacy/page.js`'s "Governance & human review"
+section in the same change — not as a follow-up.** Do not ship an automated
+performance-related output nobody has reviewed, even experimentally. If
+unsure whether something crosses this line, ask Melissa rather than guess.

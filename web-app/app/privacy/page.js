@@ -55,6 +55,17 @@ export default function PrivacyPage() {
           provisioned are turned away at sign-in.
         </p>
 
+        <h3 style={{ marginTop: 20 }}>Governance &amp; human review</h3>
+        <p style={{ fontSize: 13 }}>
+          Performance Pulse doesn&apos;t use AI to write, score, or decide
+          anything about your performance. Every topic, goal, action, and
+          piece of feedback in this app is typed by you or your manager —
+          nothing here is auto-generated or auto-approved. Any change to how
+          this app behaves is reviewed and approved by a person before it
+          ships, not shipped automatically. If that ever changes, this page
+          will say so.
+        </p>
+
         <h3 style={{ marginTop: 20 }}>What we don&apos;t do</h3>
         <p style={{ fontSize: 13 }}>
           We don&apos;t sell or share your data with third parties, and we

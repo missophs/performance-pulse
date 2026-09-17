@@ -167,16 +167,17 @@ export function homeView(ctx, d) {
     // No self-name-edit at all, either role -- names are set once at signup
     // (OnboardingForm.js) and carry through everywhere, including here, so a
     // separate "edit your own name" entry point was pure confusion (Melissa's
-    // call). Managers keep "Edit their name" -- a distinct feature, a
-    // manager-only per-pairing label (pairs.employee_label, migration 0015)
-    // that never touches the employee's real account name.
+    // call). "Edit their name" (the manager-only pairs.employee_label
+    // rename) is gone too, 2026-09-17 -- Melissa's call, once "switch
+    // pairing" covered picking between employees. Confirmed capability loss
+    // (relabeling a wrong display name) accepted; nothing replaces it.
     // Wording spells out the relationship directly (Melissa's explicit
     // rewrite) instead of the old dry "Your 1:1 partner: X · you're the
     // role" line, which tested as unclear.
     ...(ctx.isMgr
       ? [
           context(`*${ctx.myName}* (manager)`),
-          section(`*${ctx.partnerName}* is your employee — they'll be your 1:1 partner.`, button("Edit their name", "open_edit_employee_label")),
+          section(`*${ctx.partnerName}* is your employee — they'll be your 1:1 partner.`),
         ]
       : [context(`*${ctx.partnerName}* is your manager — they'll be your 1:1 partner.`)]),
     // Opens a real Slack conversation (bot + both people), not a modal --
@@ -281,22 +282,17 @@ export function homeView(ctx, d) {
     actions([button("Mark topics & actions as done", "open_close_pair")]),
     { type: "divider" },
     context(":lock: Everything here is shared only between you and your 1:1 partner — never with HR."),
+    // Governance disclosure, visible on every Home tab load -- Melissa's
+    // call, 2026-09-17, modeled on Slack's own Marketplace policy, which
+    // prohibits "AI mak[ing] consequential decisions without human review"
+    // and names an HR agent auto-approving/denying requests as exactly what
+    // not to build (see web-app/CLAUDE.md's governance rule for the source).
+    // This app has no runtime AI at all today -- every entry is typed by a
+    // person -- so this is a forward commitment as much as a current fact;
+    // keep it true if that ever changes.
+    context(":shield: No AI writes, scores, or decides anything about your performance here — every entry is from you or your manager, and a human reviews and approves how this app works before it changes."),
   ];
   return { type: "home", blocks };
-}
-
-// Manager-only (see the governance re-check on open_edit_employee_label in
-// route.js): sets pairs.employee_label (migration 0015), the same
-// manager-only per-pairing display name the website's "Name to show you"
-// field writes -- never the employee's own profiles.full_name, so it can't
-// leak into any other pairing that employee is in and the employee's own
-// account name is untouched.
-export function editEmployeeLabelModal(ctx) {
-  const realName = ctx.pair.employee?.full_name || ctx.pair.employee_email;
-  return modal("edit_employee_label", "Employee's name", [
-    section(`Their account name is *${realName}*. This only changes what you call them here — it doesn't rename their account, and only you see it.`),
-    inputBlock("label", "Name to show you", plainInput("val", { initial: ctx.pair.employee_label || "", placeholder: realName })),
-  ]);
 }
 
 export function notLinkedHomeView() {
@@ -579,11 +575,10 @@ export function listActionsModal(list) {
 // Rebuilt 2026-09-16 (SLACK_TODO.md/CLAUDE.md's "removed entirely" note) --
 // the old version was a manager-only dead end with no response path. Now a
 // concern can be shared (manager's explicit choice; drafts stay private
-// until then), and once shared the employee sees it and can respond -- but,
-// like feedback (see this file's header comment), the real text is never
-// echoed into a Slack view. This modal only ever writes; listConcernsModal
-// below only ever shows counts/status, with a link to the app to read or
-// respond to the actual words.
+// until then), and once shared the employee sees it and can respond. This
+// modal only ever writes; listConcernsModal below shows the real text and
+// a Respond action, in-Slack only (Melissa's call, 2026-09-17: see this
+// file's header comment) -- no link to the app.
 export function addConcernModal(ctx) {
   return modal(
     "add_concern",
@@ -1083,18 +1078,22 @@ export function wrapUpModal(topics, pairId) {
 // explicitly what should happen to the CURRENT pairing (ctx.pairId) --
 // kept open (the old "just add a second report" case) or archived (the new
 // "replace them" case) -- rather than silently always keeping it open,
-// which is what "Add a new employee" always did before. Renaming/label
-// editing for an employee who ISN'T being replaced still lives on
-// editEmployeeLabelModal; this modal is only about the roster itself.
+// which is what "Add a new employee" always did before.
+//
+// Picks from Slack's own member list (users_select) instead of typing an
+// email or roster name, 2026-09-17 -- Melissa's call: IT already adds new
+// hires to the Slack channel before a manager ever pairs with them here, so
+// everyone a manager would add is already a pickable Slack member. Replaces
+// the old free-text field and resolveEmployeeNameToEmail (lib/data.js),
+// removed since nothing else called it -- the picker can't return a typo,
+// so the roster-name-fallback it existed for no longer applies.
 export function addEmployeeModal(ctx) {
   return modal(
     "add_employee",
     "Add or change employee",
     [
-      section(
-        "Starts a new 1:1 pairing with you as their manager. Type their work email, or their exact name if HR already has them on the roster — it links right away if they already use Performance Pulse, or the moment they sign up otherwise."
-      ),
-      inputBlock("email", "Their work email or roster name", plainInput("val", { placeholder: "name@company.com, or their full name" }), true),
+      section("Starts a new 1:1 pairing with you as their manager. Pick them from the workspace — it links right away if they already use Performance Pulse, or the moment they sign up otherwise."),
+      inputBlock("employee_picker", "Employee", { type: "users_select", action_id: "val", placeholder: { type: "plain_text", text: "Choose a person" } }),
       inputBlock(
         "keep_current",
         `Your current pairing with ${ctx.partnerName}`,
