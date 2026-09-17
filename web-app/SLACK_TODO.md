@@ -5180,3 +5180,55 @@ done: real per-workspace token *revocation* on uninstall (only meaningful
 once more than one workspace is ever actually installed at a time);
 general `view_submission` idempotency covers the whole dispatcher now, but
 wasn't live-clicked in Slack this session.
+
+## 2026-09-16, later session — "sell to any company via Slack" pivot
+
+Melissa's direction, verbatim: "This was supposed to be built as a Slack
+plugin that anybody in any company can use it if they buy it... The web
+app is not important. It is more important that it all runs from Slack."
+Two-and-a-half-day deadline given same session.
+
+Built and **verified live against production** (not just committed):
+
+- Multi-tenant schema, migrations 0030-0031: `companies` table,
+  `pairs.company_id`, `profiles.company_id`/`profiles.is_hr` replacing the
+  hardcoded HR email in `is_hr()` (migration 0013).
+- Self-serve first-pairing entirely from Slack for a brand-new company —
+  no website signup needed (`firstSetupHomeView`, `setupFirstPairModal`,
+  `createFirstPairForSlack`).
+- Company-scoped Slack bot-token routing threaded through every
+  `slackApi()` call site. Was silently falling back to one shared token
+  across every company — real cross-tenant bug, now fixed
+  (`lib/slack-user.js`, `lib/slack-api.js`, `lib/slack-send.js`).
+- HR admin console (roster upload, org chart, close-pair, close-all-pairs)
+  scoped to the calling HR admin's own company. `closeAllPairs` was
+  previously global — would have force-closed every company's pairings at
+  once the first time a second company's HR account existed.
+- All 5 migrations (0027-0031) applied to production Supabase, confirmed
+  via a direct read-only query against the live tables/columns, not just
+  "the file exists."
+- Slack app OAuth Redirect URL
+  (`https://performance-pulse-lyart.vercel.app/api/slack/oauth/callback`)
+  added in the Slack app dashboard and confirmed persisted after a fresh
+  reload.
+
+Still blocking, not done:
+
+- `SLACK_CLIENT_ID`/`SLACK_CLIENT_SECRET` not yet set in Vercel
+  production (confirmed via `vercel env ls`). Melissa needs to copy these
+  herself from the Slack app's OAuth & Permissions page — API secrets
+  aren't something I enter into fields. Redeploy (`vercel --prod`)
+  required after adding them.
+- The Slack app's "Public Distribution" is not yet activated — 2 of 4
+  checklist items done (redirect URL, features). "Remove Hard Coded
+  Information" is a self-attestation checkbox, not a scan; honest current
+  state is the code still keeps a `SLACK_BOT_TOKEN` env-var fallback for
+  resilience, so whether that counts as "removed" is Melissa's call.
+- No live end-to-end OAuth install has been tested yet.
+- Found mid-session: the "performance" workspace (created earlier for
+  "testing OAuth") was showing Melissa's *real* company's data the whole
+  time — manager `melissaw212@gmail.com`, employee `monte.montoya` — via
+  the old single-tenant fallback, because the migrations above hadn't been
+  applied yet when it was first tried. Not an isolated test tenant until
+  the OAuth install above is actually run and a fresh `company_id` is
+  confirmed.
