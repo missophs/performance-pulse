@@ -241,8 +241,8 @@ export function homeView(ctx, d) {
     section(`*Feedback* — ${d.feedback.length} entries${openRequests.length ? `, ${openRequests.length} request${openRequests.length === 1 ? "" : "s"} waiting` : ""}`),
     context(
       ctx.isMgr
-        ? "*Give feedback:* write feedback for them, they'll see it. *Ask for feedback:* ask them to evaluate you. *View feedback in the app:* read the full history."
-        : "*Ask for feedback:* ask your manager to evaluate you. *View feedback in the app:* read the full history, including anything they've given you."
+        ? "*Give feedback:* write feedback for them, they'll see it. *Ask for feedback:* ask them to evaluate you. *View feedback:* read the full history."
+        : "*Ask for feedback:* ask your manager to evaluate you. *View feedback:* read the full history, including anything they've given you."
     ),
     actions([
       ...(ctx.isMgr ? [button("Give feedback", "open_add_feedback", "", usedStyle(d.feedback.length))] : []),
@@ -252,7 +252,7 @@ export function homeView(ctx, d) {
         "",
         ctx.isMgr ? undefined : usedStyle(openRequests.filter((r) => r.from_role === ctx.role).length)
       ),
-      button("View feedback in the app", "open_list_feedback"),
+      button("View feedback", "open_list_feedback"),
     ]),
     // Two-way, both roles, no notify() -- matches the website's "Between you
     // two" card exactly (sendMessage in app/(dashboard)/dashboard/page.js
