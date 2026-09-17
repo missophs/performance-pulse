@@ -6,8 +6,6 @@
 // is the point (see the privacy banner on the Slack tab) — do not "improve"
 // this into something that includes content.
 
-const APP_URL = "https://performance-pulse-lyart.vercel.app";
-
 export const BK_KINDS = [
   { id: "topic", label: "Topic added" },
   { id: "upcoming", label: "1:1 coming up" },
@@ -30,30 +28,24 @@ function bkContext(md) {
 function bkHeader() {
   return { type: "header", text: { type: "plain_text", text: "Performance Pulse", emoji: true } };
 }
-// Primary button acts right here in Slack (interactivity endpoint); the
-// secondary link is a fallback for anyone who'd rather use the website —
-// people get to choose either way. `value`, when given, is the id of the
-// specific record this button acts on (e.g. a feedback request), threaded
-// through to the interactivity route's OPENERS the same way any other
-// Slack-supplied id gets there.
+// Acts right here in Slack, via the interactivity endpoint -- no website
+// link (Melissa's call, 2026-09-17: Slack is the product, not a gateway to
+// it). `value`, when given, is the id of the specific record this button
+// acts on (e.g. a feedback request), threaded through to the interactivity
+// route's OPENERS the same way any other Slack-supplied id gets there.
 function bkOpenAction(label, inSlackActionId, value) {
-  const elements = [];
-  if (inSlackActionId) {
-    elements.push({
-      type: "button",
-      text: { type: "plain_text", text: label || "Open in Slack", emoji: true },
-      style: "primary",
-      action_id: inSlackActionId,
-      ...(value !== undefined && value !== null && value !== "" ? { value: String(value) } : {}),
-    });
-  }
-  elements.push({
-    type: "button",
-    text: { type: "plain_text", text: inSlackActionId ? "Open full app" : label || "Open Performance Pulse", emoji: true },
-    url: APP_URL,
-    action_id: "open_app",
-  });
-  return { type: "actions", elements };
+  return {
+    type: "actions",
+    elements: [
+      {
+        type: "button",
+        text: { type: "plain_text", text: label || "Open in Slack", emoji: true },
+        style: "primary",
+        action_id: inSlackActionId,
+        ...(value !== undefined && value !== null && value !== "" ? { value: String(value) } : {}),
+      },
+    ],
+  };
 }
 function bkFoot() {
   return bkContext(
@@ -94,7 +86,6 @@ export function buildDigestBlockKit(kindCounts, ctx) {
       bkHeader(),
       bkSection(`*${ctx.partnerName}* made ${total} updates.`),
       bkContext(parts.join("  ·  ")),
-      bkOpenAction("Open Performance Pulse"),
       { type: "divider" },
       bkFoot(),
     ],

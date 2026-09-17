@@ -25,6 +25,7 @@ import {
   editActionModal,
   addConcernModal,
   listConcernsModal,
+  respondConcernModal,
   listDocumentsModal,
   setupFirstPairModal,
   addGoalModal,
@@ -41,6 +42,7 @@ import {
   FEEDBACK_FIELDS,
   addFeedbackRequestModal,
   listFeedbackModal,
+  respondFeedbackModal,
   wrapUpModal,
   wrapUpConversationModal,
   addEmployeeModal,
@@ -74,8 +76,10 @@ import {
   addConcern,
   shareConcern,
   deleteConcern,
+  respondToConcern,
   addFeedback,
   addFeedbackRequest,
+  respondToFeedback,
   saveWrapUp,
   wrapUpConversation,
   createPairForSlack,
@@ -346,6 +350,26 @@ const PUSH_ACTIONS = {
       // own isn't enough — see the governance note in CLAUDE.md).
       const request = await verifyOwnedRow(admin, "feedback_requests", "id, pair_id, from_role, status", value, ctx, (row) => row.status === "open" && row.from_role !== ctx.role);
       return request ? addFeedbackModal(ctx, undefined, false, request.id) : null;
+    },
+  },
+  // Respond buttons only ever render for the employee (listConcernsModal /
+  // listFeedbackModal already hide them for a manager) -- ctx.isMgr is the
+  // hard guard behind that, same governance reasoning as feedback_request_answer
+  // above: a hidden button alone isn't enough since action.value is replayable.
+  concern_respond: {
+    title: "Respond",
+    build: async (admin, ctx, value) => {
+      if (ctx.isMgr) return null;
+      const concern = await verifyOwnedRow(admin, "concerns", "id, pair_id, what, expectation, communicated, previously, support, response, shared_at", value, ctx, (row) => row.shared_at);
+      return concern ? respondConcernModal(concern) : null;
+    },
+  },
+  feedback_respond: {
+    title: "Respond",
+    build: async (admin, ctx, value) => {
+      if (ctx.isMgr) return null;
+      const entry = await verifyOwnedRow(admin, "feedback_entries", "id, pair_id, type, text, example, response", value, ctx);
+      return entry ? respondFeedbackModal(entry) : null;
     },
   },
 };
@@ -827,6 +851,27 @@ const SUBMISSIONS = {
       createdByName: ctx.myName,
     });
   },
+  // private_metadata carries the concern id (see respondConcernModal /
+  // PUSH_ACTIONS.concern_respond above) -- re-checked here independently of
+  // that opener's check, same reasoning as edit_topic above: private_metadata
+  // is exactly as replayable as action.value. Employee-only (concern_respond
+  // already gates this at open time) and shared_at must still be set.
+  respond_concern: async (admin, ctx, v, view) => {
+    if (ctx.isMgr) return { skip: true };
+    const id = view?.private_metadata;
+    if (!id) return { skip: true };
+    const response = (fieldVal(v, "response") || "").trim();
+    if (!response) return { error: { blockId: "response", message: "Say something before sending." } };
+    const concern = await verifyOwnedRow(admin, "concerns", "pair_id, shared_at", id, ctx, (row) => row.shared_at);
+    if (!concern) return { skip: true };
+    await respondToConcern(admin, id, response);
+    if (view.previous_view_id) {
+      const data = await loadHomeData(admin, ctx.pairId);
+      await slackApi("views.update", { view_id: view.previous_view_id, view: listConcernsModal(data.concerns, ctx.isMgr) }, { companyId: ctx.companyId }).catch((e) =>
+        console.error("respond concern list refresh:", e)
+      );
+    }
+  },
   // Matches the website's atomic answer-a-request behavior
   // (app/(dashboard)/performance/page.js's saveFeedback): saving the entry
   // and closing the request it answers happen together, from one submit,
@@ -889,6 +934,24 @@ const SUBMISSIONS = {
     // entity_id so the digest DM's "Answer it" button can thread this
     // request's id through (see lib/block-kit.js, lib/slack-send.js).
     delayedNotify(admin, ctx.pairId, `${ctx.myName} asked you for feedback`, ctx.role, ctx.otherRole, "performance", "request", req.id);
+  },
+  // Same private_metadata/re-check pattern as respond_concern above.
+  // Employee-only (feedback_respond already gates this at open time).
+  respond_feedback: async (admin, ctx, v, view) => {
+    if (ctx.isMgr) return { skip: true };
+    const id = view?.private_metadata;
+    if (!id) return { skip: true };
+    const response = (fieldVal(v, "response") || "").trim();
+    if (!response) return { error: { blockId: "response", message: "Say something before sending." } };
+    const entry = await verifyOwnedRow(admin, "feedback_entries", "pair_id", id, ctx);
+    if (!entry) return { skip: true };
+    await respondToFeedback(admin, id, response);
+    if (view.previous_view_id) {
+      const data = await loadHomeData(admin, ctx.pairId);
+      await slackApi("views.update", { view_id: view.previous_view_id, view: listFeedbackModal(data.feedback, data.feedbackRequests, ctx.role) }, { companyId: ctx.companyId }).catch((e) =>
+        console.error("respond feedback list refresh:", e)
+      );
+    }
   },
   edit_topic: async (admin, ctx, v, view) => {
     const id = view?.private_metadata;

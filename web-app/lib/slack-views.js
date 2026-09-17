@@ -4,11 +4,20 @@
 // kind of row filling it out on the site would. Presentation only — no
 // Supabase calls here, see app/api/slack/interactivity/route.js.
 //
-// Privacy: same rule as lib/block-kit.js — nothing written in a topic, goal,
-// achievement, feedback entry, or meeting summary ever gets echoed back into
-// a Slack view. "List" modals below show counts/categories/dates only, with
-// a link back to the app for the actual text. Slack workspace admins can
-// export view/message history, so the real content never transits Slack.
+// Privacy (revised, Melissa's call, 2026-09-17): Slack is the product now,
+// not a gateway to the website, so list modals below show real feedback,
+// concern, and 1:1-summary text -- not just counts/categories/dates. This is
+// safe specifically because a modal (views.open/views.push) is never saved
+// by Slack anywhere -- it's not a message, it has no history, and it is not
+// covered by Slack's Discovery/export tooling the way a real posted message
+// is (verified against Slack's own Discovery API docs, 2026-09-17). That
+// distinction is the whole rule: keep real content OUT of anything that's an
+// actual posted Slack message (see lib/block-kit.js -- DM pings stay
+// counts-only, on purpose, since those genuinely are exportable messages),
+// and it's fine INSIDE a modal, which no one but the two people looking at
+// it right now can ever see. Dev plans and achievements are the exception --
+// Melissa's call: keep those structural-fields-only, no full text, no link
+// anywhere -- log the actual plan/achievement content somewhere else.
 
 import { isOpenTopic, ago } from "@/lib/format";
 import { TOPIC_CATEGORIES, SUGGESTIONS, MSG_KINDS } from "@/lib/one-on-one-content";
@@ -134,21 +143,6 @@ export function homeView(ctx, d) {
 
   const blocks = [
     { type: "header", text: { type: "plain_text", text: "Performance Pulse", emoji: true } },
-    // Slack is the primary way people use this (that's why it was built),
-    // but everything saved here already lives in the same database the
-    // website reads -- this is just a fast way to get to the website too,
-    // for the option to look at either one (Melissa, 2026-09-13). Still
-    // requires the normal Google sign-in there -- a one-time auto-sign-in
-    // link was tried and rejected as a security downgrade (anyone who saw
-    // the link could get in without it).
-    // Label deliberately doesn't say "(Google sign-in)" (Melissa, 2026-09-16):
-    // this view only ever renders for a Slack user resolveSlackUser() already
-    // matched to a real account (app/api/slack/events/route.js's ctx check --
-    // an unlinked user gets notLinkedHomeView() instead, never this one), so
-    // for its actual audience this is never a signup step, and the old label
-    // read as "you have to log in" even to someone already signed in -- the
-    // one thing Slack's static Home tab text can never actually know.
-    actions([openInApp("Open Performance Pulse", "/dashboard?from=slack")]),
     ...(ctx.pairs.length > 1
       ? [
           actions(
@@ -228,8 +222,10 @@ export function homeView(ctx, d) {
     section(`*Goals* — ${d.goals.length} on record`),
     actions([button("Add a goal", "open_add_goal", "", usedStyle(openGoals.length)), button("View goals", "open_list_goals")]),
     section(`*Learning & development* — ${d.devPlans.length} plan${d.devPlans.length === 1 ? "" : "s"}`),
+    context("Tracked here by date and status only — keep the actual plan write-up somewhere else."),
     actions([button("Add a plan", "open_add_devplan", "", usedStyle(openDevPlans.length)), button("View plans", "open_list_devplans")]),
     section(`*Achievements* — ${d.achievements.length} logged`),
+    context("Tracked here by date and category only — keep the actual write-up somewhere else."),
     actions([button("Log one", "open_add_achievement", "", usedStyle(d.achievements.length)), button("View achievements", "open_list_achievements")]),
     ...(ctx.isMgr
       ? [
@@ -605,23 +601,44 @@ export function addConcernModal(ctx) {
   );
 }
 
+const concernText = (c) =>
+  `${c.what}` +
+  (c.expectation ? `\n*Expected instead:* ${c.expectation}` : "") +
+  (c.communicated ? `\n*Already raised:* ${c.communicated}` : "") +
+  (c.previously ? `\n*Come up before:* ${c.previously}` : "") +
+  (c.support ? `\n*Support offered:* ${c.support}` : "");
+
 export function listConcernsModal(concerns, isMgr) {
   if (isMgr) {
     const blocks = concerns.length
       ? concerns.flatMap((c, i) => [
-          section(`*Concern ${i + 1}*${c.concern_date ? ` — ${c.concern_date}` : ""}\n${c.shared_at ? `Shared ${c.shared_at.slice(0, 10)}${c.response ? " · responded" : " · no response yet"}` : "Not yet shared"}`),
+          section(
+            `*Concern ${i + 1}*${c.concern_date ? ` — ${c.concern_date}` : ""}\n${concernText(c)}\n${c.shared_at ? `Shared ${c.shared_at.slice(0, 10)}${c.response ? " · responded" : " · no response yet"}` : "Not yet shared"}` +
+              (c.response ? `\n*Response:* ${c.response}` : "")
+          ),
           actions([...(c.shared_at ? [] : [button("Share it", "concern_share", c.id, "primary")]), button("Delete", "concern_delete", c.id, "danger")]),
         ])
       : [section("No concerns logged. Add one from the Home tab.")];
-    blocks.push({ type: "divider" }, actions([openInApp("Read or edit the full text in the app", "/performance")]));
     return modal("view_concerns", "Concerns", blocks, "Close");
   }
   const shared = concerns.filter((c) => c.shared_at);
   const blocks = shared.length
-    ? [section(`*${shared.length} shared with you*\n${shared.filter((c) => !c.response).length} waiting on your response`)]
+    ? shared.flatMap((c) => [
+        section(`*Concern*${c.concern_date ? ` — ${c.concern_date}` : ""}\n${concernText(c)}` + (c.response ? `\n*Your response:* ${c.response}` : "")),
+        actions([button(c.response ? "Edit your response" : "Respond", "concern_respond", c.id, c.response ? undefined : "primary")]),
+      ])
     : [section("Nothing shared with you yet.")];
-  blocks.push({ type: "divider" }, actions([openInApp("Read and respond in the app", "/performance")]));
   return modal("view_concerns", "Concerns", blocks, "Close");
+}
+
+export function respondConcernModal(concern) {
+  return modal(
+    "respond_concern",
+    "Respond",
+    [section(concernText(concern)), inputBlock("response", "Your response", plainInput("val", { multiline: true, initial: concern.response || "" }))],
+    "Send",
+    concern.id
+  );
 }
 
 // ---------------------------------------------------------------- goals ----
@@ -758,11 +775,11 @@ export function addDevPlanModal(ctx, draft, saved = false) {
   );
 }
 
-// No content-parity decision for Dev plans (unlike Goals/Actions, see
-// SLACK_TODO.md item 0b) — stays redacted to structural fields only (type,
-// status, target date), same reasoning as the pre-existing Actions
-// redaction. Delete only, no Edit (item 0d's scope is Goals + Actions).
-// Delete is manager-only, same reasoning and same date as listGoalsModal above.
+// Structural fields only, no full text -- Melissa's call, 2026-09-17: keep
+// dev plans out of Slack beyond title/status/date, track the actual plan
+// content elsewhere. Delete only, no Edit (item 0d's scope is Goals +
+// Actions). Delete is manager-only, same reasoning and same date as
+// listGoalsModal above.
 export function listDevPlansModal(plans, isMgr) {
   const blocks = plans.length
     ? plans.flatMap((p, i) => [
@@ -770,7 +787,6 @@ export function listDevPlansModal(plans, isMgr) {
         ...(isMgr ? [actions([button("Delete", "devplan_delete", p.id, "danger")])] : []),
       ])
     : [section("No development plans yet. Add one from the Home tab.")];
-  blocks.push({ type: "divider" }, actions([openInApp("Open plans in the app for the full text")]));
   return modal("view_devplans", "Learning plans", blocks, "Close");
 }
 
@@ -798,7 +814,7 @@ export function addAchievementModal(draft, saved = false) {
   );
 }
 
-// Same redaction reasoning as Dev plans above — structural fields only.
+// Same reasoning as Dev plans above — structural fields only, no full text.
 // Delete only, no Edit (item 0d's scope is Goals + Actions).
 export function listAchievementsModal(list) {
   const blocks = list.length
@@ -807,7 +823,6 @@ export function listAchievementsModal(list) {
         actions([button("Delete", "achievement_delete", a.id, "danger")]),
       ])
     : [section("Nothing logged yet. Add one from the Home tab.")];
-  blocks.push({ type: "divider" }, actions([openInApp("Open achievements in the app for the full text")]));
   return modal("view_achievements", "Achievements", blocks, "Close");
 }
 
@@ -862,13 +877,15 @@ export function addFeedbackRequestModal() {
 // answering" stays available regardless of who's viewing — it's the
 // website's Dismiss/Withdraw action, which either side can do.
 export function listFeedbackModal(feedback, requests, viewerRole) {
-  const byType = {};
-  feedback.forEach((f) => (byType[f.type] = (byType[f.type] || 0) + 1));
-  const summary = Object.entries(byType)
-    .map(([t, n]) => `${n} ${t}`)
-    .join(" · ");
   const fbBlocks = feedback.length
-    ? [section(`*${feedback.length} feedback entr${feedback.length === 1 ? "y" : "ies"}*\n${summary}`)]
+    ? feedback.flatMap((f) => [
+        section(
+          `*${f.type}* — ${f.from_name} → ${f.to_name} · ${ago(f.created_at)}\n${f.text}` +
+            (f.example ? `\n*For example:* ${f.example}` : "") +
+            (f.response ? `\n*Response:* ${f.response}` : "")
+        ),
+        ...(viewerRole === "employee" ? [actions([button(f.response ? "Edit your response" : "Respond", "feedback_respond", f.id, f.response ? undefined : "primary")])] : []),
+      ])
     : [section("No feedback yet.")];
   // The website (app/(dashboard)/performance/page.js) offers two genuinely
   // different actions on an open request: "Answer" (writes a real feedback
@@ -889,15 +906,21 @@ export function listFeedbackModal(feedback, requests, viewerRole) {
         button("Close without answering", "feedback_request_answered", r.id),
       ]),
     ]),
-    { type: "divider" },
-    // Feedback text is deliberately never echoed into Slack (see the file
-    // header comment) -- so "respond" here means a real, working link
-    // straight to the Feedback tab, not a build-in-Slack reply box.
-    // Wording is role-specific: an employee is the one who actually
-    // responds; a manager is just reading their own full history.
-    actions([openInApp(viewerRole === "employee" ? "Respond in the app" : "View full feedback in the app", "/performance")]),
   ];
   return modal("view_feedback", "Feedback", blocks, "Close");
+}
+
+export function respondFeedbackModal(feedback) {
+  return modal(
+    "respond_feedback",
+    "Respond",
+    [
+      section(`*${feedback.type}*\n${feedback.text}` + (feedback.example ? `\n*For example:* ${feedback.example}` : "")),
+      inputBlock("response", "Your response", plainInput("val", { multiline: true, initial: feedback.response || "" })),
+    ],
+    "Send",
+    feedback.id
+  );
 }
 
 // ------------------------------------------------------ between you two ---
@@ -918,24 +941,16 @@ export function addMessageModal() {
   );
 }
 
-// Message text is deliberately never echoed into Slack, same rule as
-// feedback above (see the file header comment) -- this shows who sent what
-// kind and when, with a real link to read the actual text in the app.
+// Real message text shown here now (Melissa's call, 2026-09-17) -- safe in a
+// modal specifically because Slack never saves modal content anywhere (see
+// the file header comment). Most recent first, capped at 10 so one long
+// history doesn't blow Slack's per-modal block limit.
 export function listMessagesModal(messages) {
-  const byKind = {};
-  messages.forEach((m) => (byKind[m.kind] = (byKind[m.kind] || 0) + 1));
-  const summary = Object.entries(byKind)
-    .map(([k, n]) => `${n} ${k}`)
-    .join(" · ");
-  const recent = messages.slice().reverse().slice(0, 6);
-  const blocks = messages.length
-    ? [
-        section(`*${messages.length} message${messages.length === 1 ? "" : "s"}*\n${summary}`),
-        { type: "divider" },
-        ...recent.map((m) => context(`*${m.kind}* · ${m.created_by_name} · ${ago(m.created_at)}`)),
-      ]
+  const recent = messages.slice().reverse().slice(0, 10);
+  const blocks = recent.length
+    ? recent.flatMap((m, i) => [section(`*${m.kind}* · ${m.created_by_name} · ${ago(m.created_at)}\n${m.text}`), ...(i < recent.length - 1 ? [{ type: "divider" }] : [])])
     : [section("No messages yet.")];
-  return modal("list_messages", "Between you two", [...blocks, actions([openInApp("Read in the app", "/dashboard")])], "Close");
+  return modal("list_messages", "Between you two", blocks, "Close");
 }
 
 // -------------------------------------------------------------- handbook ---
@@ -992,7 +1007,21 @@ export function listHandbookLinksModal(links) {
 export function lastMeetingModal(meetings) {
   const last = meetings[0];
   const blocks = last
-    ? [section(`*1:1 on ${last.meeting_date}*\nRead what you discussed and agreed on in the app.`), { type: "divider" }, actions([openInApp("Open the summary")])]
+    ? [
+        section(`*1:1 on ${last.meeting_date}*`),
+        ...(last.discussed ? [section(`*Discussed:*\n${last.discussed}`)] : []),
+        ...(last.agreed ? [section(`*Agreed:*\n${last.agreed}`)] : []),
+        ...(last.revisit ? [section(`*Revisit next time:*\n${last.revisit}`)] : []),
+        ...(last.start_line || last.stop_line || last.keep_line
+          ? [
+              section(
+                [last.start_line && `*Start:* ${last.start_line}`, last.stop_line && `*Stop:* ${last.stop_line}`, last.keep_line && `*Keep:* ${last.keep_line}`]
+                  .filter(Boolean)
+                  .join("\n")
+              ),
+            ]
+          : []),
+      ]
     : [section("No 1:1s wrapped up yet.")];
   return modal("view_last_meeting", "Last 1:1 summary", blocks, "Close");
 }
