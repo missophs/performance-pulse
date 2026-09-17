@@ -2,7 +2,8 @@
 // same Block Kit payloads previewed on the Slack tab (lib/block-kit.js) —
 // this is the thing that actually calls Slack instead of asking you to paste
 // JSON into Block Kit Builder. Never import this from a "use client" file:
-// it needs SLACK_BOT_TOKEN, which must stay server-side.
+// it needs the Supabase service-role key (via lib/slack-api.js), which must
+// stay server-side.
 
 import { BK_KINDS, buildBlockKit, buildDigestBlockKit } from "@/lib/block-kit";
 import { fmtDate } from "@/lib/format";
@@ -14,6 +15,22 @@ export async function dmByEmail(email, payload, companyId) {
   });
   const opened = await slackApi("conversations.open", { users: lookup.user.id }, { companyId });
   await slackApi("chat.postMessage", { channel: opened.channel.id, ...payload }, { companyId });
+}
+
+// Real Slack group DM between the bot, the caller, and their pair partner --
+// not a Performance Pulse chat UI. `conversations.open` is idempotent, so
+// clicking "Message X" again just reopens the same conversation instead of
+// creating a second one. Performance Pulse's own involvement ends at the
+// intro message the caller sends once (see "message_partner",
+// app/api/slack/interactivity/route.js) -- nothing here ever calls
+// conversations.history, on purpose (Melissa's call, 2026-09-17: private,
+// no HR visibility; escalation is a person sharing their own Slack thread).
+export async function openPairConversation(otherEmail, myUserId, companyId) {
+  const lookup = await slackApi("users.lookupByEmail", { email: otherEmail }, { companyId }).catch((e) => {
+    throw new Error(`No Slack account for ${otherEmail}: ${e.message}`);
+  });
+  const opened = await slackApi("conversations.open", { users: `${myUserId},${lookup.user.id}` }, { companyId });
+  return opened.channel.id;
 }
 
 /**
@@ -60,10 +77,6 @@ export async function sendSlackPing(notification, pair, counts) {
   if (!kind || !BK_KINDS.some((k) => k.id === kind)) {
     return { skipped: `no matching ping for kind "${kind}"` };
   }
-  if (!process.env.SLACK_BOT_TOKEN) {
-    return { skipped: "SLACK_BOT_TOKEN not configured" };
-  }
-
   const sent = [];
   for (const r of recipientsFor(notification.to_role, pair)) {
     await dmByEmail(r.email, buildBlockKit(kind, ctxFor(r, pair, counts, notification)), pair.company_id);
@@ -83,7 +96,6 @@ export async function sendSlackDigest(notifications, pair, counts) {
   const known = notifications.filter((n) => n.kind && BK_KINDS.some((k) => k.id === n.kind));
   if (!known.length) return { skipped: "no sendable kinds in batch" };
   if (known.length === 1) return sendSlackPing(known[0], pair, counts);
-  if (!process.env.SLACK_BOT_TOKEN) return { skipped: "SLACK_BOT_TOKEN not configured" };
 
   const byKind = new Map();
   for (const n of known) byKind.set(n.kind, (byKind.get(n.kind) || 0) + 1);

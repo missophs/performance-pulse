@@ -95,7 +95,7 @@ import {
   saveFormDraft,
   clearFormDraft,
 } from "@/lib/data";
-import { dmByEmail } from "@/lib/slack-send";
+import { dmByEmail, openPairConversation } from "@/lib/slack-send";
 
 // Slack's interactivity endpoint is one request/response — there's no
 // browser tab to hold state in like the website's topic-add batching. This
@@ -616,7 +616,7 @@ const SUBMISSIONS = {
     if (!topics && !goals && !actions && !note) return; // nothing picked, nothing written -- no need to DM an empty summary
     const otherEmail = pairCtx.isMgr ? pairCtx.pair.employee_email : pairCtx.pair.manager_email;
     const text = `${pairCtx.myName} marked some things done on your 1:1 -- ${topics} topic(s), ${goals} goal(s), and ${actions} action(s) closed out. Your pairing is unaffected, and you can keep adding topics or actions any time.${note ? `\n\nNote: ${note}` : ""}`;
-    await dmByEmail(otherEmail, { text }).catch((e) => console.error("wrap up conversation notify:", e));
+    await dmByEmail(otherEmail, { text }, pairCtx.companyId).catch((e) => console.error("wrap up conversation notify:", e));
   },
   // Manager-only (also gated in OPENERS above). createPairForSlack takes
   // ctx.profileId/ctx.email -- the caller's own already-verified Slack
@@ -663,7 +663,7 @@ const SUBMISSIONS = {
     // ack window, same reasoning as every other post-write side effect in
     // this file (see refreshHome below).
     after(() =>
-      dmByEmail(email, { text: `${ctx.myName} added you as their direct report on Performance Pulse. Open the app to say hello.` }).catch((e) =>
+      dmByEmail(email, { text: `${ctx.myName} added you as their direct report on Performance Pulse. Open the app to say hello.` }, ctx.companyId).catch((e) =>
         console.error("add employee notify:", e)
       )
     );
@@ -1238,6 +1238,29 @@ async function handleInteraction(admin, slackUserId, payload) {
           },
           { companyId: ctx.companyId }
         ).catch((e) => console.error("devplan suggestion prefill view update:", e));
+      }
+    } else if (action.action_id === "message_partner") {
+      // Opens a real Slack conversation, not a Performance Pulse chat UI --
+      // see openPairConversation (lib/slack-send.js) and the "message_partner"
+      // block in homeView (lib/slack-views.js). chat_opened_at (migration
+      // 0032) is only "have we sent the one-time intro," never a log of
+      // what's actually said -- this app never calls conversations.history.
+      try {
+        const otherEmail = ctx.isMgr ? ctx.pair.employee_email : ctx.pair.manager_email;
+        const channelId = await openPairConversation(otherEmail, ctx.slackUserId, ctx.companyId);
+        if (!ctx.pair.chat_opened_at) {
+          await slackApi(
+            "chat.postMessage",
+            {
+              channel: channelId,
+              text: "This is your private space to talk with each other. Performance Pulse doesn't read what's said here — if anything ever needs to go to HR, either of you can share or export this conversation yourselves.",
+            },
+            { companyId: ctx.companyId }
+          );
+          await updatePair(admin, ctx.pairId, { chat_opened_at: new Date().toISOString() });
+        }
+      } catch (e) {
+        console.error("message partner:", e);
       }
     } else if (action.action_id === "switch_pair") {
       const chosenId = action.selected_option?.value;

@@ -3,45 +3,39 @@
 // Token resolution (SLACK_TODO.md item 0h-2, extended for real multi-tenant
 // use -- migration 0030): each company has its own row in
 // slack_installations, so the token to use depends on WHICH company's
-// request this is, not just "whichever installed most recently." Callers
-// that know their company (resolved from a Slack payload's team_id via
-// lib/slack-user.js, or from a pairs row's company_id) pass it as
-// opts.companyId; slackApi looks up that company's token specifically.
-// Callers that don't pass one (anything not yet threaded through) fall back
-// to the single most-recently-installed token, then the SLACK_BOT_TOKEN env
-// var -- this app's original single-company behavior, unchanged for any
-// call site this session didn't touch.
+// request this is, not just "whichever installed most recently." Every
+// caller MUST pass opts.companyId (resolved from a Slack payload's team_id
+// via lib/slack-user.js, or from a pairs row's company_id) -- there is no
+// shared-token fallback. A multi-tenant product can't let one company's
+// request silently borrow another company's (or the original deploy's)
+// bot token when the lookup comes up empty; it has to fail loudly instead
+// (2026-09-17, closing the "Remove Hard Coded Information" item on Slack's
+// Public Distribution checklist -- the old SLACK_BOT_TOKEN env-var fallback
+// was exactly the hard-coded credential that checklist item means).
 //
-// Cached per companyId (keyed "" for the no-company fallback) for
-// TOKEN_CACHE_MS, so this doesn't add a DB round trip to every single Slack
-// call.
+// Cached per companyId for TOKEN_CACHE_MS, so this doesn't add a DB round
+// trip to every single Slack call.
 
 import { createClient } from "@supabase/supabase-js";
 
 const SLACK_API = "https://slack.com/api";
 const TOKEN_CACHE_MS = 60_000;
-const tokenCache = new Map(); // companyId (or "") -> { token, expiresAt }
+const tokenCache = new Map(); // companyId -> { token, expiresAt }
 
 async function resolveBotToken(companyId) {
-  const cacheKey = companyId || "";
-  const cached = tokenCache.get(cacheKey);
+  if (!companyId) {
+    throw new Error("[SLACK_INTEGRATION_DOWN] slackApi called with no companyId -- every call site must know which company's token to use, there is no shared fallback");
+  }
+  const cached = tokenCache.get(companyId);
   if (cached && Date.now() < cached.expiresAt) return cached.token;
 
-  let token = process.env.SLACK_BOT_TOKEN;
-  try {
-    const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-    let query = admin.from("slack_installations").select("access_token").order("installed_at", { ascending: false }).limit(1);
-    query = companyId ? query.eq("company_id", companyId) : query;
-    const { data } = await query.maybeSingle();
-    if (data?.access_token) token = data.access_token;
-  } catch (e) {
-    // slack_installations may not exist yet (migration 0029 not applied)
-    // or the DB may be briefly unreachable -- either way, fall back to the
-    // env var rather than breaking every Slack call over a lookup failure.
-    console.error("slack bot token lookup, falling back to env var:", e.message);
-  }
-  tokenCache.set(cacheKey, { token, expiresAt: Date.now() + TOKEN_CACHE_MS });
-  return token;
+  const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+  const { data, error } = await admin.from("slack_installations").select("access_token").eq("company_id", companyId).order("installed_at", { ascending: false }).limit(1).maybeSingle();
+  if (error) throw new Error(`[SLACK_INTEGRATION_DOWN] slack bot token lookup failed for company ${companyId}: ${error.message}`);
+  if (!data?.access_token) throw new Error(`[SLACK_INTEGRATION_DOWN] no Slack installation found for company ${companyId}`);
+
+  tokenCache.set(companyId, { token: data.access_token, expiresAt: Date.now() + TOKEN_CACHE_MS });
+  return data.access_token;
 }
 // Slack's interactivity endpoint calls this synchronously inside its 3s
 // response budget (see app/api/slack/interactivity/route.js), so a retry
@@ -100,7 +94,7 @@ export async function slackApi(method, body, opts = {}) {
     const detail = json.response_metadata?.messages ? ` (${json.response_metadata.messages.join("; ")})` : "";
     // Every Slack route's error handling fails soft (console.error, ack
     // anyway) — see app/api/slack/{interactivity,notify,events}/route.js —
-    // so a dead/revoked SLACK_BOT_TOKEN would otherwise fail invisibly:
+    // so a dead/revoked company token would otherwise fail invisibly:
     // every website feature keeps working, and only Slack goes silently
     // dark. This marker is the one thing that makes that greppable in logs.
     throw new Error(`[SLACK_INTEGRATION_DOWN] Slack ${method} failed: ${json.error}${detail}`);

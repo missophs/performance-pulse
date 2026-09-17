@@ -185,6 +185,13 @@ export function homeView(ctx, d) {
           section(`*${ctx.partnerName}* is your employee — they'll be your 1:1 partner.`, button("Edit their name", "open_edit_employee_label")),
         ]
       : [context(`*${ctx.partnerName}* is your manager — they'll be your 1:1 partner.`)]),
+    // Opens a real Slack conversation (bot + both people), not a modal --
+    // Performance Pulse never reads what's said in it after the one-time
+    // intro message (Melissa's call, 2026-09-17: private, no HR visibility;
+    // an escalation is a person sharing/exporting their own Slack thread,
+    // not something this app logs). See "message_partner" in
+    // app/api/slack/interactivity/route.js.
+    actions([button(`Message ${ctx.partnerName}`, "message_partner")]),
     // No usedStyle() here on purpose: "Add a new employee" always creates a
     // brand-new pairing, so there's no open/closed count of THIS pair's own
     // history that could mean "already used" for it the way there is for
