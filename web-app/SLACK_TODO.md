@@ -5298,3 +5298,45 @@ three things, not two:**
    `slack_installations` row earlier), only Melissa's own company can ever
    actually run the install flow, even after items 1 and 2 above are
    fixed.
+
+### Standing scope directive (Melissa, verbatim, 2026-09-17)
+
+"We're only worrying about a plugin app that we might be able to sell."
+**The web app (`web-app/`'s browser pages) is not the product.** The only
+thing that matters going forward is the Slack-native plugin — what runs
+inside Slack itself — as something that could be sold to another company.
+Any work on this repo should be read against that filter: does it make the
+sellable Slack plugin better, or is it website-side work that's now
+explicitly out of scope. This restates and sharpens the 2026-09-16 pivot
+("The web app is not important. It is more important that it all runs from
+Slack.") — not a new decision, but Melissa asked it be written down again
+so it survives a fresh session.
+
+### How to pair a test user (answered this session, no code changes)
+
+1. Invite them to the Slack workspace itself first — Slack's own **Settings
+   & administration → Manage members → Invite people**. This is a Slack
+   admin action; the app has no part in it.
+2. Once they're a member, open the Performance Pulse Home tab yourself,
+   click **"Add or change employee,"** pick them from the picker, choose
+   **"Keep it open — adding another employee,"** and submit.
+3. Clarified for Melissa: the picker (`users_select`) is Slack's own
+   people-picker — it lists literally every member of the workspace, by
+   name and photo, with no filtering by us (Slack's Block Kit doesn't
+   support narrowing it). The only server-side guards are "not yourself"
+   and "must be a manager." This makes the person her employee (she's the
+   manager) — if a test needs the *manager* view instead, that's the
+   opposite pairing direction and isn't what this flow does today.
+
+### Status at end of this session
+
+- Local commit `618b4b4` ("Slack-native employee picker, drop Edit their
+  name, add governance policy") is made but **not yet pushed** — `git push
+  origin main` was denied by this session's own tooling permissions
+  (pushing to `main` auto-deploys production, which needs Melissa's own
+  confirmation/execution, not an agent running it unattended). Melissa:
+  run `git push origin main` from `/Users/Owner/Code/performance` yourself
+  when ready.
+- `SLACK_CLIENT_ID`/`SLACK_CLIENT_SECRET` work explicitly moved to
+  **2026-09-18** ("We'll do it tomorrow") — see the "Still blocking" list
+  above, unchanged otherwise.
