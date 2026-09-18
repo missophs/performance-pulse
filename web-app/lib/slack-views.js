@@ -776,14 +776,37 @@ export function addDevPlanModal(ctx, draft, saved = false) {
 // content elsewhere. Delete only, no Edit (item 0d's scope is Goals +
 // Actions). Delete is manager-only, same reasoning and same date as
 // listGoalsModal above.
-export function listDevPlansModal(plans, isMgr) {
+// Respond is employee-only (Melissa's explicit request, 2026-09-18:
+// "everyone needs to be able to respond") -- same Respond/Edit-your-response
+// pattern as listConcernsModal/listFeedbackModal below, since a dev plan was
+// otherwise the one recommendation type an employee had no way to react to.
+export function listDevPlansModal(plans, isMgr, viewerRole) {
   const blocks = plans.length
     ? plans.flatMap((p, i) => [
-        section(`*Plan ${i + 1}* — ${p.type}${p.status ? ` · ${p.status}` : ""}${p.target_date ? ` · target ${p.target_date}` : ""}`),
-        ...(isMgr ? [actions([button("Delete", "devplan_delete", p.id, "danger")])] : []),
+        section(
+          `*Plan ${i + 1}* — ${p.type}${p.status ? ` · ${p.status}` : ""}${p.target_date ? ` · target ${p.target_date}` : ""}` +
+            (p.response ? `\n*Response:* ${p.response}` : "")
+        ),
+        actions([
+          ...(isMgr ? [button("Delete", "devplan_delete", p.id, "danger")] : []),
+          ...(viewerRole === "employee" ? [button(p.response ? "Edit your response" : "Respond", "devplan_respond", p.id, p.response ? undefined : "primary")] : []),
+        ]),
       ])
     : [section("No development plans yet. Add one from the Home tab.")];
   return modal("view_devplans", "Learning plans", blocks, "Close");
+}
+
+export function respondDevPlanModal(plan) {
+  return modal(
+    "respond_devplan",
+    "Respond",
+    [
+      section(`*${plan.area}* — ${plan.type}`),
+      inputBlock("response", "Your response", plainInput("val", { multiline: true, initial: plan.response || "" })),
+    ],
+    "Send",
+    plan.id
+  );
 }
 
 // ---------------------------------------------------------- achievements ---

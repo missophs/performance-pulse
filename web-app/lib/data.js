@@ -1003,6 +1003,14 @@ export async function deleteDevelopmentPlan(supabase, id) {
   if (error) throw error;
 }
 
+export async function respondToDevelopmentPlan(supabase, planId, response) {
+  const { error } = await supabase
+    .from("development_plans")
+    .update({ response, responded_at: new Date().toISOString() })
+    .eq("id", planId);
+  if (error) throw error;
+}
+
 // -------------------------------------------------------------- career -----
 
 export async function listCareerAnswers(supabase, pairId) {

@@ -34,6 +34,7 @@ import {
   addDevPlanModal,
   DEVPLAN_FIELDS,
   listDevPlansModal,
+  respondDevPlanModal,
   addAchievementModal,
   ACHIEVEMENT_FIELDS,
   listAchievementsModal,
@@ -69,6 +70,7 @@ import {
   deleteGoal,
   saveDevelopmentPlan,
   deleteDevelopmentPlan,
+  respondToDevelopmentPlan,
   addAchievement,
   deleteAchievement,
   deleteTopics,
@@ -230,7 +232,7 @@ const OPENERS = {
   open_list_topics: { title: "Open topics", build: async (admin, ctx) => listTopicsModal((await loadHomeData(admin, ctx.pairId)).topics, ctx.role) },
   open_list_actions: { title: "Open actions", build: async (admin, ctx) => listActionsModal((await loadHomeData(admin, ctx.pairId)).actions) },
   open_list_goals: { title: "Goals", build: async (admin, ctx) => listGoalsModal((await loadHomeData(admin, ctx.pairId)).goals, ctx.isMgr) },
-  open_list_devplans: { title: "Development plans", build: async (admin, ctx) => listDevPlansModal((await loadHomeData(admin, ctx.pairId)).devPlans, ctx.isMgr) },
+  open_list_devplans: { title: "Development plans", build: async (admin, ctx) => listDevPlansModal((await loadHomeData(admin, ctx.pairId)).devPlans, ctx.isMgr, ctx.role) },
   open_list_achievements: { title: "Achievements", build: async (admin, ctx) => listAchievementsModal((await loadHomeData(admin, ctx.pairId)).achievements) },
   // build is never actually called -- deferredModal's after() callback
   // special-cases this action_id before it would try (and fail) to resolve
@@ -399,6 +401,18 @@ const PUSH_ACTIONS = {
       if (ctx.isMgr) return null;
       const entry = await verifyOwnedRow(admin, "feedback_entries", "id, pair_id, type, text, example, response", value, ctx);
       return entry ? respondFeedbackModal(entry) : null;
+    },
+  },
+  // Employee-only, same reasoning as concern_respond/feedback_respond above --
+  // added 2026-09-18, Melissa's explicit request ("everyone needs to be able
+  // to respond"): a dev plan was the one recommendation type an employee had
+  // no way to react to in Slack.
+  devplan_respond: {
+    title: "Respond",
+    build: async (admin, ctx, value) => {
+      if (ctx.isMgr) return null;
+      const plan = await verifyOwnedRow(admin, "development_plans", "id, pair_id, area, type, response", value, ctx);
+      return plan ? respondDevPlanModal(plan) : null;
     },
   },
   // Manager-only, same reasoning as historyModal/summary_generate above --
@@ -576,7 +590,7 @@ const QUICK_ACTIONS = {
       // Matches the website (development/page.js handleDeleteDev).
       await notify(admin, ctx.pairId, `Development plan removed: ${plan.area}`, ctx.role, ctx.otherRole);
     },
-    refreshList: (data, ctx) => listDevPlansModal(data.devPlans, ctx.isMgr),
+    refreshList: (data, ctx) => listDevPlansModal(data.devPlans, ctx.isMgr, ctx.role),
   },
   achievement_delete: {
     run: async (admin, ctx, id) => {
@@ -964,6 +978,26 @@ const SUBMISSIONS = {
       const data = await loadHomeData(admin, ctx.pairId);
       await slackApi("views.update", { view_id: view.previous_view_id, view: listConcernsModal(data.concerns, ctx.isMgr) }, { companyId: ctx.companyId }).catch((e) =>
         console.error("respond concern list refresh:", e)
+      );
+    }
+  },
+  // Same pattern as respond_concern above -- added 2026-09-18, Melissa's
+  // explicit request ("everyone needs to be able to respond"). Employee-only
+  // (devplan_respond already gates this at open time, re-checked here since
+  // private_metadata is exactly as replayable as action.value).
+  respond_devplan: async (admin, ctx, v, view) => {
+    if (ctx.isMgr) return { skip: true };
+    const id = view?.private_metadata;
+    if (!id) return { skip: true };
+    const response = (fieldVal(v, "response") || "").trim();
+    if (!response) return { error: { blockId: "response", message: "Say something before sending." } };
+    const plan = await verifyOwnedRow(admin, "development_plans", "pair_id", id, ctx);
+    if (!plan) return { skip: true };
+    await respondToDevelopmentPlan(admin, id, response);
+    if (view.previous_view_id) {
+      const data = await loadHomeData(admin, ctx.pairId);
+      await slackApi("views.update", { view_id: view.previous_view_id, view: listDevPlansModal(data.devPlans, ctx.isMgr, ctx.role) }, { companyId: ctx.companyId }).catch((e) =>
+        console.error("respond devplan list refresh:", e)
       );
     }
   },
