@@ -5382,3 +5382,18 @@ Verified: `npx eslint` clean on both changed/new files; `git diff` reviewed
 (only the intended lines changed). **Not yet verified**: an actual live
 end-to-end install by someone outside Melissa's own Slack workspace — that
 still hasn't been run even once, on this or any prior session.
+
+**Same-day follow-up bug, found and fixed**: `/install` still 307-redirected
+to `/login` for signed-out visitors after deploying the above — the actual
+page worked, but this project's real request gate isn't named
+`middleware.js` (this Next.js version calls it `proxy.js`, at the project
+root — confirmed via a from-scratch, cache-free Vercel build log showing
+`ƒ Proxy (Middleware)`), so searching for "middleware" never found it.
+`proxy.js`'s `PUBLIC_PATHS` allowlist (`/login`, `/auth/callback`,
+`/api/slack`, `/privacy`) didn't include `/install`, so every signed-out
+visitor got bounced before ever seeing the page. Added `/install` to that
+list. Two dead-end fix attempts before finding this, both now known not to
+matter here: a plain dashboard "Redeploy" and `vercel --prod --force` from
+the repo root (confirmed via build log: `Skipping build cache, deployment
+was triggered without cache` — so this was never a stale-cache issue,
+`proxy.js` was simply missing `/install` from day one).
