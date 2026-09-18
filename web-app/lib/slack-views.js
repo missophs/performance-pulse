@@ -936,14 +936,15 @@ export function addMessageModal() {
   );
 }
 
-// Real message text shown here now (Melissa's call, 2026-09-17) -- safe in a
-// modal specifically because Slack never saves modal content anywhere (see
-// the file header comment). Most recent first, capped at 10 so one long
-// history doesn't blow Slack's per-modal block limit.
+// Kind/sender/when only -- never the real text (this file's own privacy
+// rule, see the header comment: Slack workspace admins can export view/
+// message history, so a Slack view is not a safe place for what someone
+// actually typed). Most recent first, capped at 6; "Open in app" is where
+// the real text is read.
 export function listMessagesModal(messages) {
-  const recent = messages.slice().reverse().slice(0, 10);
+  const recent = messages.slice().reverse().slice(0, 6);
   const blocks = recent.length
-    ? recent.flatMap((m, i) => [section(`*${m.kind}* · ${m.created_by_name} · ${ago(m.created_at)}\n${m.text}`), ...(i < recent.length - 1 ? [{ type: "divider" }] : [])])
+    ? [...recent.map((m) => context(`*${m.kind}* · ${m.created_by_name} · ${ago(m.created_at)}`)), { type: "divider" }, actions([openInApp("Open in app")])]
     : [section("No messages yet.")];
   return modal("list_messages", "Between you two", blocks, "Close");
 }
