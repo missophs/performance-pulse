@@ -86,6 +86,7 @@ export function buildDigestBlockKit(kindCounts, ctx) {
       bkHeader(),
       bkSection(`*${ctx.partnerName}* made ${total} updates.`),
       bkContext(parts.join("  ·  ")),
+      bkContext("Open Performance Pulse's Home tab to see it all and respond."),
       { type: "divider" },
       bkFoot(),
     ],

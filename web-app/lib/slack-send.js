@@ -9,6 +9,45 @@ import { BK_KINDS, buildBlockKit, buildDigestBlockKit } from "@/lib/block-kit";
 import { fmtDate } from "@/lib/format";
 import { slackApi } from "@/lib/slack-api";
 
+// Shared by app/api/slack/notify/route.js (the insert webhook, "request" kind
+// only) and app/api/slack/notify/digest/route.js (the once-daily cron for
+// everything else) -- both need the same pair row + live counts to build a
+// ping/digest payload.
+export async function loadPairContext(supabaseAdmin, pairId) {
+  const { data: pair, error: pairErr } = await supabaseAdmin
+    .from("pairs")
+    .select("employee_id, manager_id, employee_email, manager_email, employee_label, next_1on1_date, company_id")
+    .eq("id", pairId)
+    .single();
+  if (pairErr) throw pairErr;
+
+  const { data: profiles } = await supabaseAdmin
+    .from("profiles")
+    .select("id, full_name")
+    .in("id", [pair.employee_id, pair.manager_id].filter(Boolean));
+  pair.employee_name = profiles?.find((p) => p.id === pair.employee_id)?.full_name || "";
+  pair.manager_name = profiles?.find((p) => p.id === pair.manager_id)?.full_name || "";
+
+  const [{ count: openTopicsCount }, { count: mineActionsCount }, { count: devPlansCount }] = await Promise.all([
+    supabaseAdmin
+      .from("topics")
+      .select("id", { count: "exact", head: true })
+      .eq("pair_id", pairId)
+      .not("status", "in", '("Discussed","Resolved","Parking Lot")'),
+    supabaseAdmin.from("actions").select("id", { count: "exact", head: true }).eq("pair_id", pairId).neq("status", "Done"),
+    supabaseAdmin.from("development_plans").select("id", { count: "exact", head: true }).eq("pair_id", pairId),
+  ]);
+
+  return {
+    pair,
+    counts: {
+      openTopicsCount: openTopicsCount || 0,
+      mineActionsCount: mineActionsCount || 0,
+      devPlansCount: devPlansCount || 0,
+    },
+  };
+}
+
 export async function dmByEmail(email, payload, companyId) {
   const lookup = await slackApi("users.lookupByEmail", { email }, { companyId }).catch((e) => {
     throw new Error(`No Slack account for ${email}: ${e.message}`);

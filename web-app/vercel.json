@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/slack/notify/digest",
+      "schedule": "0 13 * * *"
+    }
+  ]
+}
