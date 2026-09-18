@@ -197,7 +197,7 @@ export function homeView(ctx, d) {
     // an escalation is a person sharing/exporting their own Slack thread,
     // not something this app logs). See "message_partner" in
     // app/api/slack/interactivity/route.js.
-    actions([button(`Message ${ctx.partnerName}`, "message_partner")]),
+    actions([button(`Message ${ctx.partnerName}`, "message_partner", "", usedStyle(ctx.pair.chat_opened_at ? 1 : 0))]),
     // No usedStyle() here on purpose: "Add a new employee" always creates a
     // brand-new pairing, so there's no open/closed count of THIS pair's own
     // history that could mean "already used" for it the way there is for

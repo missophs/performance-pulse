@@ -287,6 +287,33 @@ const OPENERS = {
     title: "Between you two",
     build: async (admin, ctx) => listMessagesModal((await loadHomeData(admin, ctx.pairId)).messages),
   },
+  // Found live 2026-09-18: this used to be a plain block_actions button with
+  // no OPENERS entry, so clicking it did real work (opened the conversation,
+  // maybe sent the one-time intro) with zero visible feedback -- from the
+  // clicker's side, "nothing happens." Slack has no way to make a button
+  // click jump the client to a different channel on its own; the fix is to
+  // give it the same loadingModal-then-swap treatment as every other opener,
+  // and land on a small modal with an actual `<#channelId>` link, which
+  // Slack renders as a clickable pill that does navigate there.
+  message_partner: {
+    title: "Message",
+    build: async (admin, ctx) => {
+      const otherEmail = ctx.isMgr ? ctx.pair.employee_email : ctx.pair.manager_email;
+      const channelId = await openPairConversation(otherEmail, ctx.slackUserId, ctx.companyId);
+      if (!ctx.pair.chat_opened_at) {
+        await slackApi(
+          "chat.postMessage",
+          {
+            channel: channelId,
+            text: "This is your private space to talk with each other. Performance Pulse doesn't read what's said here — if anything ever needs to go to HR, either of you can share or export this conversation yourselves.",
+          },
+          { companyId: ctx.companyId }
+        );
+        await updatePair(admin, ctx.pairId, { chat_opened_at: new Date().toISOString() });
+      }
+      return noticeModal(`Message ${ctx.partnerName}`, `Opened — head to <#${channelId}> to keep talking.`);
+    },
+  },
 };
 
 // "Edit" buttons clicked from inside an already-open list modal. Same
@@ -1281,29 +1308,6 @@ async function handleInteraction(admin, slackUserId, payload) {
           },
           { companyId: ctx.companyId }
         ).catch((e) => console.error("devplan suggestion prefill view update:", e));
-      }
-    } else if (action.action_id === "message_partner") {
-      // Opens a real Slack conversation, not a Performance Pulse chat UI --
-      // see openPairConversation (lib/slack-send.js) and the "message_partner"
-      // block in homeView (lib/slack-views.js). chat_opened_at (migration
-      // 0032) is only "have we sent the one-time intro," never a log of
-      // what's actually said -- this app never calls conversations.history.
-      try {
-        const otherEmail = ctx.isMgr ? ctx.pair.employee_email : ctx.pair.manager_email;
-        const channelId = await openPairConversation(otherEmail, ctx.slackUserId, ctx.companyId);
-        if (!ctx.pair.chat_opened_at) {
-          await slackApi(
-            "chat.postMessage",
-            {
-              channel: channelId,
-              text: "This is your private space to talk with each other. Performance Pulse doesn't read what's said here — if anything ever needs to go to HR, either of you can share or export this conversation yourselves.",
-            },
-            { companyId: ctx.companyId }
-          );
-          await updatePair(admin, ctx.pairId, { chat_opened_at: new Date().toISOString() });
-        }
-      } catch (e) {
-        console.error("message partner:", e);
       }
     } else if (action.action_id === "switch_pair") {
       const chosenId = action.selected_option?.value;
