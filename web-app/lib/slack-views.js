@@ -306,7 +306,7 @@ export function homeView(ctx, d) {
     // Updated 2026-09-18 for the one real exception: the manager-only AI
     // conversation summary (see historyModal) -- always labeled, always
     // manager-reviewed/editable before it's final, never automatic.
-    context(":shield: No AI writes, scores, or decides anything about your performance here — every entry is from you or your manager. The one exception: a manager can generate an AI summary of your private conversation, always labeled as such and reviewed/editable by them before it's final. A human reviews and approves how this app works before it changes."),
+    context(":shield: No AI writes, scores, or decides anything about your performance here — every entry is from you or your manager. The one exception: a manager can generate an AI summary of the topics, goals, actions, and past meeting notes already logged for your 1:1 — it never reads the private Message conversation. It's always labeled as such and reviewed/editable by them before it's final. A human reviews and approves how this app works before it changes."),
   ];
   return homeTab(blocks);
 }

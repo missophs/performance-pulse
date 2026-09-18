@@ -511,7 +511,7 @@ const QUICK_ACTIONS = {
       // that's real feedback, but not one everyone reads as "it worked" on
       // its own, so a plain-text notice backs it up instead of relying on
       // a button color anyone might miss.
-      ctx._actionNotice = `Marked "${task.text}" as done.`;
+      ctx._actionNotice = `Marked done: ${task.text}`;
     },
     refreshList: (data, ctx) => listActionsModal(data.actions, ctx._actionNotice),
   },
@@ -617,7 +617,11 @@ const QUICK_ACTIONS = {
   summary_generate: {
     run: async (admin, ctx) => {
       if (!ctx.isMgr) return;
-      const { topics, goals, actions, meetings } = await loadHomeData(admin, ctx.pairId);
+      // Stashed on ctx so the QUICK_ACTIONS dispatcher's own loadHomeData
+      // call (right after this returns) can reuse it instead of re-fetching
+      // the same pair's data a second time.
+      const data = (ctx._homeData = await loadHomeData(admin, ctx.pairId));
+      const { topics, goals, actions, meetings } = data;
       const transcript = buildOneOnOneTranscript({ topics, goals, actions, meetings });
       if (!transcript) {
         ctx._summaryNotice = "Nothing logged yet for this pairing -- add a topic, goal, or action first, then try again.";
@@ -628,6 +632,14 @@ const QUICK_ACTIONS = {
         summary = await summarizeOneOnOne({ topics, goals, actions, meetings });
       } catch (e) {
         console.error("summary_generate:", e);
+        ctx._summaryNotice = "Couldn't generate a summary just now -- try again in a moment.";
+        return;
+      }
+      // The Anthropic call can resolve without throwing but still come back
+      // with no text block (e.g. cut off before one closed) -- treat that
+      // the same as a thrown error instead of silently saving an empty
+      // summary with no notice.
+      if (!summary) {
         ctx._summaryNotice = "Couldn't generate a summary just now -- try again in a moment.";
         return;
       }
@@ -1332,8 +1344,9 @@ async function handleInteraction(admin, slackUserId, payload) {
     } else if (QUICK_ACTIONS[action.action_id]) {
       const spec = QUICK_ACTIONS[action.action_id];
       await spec.run(admin, ctx, action.value);
-      // One load feeds both the open list modal and the Home tab republish.
-      const data = await loadHomeData(admin, ctx.pairId);
+      // One load feeds both the open list modal and the Home tab republish --
+      // reuse it if `run` (e.g. summary_generate) already fetched it above.
+      const data = ctx._homeData || (await loadHomeData(admin, ctx.pairId));
       // The list modal is the visible result of the click, so it stays on the
       // critical path; the Home tab behind it can catch up after the response.
       if (payload.view?.id) {

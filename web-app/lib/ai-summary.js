@@ -7,32 +7,40 @@
 // Server-only -- needs ANTHROPIC_API_KEY, which must stay server-side.
 
 import Anthropic from "@anthropic-ai/sdk";
+import { topicStatusBadge } from "@/lib/badges";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// One header + one line per item, skipped entirely when the list is empty.
+function section(header, items, fmt) {
+  return items?.length ? [header, ...items.map(fmt)] : [];
+}
+
 // Builds a plain-text transcript of everything logged for a pair -- see
 // callers for the exact field names (they match the modals in slack-views.js).
+// Topic status reuses topicStatusBadge (lib/badges.js) instead of the raw DB
+// value, so the AI sees the same wording ("Not yet discussed") the Slack/
+// website UI already shows instead of the literal word "open".
 export function buildOneOnOneTranscript({ topics, goals, actions, meetings }) {
-  const lines = [];
-  if (topics?.length) {
-    lines.push("Topics:");
-    topics.forEach((t) => lines.push(`- ${t.text} (${t.category}, ${t.status || "open"})${t.why ? ` -- ${t.why}` : ""}`));
-  }
-  if (goals?.length) {
-    lines.push("\nGoals:");
-    goals.forEach((g) => lines.push(`- ${g.text} (${g.status}, ${g.progress || 0}%)${g.why ? ` -- ${g.why}` : ""}`));
-  }
-  if (actions?.length) {
-    lines.push("\nActions:");
-    actions.forEach((a) => lines.push(`- ${a.text} (owner: ${a.owner_label}, ${a.status})${a.due_date ? `, due ${a.due_date}` : ""}`));
-  }
-  if (meetings?.length) {
-    lines.push("\nPast 1:1 notes:");
-    meetings.forEach((m) => {
-      const parts = [m.discussed && `discussed: ${m.discussed}`, m.agreed && `agreed: ${m.agreed}`, m.revisit && `revisit: ${m.revisit}`];
-      lines.push(`- ${m.meeting_date} -- ${parts.filter(Boolean).join("; ")}`);
-    });
-  }
+  const lines = [
+    ...section("Topics:", topics, (t) => `- ${t.text} (${t.category}, ${topicStatusBadge(t.status).label})${t.why ? ` -- ${t.why}` : ""}`),
+    ...section("\nGoals:", goals, (g) => `- ${g.text} (${g.status}, ${g.progress || 0}%)${g.why ? ` -- ${g.why}` : ""}`),
+    ...section("\nActions:", actions, (a) => `- ${a.text} (owner: ${a.owner_label}, ${a.status})${a.due_date ? `, due ${a.due_date}` : ""}`),
+    // Includes Start/Stop/Keep, not just Discussed/Agreed/Revisit -- these are
+    // real logged retro notes (see meetingBlocks, lib/slack-views.js) that the
+    // transcript used to drop silently.
+    ...section("\nPast 1:1 notes:", meetings, (m) => {
+      const parts = [
+        m.discussed && `discussed: ${m.discussed}`,
+        m.agreed && `agreed: ${m.agreed}`,
+        m.revisit && `revisit: ${m.revisit}`,
+        m.start_line && `start: ${m.start_line}`,
+        m.stop_line && `stop: ${m.stop_line}`,
+        m.keep_line && `keep: ${m.keep_line}`,
+      ];
+      return `- ${m.meeting_date} -- ${parts.filter(Boolean).join("; ")}`;
+    }),
+  ];
   return lines.join("\n").trim();
 }
 
