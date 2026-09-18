@@ -697,6 +697,11 @@ export async function respondToFeedback(supabase, feedbackId, response) {
   if (error) throw error;
 }
 
+export async function deleteFeedbackEntry(supabase, id) {
+  const { error } = await supabase.from("feedback_entries").delete().eq("id", id);
+  if (error) throw error;
+}
+
 export async function listFeedbackRequests(supabase, pairId) {
   const { data, error } = await supabase
     .from("feedback_requests")
@@ -1457,6 +1462,11 @@ export async function listMessages(supabase, pairId) {
     .order("created_at", { ascending: true });
   if (error) throw error;
   return data;
+}
+
+export async function deleteMessage(supabase, id) {
+  const { error } = await supabase.from("messages").delete().eq("id", id);
+  if (error) throw error;
 }
 
 export async function addMessage(supabase, pairId, kind, text, role, byName) {

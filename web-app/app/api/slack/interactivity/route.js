@@ -79,6 +79,7 @@ import {
   addFeedback,
   addFeedbackRequest,
   respondToFeedback,
+  deleteFeedbackEntry,
   saveWrapUp,
   wrapUpConversation,
   createPairForSlack,
@@ -91,6 +92,7 @@ import {
   addCustomSuggestion,
   deleteCustomSuggestion,
   addMessage,
+  deleteMessage,
   updatePair,
   closePair,
   getFormDraft,
@@ -562,6 +564,27 @@ const QUICK_ACTIONS = {
       await deleteAchievement(admin, id);
     },
     refreshList: (data) => listAchievementsModal(data.achievements),
+  },
+  // Open to both partners -- no delete existed anywhere for feedback (Slack
+  // or website) before this; matches topic_delete/action_delete's "no
+  // creator gate" pattern rather than restricting to whoever gave it.
+  feedback_delete: {
+    run: async (admin, ctx, id) => {
+      const entry = await verifyOwnedRow(admin, "feedback_entries", "pair_id", id, ctx);
+      if (!entry) return;
+      await deleteFeedbackEntry(admin, id);
+    },
+    refreshList: (data, ctx) => listFeedbackModal(data.feedback, data.feedbackRequests, ctx.role),
+  },
+  // Open to both partners, same reasoning as feedback_delete above -- no
+  // delete existed anywhere for "Between you two" messages before this.
+  message_delete: {
+    run: async (admin, ctx, id) => {
+      const msg = await verifyOwnedRow(admin, "messages", "pair_id", id, ctx);
+      if (!msg) return;
+      await deleteMessage(admin, id);
+    },
+    refreshList: (data) => listMessagesModal(data.messages),
   },
   // Mirrors addFromSuggestion (page.js): creates a plain unsubmitted topic,
   // no ping until Submit — same as adding one by hand. role, not just

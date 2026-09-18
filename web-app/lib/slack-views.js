@@ -875,7 +875,10 @@ export function listFeedbackModal(feedback, requests, viewerRole) {
             (f.example ? `\n*For example:* ${f.example}` : "") +
             (f.response ? `\n*Response:* ${f.response}` : "")
         ),
-        ...(viewerRole === "employee" ? [actions([button(f.response ? "Edit your response" : "Respond", "feedback_respond", f.id, f.response ? undefined : "primary")])] : []),
+        actions([
+          ...(viewerRole === "employee" ? [button(f.response ? "Edit your response" : "Respond", "feedback_respond", f.id, f.response ? undefined : "primary")] : []),
+          button("Delete", "feedback_delete", f.id, "danger"),
+        ]),
       ])
     : [section("No feedback yet.")];
   // The website (app/(dashboard)/performance/page.js) offers two genuinely
@@ -940,7 +943,11 @@ export function addMessageModal() {
 export function listMessagesModal(messages) {
   const recent = messages.slice().reverse().slice(0, 6);
   const blocks = recent.length
-    ? [...recent.map((m) => context(`*${m.kind}* · ${m.created_by_name} · ${ago(m.created_at)}`)), divider(), actions([openInApp("Open in app")])]
+    ? [
+        ...recent.flatMap((m) => [context(`*${m.kind}* · ${m.created_by_name} · ${ago(m.created_at)}`), actions([button("Delete", "message_delete", m.id, "danger")])]),
+        divider(),
+        actions([openInApp("Open in app")]),
+      ]
     : [section("No messages yet.")];
   return modal("list_messages", "Between you two", blocks, "Close");
 }
