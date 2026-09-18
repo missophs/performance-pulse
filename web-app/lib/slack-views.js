@@ -18,7 +18,20 @@
 // it right now can ever see. Dev plans and achievements are the exception --
 // Melissa's call: keep those structural-fields-only, no full text, no link
 // anywhere -- log the actual plan/achievement content somewhere else.
+//
+// Built with slack-block-builder (https://blockbuilder.dev), Melissa's call
+// 2026-09-18 -- every block/element below is a Block Builder instance
+// (Blocks.*/Elements.*/Bits.*) instead of hand-rolled Block Kit JSON, only
+// actually turned into the plain object Slack's API wants at the very end
+// (modal()/plainModal()/homeTab() below, the only places that call
+// .buildToObject()). This is a construction-syntax change only -- every
+// Slack platform quirk documented throughout this file (the "_v2" block_id
+// workaround, "select in an input block never fires," character caps, etc.)
+// is still exactly as real and still handled exactly the same way; the
+// library doesn't know about any of that, it just gives the object
+// construction a real, chainable API instead of raw literals.
 
+import { Surfaces, Blocks, Elements, Bits } from "slack-block-builder";
 import { isOpenTopic, ago } from "@/lib/format";
 import { TOPIC_CATEGORIES, SUGGESTIONS, MSG_KINDS } from "@/lib/one-on-one-content";
 import { GOAL_SUGGESTIONS, SMART_GOAL_HELP, EMPLOYEE_GOAL_PROMPT } from "@/lib/goals-content";
@@ -41,81 +54,83 @@ function truncateOptionText(label) {
   return text.slice(0, 74).replace(/\s+\S*$/, "") + "…";
 }
 
-const opt = (label, value) => ({ text: { type: "plain_text", text: truncateOptionText(label) }, value: String(value ?? label).slice(0, 150) });
-const staticSelect = (actionId, options, initial) => ({
-  type: "static_select",
-  action_id: actionId,
-  options: options.map((o) => opt(o, o)),
-  ...(initial ? { initial_option: opt(initial, initial) } : {}),
-});
-const plainInput = (actionId, opts = {}) => ({
-  type: "plain_text_input",
-  action_id: actionId,
-  ...(opts.multiline ? { multiline: true } : {}),
-  ...(opts.placeholder ? { placeholder: { type: "plain_text", text: opts.placeholder } } : {}),
-  ...(opts.initial ? { initial_value: opts.initial } : {}),
-});
-const inputBlock = (blockId, label, element, optional = false) => ({
-  type: "input",
-  block_id: blockId,
-  label: { type: "plain_text", text: label },
-  element,
-  optional,
-});
-const section = (md, accessory) => ({ type: "section", text: { type: "mrkdwn", text: md }, ...(accessory ? { accessory } : {}) });
-const context = (md) => ({ type: "context", elements: [{ type: "mrkdwn", text: md }] });
-const actions = (elements, blockId) => ({ type: "actions", elements, ...(blockId ? { block_id: blockId } : {}) });
+// Every function below returns an UNBUILT Block Builder instance (never a
+// plain object) so it can be embedded as a child of another builder
+// (Blocks.Input().element(...), Blocks.Section().accessory(...), etc.) --
+// only the top-level surface builders (modal/plainModal/homeTab) ever call
+// .buildToObject() to turn the whole tree into what Slack's API wants.
+const opt = (label, value) => Bits.Option({ text: truncateOptionText(label), value: String(value ?? label).slice(0, 150) });
+const optionGroup = (label, options) => Bits.OptionGroup({ label: label.slice(0, 75) }).options(options);
+const staticSelect = (actionId, options, initial) =>
+  Elements.StaticSelect({ actionId })
+    .options(options.map((o) => opt(o, o)))
+    .initialOption(initial ? opt(initial, initial) : undefined);
+const plainInput = (actionId, opts = {}) =>
+  Elements.TextInput({
+    actionId,
+    multiline: opts.multiline || undefined,
+    placeholder: opts.placeholder || undefined,
+    initialValue: opts.initial || undefined,
+  });
+const datePicker = (actionId, initial) => Elements.DatePicker({ actionId, initialDate: initial ? new Date(initial) : undefined });
+const checkboxes = (actionId, options) => Elements.Checkboxes({ actionId }).options(options);
+const radioButtons = (actionId, options) =>
+  Elements.RadioButtons({ actionId }).options(options.map((o) => Bits.Option({ text: o.text, value: o.value })));
+const userSelect = (actionId, placeholder) => Elements.UserSelect({ actionId, placeholder });
+const inputBlock = (blockId, label, element, optional = false) => Blocks.Input({ blockId, label }).element(element).optional(optional);
+const section = (md, accessory) => Blocks.Section({ text: md }).accessory(accessory);
+const context = (md) => Blocks.Context().elements(md);
+const actions = (elements, blockId) => Blocks.Actions({ blockId }).elements(elements);
+const header = (text) => Blocks.Header({ text });
+const divider = () => Blocks.Divider();
 // Green means "you've actually used this," never "click me" (Melissa's
 // call, 2026-09-12) -- a create button starts default/white and only turns
 // primary/green once the count backing it is real, derived from data
 // homeView already loads, not a new tracked flag.
 const usedStyle = (count) => (count > 0 ? "primary" : undefined);
-const button = (text, actionId, value, style) => ({
-  type: "button",
-  text: { type: "plain_text", text, emoji: true },
-  action_id: actionId,
-  ...(value !== undefined && value !== "" ? { value: String(value) } : {}),
-  ...(style ? { style } : {}),
-});
+const button = (text, actionId, value, style) => {
+  const b = Elements.Button({ text, actionId, value: value !== undefined && value !== "" ? String(value) : undefined });
+  if (style === "primary") return b.primary();
+  if (style === "danger") return b.danger();
+  return b;
+};
 // action_id must be unique across an entire published view, not just within
 // one block -- Slack rejects the whole views.publish/views.open call
 // otherwise. homeView calls this more than once, so the id is derived from
 // the label rather than hardcoded (see SEP 09 incident: a hardcoded
 // "open_app" id on every button silently broke every Slack Home tab publish).
-const openInApp = (label = "Open in app", path = "") => ({
-  type: "button",
-  text: { type: "plain_text", text: label, emoji: true },
-  url: `${APP_URL}${path}`,
-  action_id: `open_app_${label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")}`,
-});
-const datePicker = (actionId, initial) => ({ type: "datepicker", action_id: actionId, ...(initial ? { initial_date: initial } : {}) });
-const modal = (callbackId, title, blocks, submit = "Save", privateMetadata) => ({
-  type: "modal",
-  callback_id: callbackId,
-  title: { type: "plain_text", text: title.slice(0, 24) },
-  // Slack hard-caps submit button text at 24 chars too (same as title) and
-  // rejects the whole views.update if it's longer -- silently, from this
-  // repo's own perspective, since the caller only sees a caught/logged
-  // error while the modal stays stuck on "Loading..." forever. Found live:
-  // wrapUpConversationModal's original 27-char label did exactly this.
-  submit: { type: "plain_text", text: submit.slice(0, 24) },
-  close: { type: "plain_text", text: "Cancel" },
-  blocks,
-  ...(privateMetadata ? { private_metadata: privateMetadata } : {}),
-});
+const openInApp = (label = "Open in app", path = "") =>
+  Elements.Button({
+    text: label,
+    url: `${APP_URL}${path}`,
+    actionId: `open_app_${label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")}`,
+  });
+const modal = (callbackId, title, blocks, submit = "Save", privateMetadata) =>
+  Surfaces.Modal({
+    callbackId,
+    title: title.slice(0, 24),
+    // Slack hard-caps submit button text at 24 chars too (same as title) and
+    // rejects the whole views.update if it's longer -- silently, from this
+    // repo's own perspective, since the caller only sees a caught/logged
+    // error while the modal stays stuck on "Loading..." forever. Found live:
+    // wrapUpConversationModal's original 27-char label did exactly this.
+    submit: submit.slice(0, 24),
+    close: "Cancel",
+    privateMetaData: privateMetadata,
+  })
+    .blocks(blocks)
+    .buildToObject();
+const homeTab = (blocks) => Surfaces.HomeTab().blocks(blocks).buildToObject();
 
 // ------------------------------------------------- placeholder modals -----
 
 // A one-line modal with nothing to submit. Can't use modal() above: that
 // always emits a `submit` button, and a modal with no input block must not
 // declare one.
-const plainModal = (callbackId, title, body, close) => ({
-  type: "modal",
-  callback_id: callbackId,
-  title: { type: "plain_text", text: title.slice(0, 24) },
-  close: { type: "plain_text", text: close },
-  blocks: [section(body)],
-});
+const plainModal = (callbackId, title, body, close) =>
+  Surfaces.Modal({ callbackId, title: title.slice(0, 24), close })
+    .blocks(section(body))
+    .buildToObject();
 
 // Slack expires a trigger_id 3 seconds after the click, and a cold start plus
 // a Supabase round trip can miss that — the person then sees a raw "operation
@@ -142,18 +157,14 @@ export function homeView(ctx, d) {
   const next1on1 = ctx.pair.next_1on1_date ? `${ctx.pair.next_1on1_date}${ctx.pair.next_1on1_time ? " " + ctx.pair.next_1on1_time : ""}` : "not scheduled";
 
   const blocks = [
-    { type: "header", text: { type: "plain_text", text: "Performance Pulse", emoji: true } },
+    header("Performance Pulse"),
     ...(ctx.pairs.length > 1
       ? [
           actions(
             [
-              {
-                type: "static_select",
-                action_id: "switch_pair",
-                placeholder: { type: "plain_text", text: "Switch pairing" },
-                options: ctx.pairs.map((p) => opt(p.partnerName, p.id)),
-                initial_option: opt(ctx.partnerName, ctx.pairId),
-              },
+              Elements.StaticSelect({ actionId: "switch_pair", placeholder: "Switch pairing" })
+                .options(ctx.pairs.map((p) => opt(p.partnerName, p.id)))
+                .initialOption(opt(ctx.partnerName, ctx.pairId)),
             ],
             // Slack's static_select can report a stale selected_option after
             // a views.publish that reuses the same block_id (same platform
@@ -196,7 +207,7 @@ export function homeView(ctx, d) {
     // highlight the 2026-09-12 rule forbids (see CLAUDE.md/memory).
     ...(ctx.isMgr ? [actions([button("Add or change employee", "open_add_employee")])] : []),
     context(`Next 1:1: ${next1on1}  ·  ${openTopics.length} open topic${openTopics.length === 1 ? "" : "s"}  ·  ${openActions.length} open action${openActions.length === 1 ? "" : "s"}`),
-    { type: "divider" },
+    divider(),
     section("*My 1:1*\nPrepare, talk, and wrap up — right here."),
     actions([
       button("Add a topic", "open_add_topic", "", usedStyle(openTopics.length)),
@@ -219,7 +230,7 @@ export function homeView(ctx, d) {
           actions([button("View notes", "open_list_suggestions"), button("Write a note", "open_add_suggestion", "", usedStyle(d.customSuggestions.length))]),
         ]
       : []),
-    { type: "divider" },
+    divider(),
     section(`*Goals* — ${d.goals.length} on record`),
     actions([button("Add a goal", "open_add_goal", "", usedStyle(openGoals.length)), button("View goals", "open_list_goals")]),
     section(`*Learning & development* — ${d.devPlans.length} plan${d.devPlans.length === 1 ? "" : "s"}`),
@@ -273,14 +284,14 @@ export function homeView(ctx, d) {
     actions([button("View handbook", "open_list_handbook")]),
     section("*History*\nEverything past — meetings, goals, feedback, all of it — lives in the app."),
     actions([openInApp("Open History in the app", "/history")]),
-    { type: "divider" },
+    divider(),
     // Wording rewritten (Melissa, 2026-09-16): "Clear out" read as deleting
     // the information, which this never does -- it only marks open items
     // Discussed/Complete/Done (see wrapUpConversation, lib/data.js -- update
     // only, never delete). "Mark ... as done" says what actually happens.
     section("If a topic, goal, or action is done, mark it so — nothing is deleted, the pairing stays open, and either of you can keep adding to it any time:"),
     actions([button("Mark topics & actions as done", "open_close_pair")]),
-    { type: "divider" },
+    divider(),
     context(":lock: Everything here is shared only between you and your 1:1 partner — never with HR."),
     // Governance disclosure, visible on every Home tab load -- Melissa's
     // call, 2026-09-17, modeled on Slack's own Marketplace policy, which
@@ -292,19 +303,16 @@ export function homeView(ctx, d) {
     // keep it true if that ever changes.
     context(":shield: No AI writes, scores, or decides anything about your performance here — every entry is from you or your manager, and a human reviews and approves how this app works before it changes."),
   ];
-  return { type: "home", blocks };
+  return homeTab(blocks);
 }
 
 export function notLinkedHomeView() {
-  return {
-    type: "home",
-    blocks: [
-      { type: "header", text: { type: "plain_text", text: "Performance Pulse" } },
-      section(
-        "This Slack account isn't linked to a Performance Pulse pair yet. Sign in on the website with the same email address this Slack account uses, and this tab will pick it up automatically."
-      ),
-    ],
-  };
+  return homeTab([
+    header("Performance Pulse"),
+    section(
+      "This Slack account isn't linked to a Performance Pulse pair yet. Sign in on the website with the same email address this Slack account uses, and this tab will pick it up automatically."
+    ),
+  ]);
 }
 
 // Real self-serve entry point (migration 0030): shown instead of the
@@ -315,14 +323,11 @@ export function notLinkedHomeView() {
 // employees" rule (SLACK_TODO.md, 2026-09-05) by staying manager-initiated:
 // whoever clicks this becomes the manager of the pair they create.
 export function firstSetupHomeView() {
-  return {
-    type: "home",
-    blocks: [
-      { type: "header", text: { type: "plain_text", text: "Welcome to Performance Pulse" } },
-      section("Nobody's set up yet on this team. Add the person you'll be having 1:1s with to get started — you'll be their manager."),
-      actions([button("Add your first employee", "open_setup_first_pair", "", "primary")]),
-    ],
-  };
+  return homeTab([
+    header("Welcome to Performance Pulse"),
+    section("Nobody's set up yet on this team. Add the person you'll be having 1:1s with to get started — you'll be their manager."),
+    actions([button("Add your first employee", "open_setup_first_pair", "", "primary")]),
+  ]);
 }
 
 export function setupFirstPairModal() {
@@ -349,10 +354,7 @@ function draftControls(actionId, saved) {
 
 function suggestionOptionGroups(role) {
   const roleSuggestions = SUGGESTIONS[role] || {};
-  return Object.entries(roleSuggestions).map(([cat, texts]) => ({
-    label: { type: "plain_text", text: cat.slice(0, 75) },
-    options: texts.map((t) => opt(t, `${cat}::${t}`)),
-  }));
+  return Object.entries(roleSuggestions).map(([cat, texts]) => optionGroup(cat, texts.map((t) => opt(t, `${cat}::${t}`))));
 }
 
 // The "suggested" picker is a convenience only — picking one round-trips
@@ -394,7 +396,7 @@ export function addTopicModal(ctx, draft, saved = false) {
     [
       section(
         "*Pick a suggestion (optional)*",
-        { type: "static_select", action_id: "suggested_pick", option_groups: groups, placeholder: { type: "plain_text", text: "Browse suggested topics" } }
+        Elements.StaticSelect({ actionId: "suggested_pick", placeholder: "Browse suggested topics" }).optionGroups(groups)
       ),
       inputBlock(
         id("text"),
@@ -537,7 +539,7 @@ export function addActionModal(ctx) {
   return modal("add_action", "Add an action", [
     inputBlock("text", "Action", plainInput("val", { placeholder: "What needs to happen?" })),
     inputBlock("owner", "Owner", staticSelect("val", [ctx.myName, ctx.partnerName, "Both of us"], ctx.myName)),
-    inputBlock("due", "Due date", { type: "datepicker", action_id: "val" }, true),
+    inputBlock("due", "Due date", datePicker("val"), true),
     inputBlock("notes", "Notes", plainInput("val", { multiline: true, placeholder: "Anything that would help whoever picks this up." }), true),
   ]);
 }
@@ -643,10 +645,7 @@ export const GOAL_FIELDS = ["text", "why", "measure", "target", "status"];
 // Same relationship to GOAL_SUGGESTIONS as suggestionOptionGroups above has
 // to SUGGESTIONS — goals have no per-role library, just one shared list.
 function goalSuggestionOptionGroups() {
-  return Object.entries(GOAL_SUGGESTIONS).map(([cat, items]) => ({
-    label: { type: "plain_text", text: cat.slice(0, 75) },
-    options: items.map((s) => opt(s.label, s.text)),
-  }));
+  return Object.entries(GOAL_SUGGESTIONS).map(([cat, items]) => optionGroup(cat, items.map((s) => opt(s.label, s.text))));
 }
 
 // Same picker pattern, matched against lib/development-content.js's fixed,
@@ -655,10 +654,7 @@ function goalSuggestionOptionGroups() {
 // as "ruleIndex::pickIndex" so devplan_suggested_pick (route.js) can look the
 // whole rule back up without re-matching anything.
 function devSuggestionOptionGroups() {
-  return LD_RULES.map((r, ri) => ({
-    label: { type: "plain_text", text: r.area.slice(0, 75) },
-    options: r.picks.map((p, pi) => opt(`${p[0]}: ${p[1]}`, `${ri}::${pi}`)),
-  }));
+  return LD_RULES.map((r, ri) => optionGroup(r.area, r.picks.map((p, pi) => opt(`${p[0]}: ${p[1]}`, `${ri}::${pi}`))));
 }
 
 const SMART_GOAL_CONTEXT = [SMART_GOAL_HELP.intro, ...SMART_GOAL_HELP.criteria.map(([k, v]) => `*${k}:* ${v}`)].join("\n");
@@ -688,7 +684,7 @@ export function addGoalModal(ctx, draft, saved = false) {
       ...(ctx?.role === "employee" ? [context(EMPLOYEE_GOAL_PROMPT)] : []),
       section(
         "*Pick a suggestion (optional)*",
-        { type: "static_select", action_id: "goal_suggested_pick", option_groups: goalSuggestionOptionGroups(), placeholder: { type: "plain_text", text: "Browse suggested goals" } }
+        Elements.StaticSelect({ actionId: "goal_suggested_pick", placeholder: "Browse suggested goals" }).optionGroups(goalSuggestionOptionGroups())
       ),
       inputBlock(id("text"), "Goal", plainInput("val", { initial: draft?.text })),
       inputBlock(id("why"), "What's the plan to accomplish this?", plainInput("val", { multiline: true, initial: draft?.why }), true),
@@ -755,7 +751,7 @@ export function addDevPlanModal(ctx, draft, saved = false) {
     [
       section(
         "*Pick a suggestion (optional)*",
-        { type: "static_select", action_id: "devplan_suggested_pick", option_groups: devSuggestionOptionGroups(), placeholder: { type: "plain_text", text: "Get a suggestion" } }
+        Elements.StaticSelect({ actionId: "devplan_suggested_pick", placeholder: "Get a suggestion" }).optionGroups(devSuggestionOptionGroups())
       ),
       inputBlock(id("area"), "Area", plainInput("val", { placeholder: "e.g. Executive presentation skills", initial: draft?.area })),
       inputBlock(id("why"), "Why it matters", plainInput("val", { multiline: true, placeholder: "e.g. Increase effectiveness presenting to senior stakeholders", initial: draft?.why }), true),
@@ -893,7 +889,7 @@ export function listFeedbackModal(feedback, requests, viewerRole) {
   const reqBlocks = requests.filter((r) => r.status === "open");
   const blocks = [
     ...fbBlocks,
-    ...(reqBlocks.length ? [{ type: "divider" }, section("*Open requests*")] : []),
+    ...(reqBlocks.length ? [divider(), section("*Open requests*")] : []),
     ...reqBlocks.flatMap((r) => [
       section(`Requested ${ago(r.created_at)}`),
       actions([
@@ -944,7 +940,7 @@ export function addMessageModal() {
 export function listMessagesModal(messages) {
   const recent = messages.slice().reverse().slice(0, 6);
   const blocks = recent.length
-    ? [...recent.map((m) => context(`*${m.kind}* · ${m.created_by_name} · ${ago(m.created_at)}`)), { type: "divider" }, actions([openInApp("Open in app")])]
+    ? [...recent.map((m) => context(`*${m.kind}* · ${m.created_by_name} · ${ago(m.created_at)}`)), divider(), actions([openInApp("Open in app")])]
     : [section("No messages yet.")];
   return modal("list_messages", "Between you two", blocks, "Close");
 }
@@ -974,11 +970,11 @@ export function listDocumentsModal(docs) {
     ? docs.flatMap((d) => [
         section(`*${d.name}*\n${ago(d.created_at)} · uploaded by ${d.created_by_name}`),
         d.url
-          ? actions([{ type: "button", text: { type: "plain_text", text: "Open", emoji: true }, url: d.url, action_id: "open_document_link" }])
+          ? actions([Elements.Button({ text: "Open", url: d.url, actionId: "open_document_link" })])
           : context("Couldn't generate a link for this file — try again from the app."),
       ])
     : [section("No documents uploaded yet.")];
-  blocks.push({ type: "divider" }, actions([openInApp("Upload a document", "/dashboard")]));
+  blocks.push(divider(), actions([openInApp("Upload a document", "/dashboard")]));
   return modal("view_documents", "Documents", blocks, "Close");
 }
 
@@ -987,7 +983,7 @@ export function listHandbookLinksModal(links) {
     ? links.flatMap((l) => [
         section(`*${l.title}*`),
         l.url
-          ? actions([{ type: "button", text: { type: "plain_text", text: "Open handbook", emoji: true }, url: l.url, action_id: "open_handbook_link" }])
+          ? actions([Elements.Button({ text: "Open handbook", url: l.url, actionId: "open_handbook_link" })])
           : context("Couldn't generate a link for this file — try again from the app."),
       ])
     : [section("No handbook uploaded yet.")];
@@ -1035,12 +1031,12 @@ export function wrapUpModal(topics, pairId) {
   const open = topics.filter(isOpenTopic);
   const checkboxOptions = open.map((t) => opt(t.text, t.id));
   return modal("wrap_up", "Wrap up your 1:1", [
-    inputBlock("date", "Meeting date", { type: "datepicker", action_id: "val", initial_date: new Date().toISOString().slice(0, 10) }),
+    inputBlock("date", "Meeting date", datePicker("val", new Date().toISOString().slice(0, 10))),
     inputBlock("discussed", "What you discussed", plainInput("val", { multiline: true, placeholder: "The headline of what you talked about." }), true),
     inputBlock("agreed", "What you agreed", plainInput("val", { multiline: true, placeholder: "Decisions, expectations, anything you both signed up for." }), true),
     inputBlock("revisit", "Topics to revisit next time", plainInput("val", { multiline: true, placeholder: "Anything you ran out of time for." }), true),
     ...(checkboxOptions.length
-      ? [inputBlock("discussed_topics", "Topics covered", { type: "checkboxes", action_id: "val", options: checkboxOptions }, true)]
+      ? [inputBlock("discussed_topics", "Topics covered", checkboxes("val", checkboxOptions), true)]
       : []),
     context("*Start · Stop · Continue* — the only rating here. No numbers, no scores."),
     inputBlock("start", "Start", plainInput("val", { placeholder: "One thing to start doing" }), true),
@@ -1094,23 +1090,19 @@ export function addEmployeeModal(ctx) {
     "Add or change employee",
     [
       section("Starts a new 1:1 pairing with you as their manager. Pick them from the workspace — it links right away if they already use Performance Pulse, or the moment they sign up otherwise."),
-      inputBlock("employee_picker", "Employee", { type: "users_select", action_id: "val", placeholder: { type: "plain_text", text: "Choose a person" } }),
+      inputBlock("employee_picker", "Employee", userSelect("val", "Choose a person")),
       inputBlock(
         "keep_current",
         `Your current pairing with ${ctx.partnerName}`,
-        {
-          type: "radio_buttons",
-          action_id: "val",
-          options: [
-            { text: { type: "plain_text", text: "Keep it open — adding another employee" }, value: "keep" },
-            // Slack caps option text at 75 chars -- a long real name here
-            // could blow that, found in review 2026-09-16 (same class of
-            // silent-Slack-limit bug as the wrap-up modal title earlier
-            // tonight). "Archive it — replacing " leaves ~50 chars of
-            // headroom for the name, comfortably more than any real name.
-            { text: { type: "plain_text", text: `Archive it — replacing ${ctx.partnerName}`.slice(0, 75) }, value: "archive" },
-          ],
-        }
+        radioButtons("val", [
+          { text: "Keep it open — adding another employee", value: "keep" },
+          // Slack caps option text at 75 chars -- a long real name here
+          // could blow that, found in review 2026-09-16 (same class of
+          // silent-Slack-limit bug as the wrap-up modal title earlier
+          // tonight). "Archive it — replacing " leaves ~50 chars of
+          // headroom for the name, comfortably more than any real name.
+          { text: `Archive it — replacing ${ctx.partnerName}`.slice(0, 75), value: "archive" },
+        ])
       ),
     ],
     "Add employee"
@@ -1144,9 +1136,9 @@ export function wrapUpConversationModal(pairId, d) {
           ? "Nothing open right now — you're all caught up. Add a note below if you still want to send one."
           : "Check off what's actually done. Anything still waiting on a response — leave it unchecked and it stays open, untouched."
       ),
-      ...(topicOptions.length ? [inputBlock("done_topics", "Topics", { type: "checkboxes", action_id: "val", options: topicOptions }, true)] : []),
-      ...(goalOptions.length ? [inputBlock("done_goals", "Goals", { type: "checkboxes", action_id: "val", options: goalOptions }, true)] : []),
-      ...(actionOptions.length ? [inputBlock("done_actions", "Actions", { type: "checkboxes", action_id: "val", options: actionOptions }, true)] : []),
+      ...(topicOptions.length ? [inputBlock("done_topics", "Topics", checkboxes("val", topicOptions), true)] : []),
+      ...(goalOptions.length ? [inputBlock("done_goals", "Goals", checkboxes("val", goalOptions), true)] : []),
+      ...(actionOptions.length ? [inputBlock("done_actions", "Actions", checkboxes("val", actionOptions), true)] : []),
       // inputBlock's 4th arg is Slack's own `optional` flag -- this was
       // hardcoded false (required) since the very first version of this
       // modal despite the label and placeholder both saying "Optional,"
