@@ -605,9 +605,10 @@ const QUICK_ACTIONS = {
   // Manager-only, on demand only (never automatic -- this is a paid AI call
   // and the one place in the app that ever reads the private Message
   // conversation -- see the governance note on historyModal, lib/slack-
-  // views.js). No-ops quietly if there's nothing to summarize yet or the
-  // AI call fails, same "fail soft, log it" pattern as the rest of this
-  // file -- the modal just won't have changed, and the error is in the logs.
+  // views.js). Used to no-op silently when there was nothing to summarize
+  // or the AI call failed -- same class of bug as the original "Message"
+  // button (fire-and-forget, no feedback). ctx._summaryNotice surfaces the
+  // reason instead; refreshList runs after this, so summaryBlocks picks it up.
   summary_generate: {
     run: async (admin, ctx) => {
       if (!ctx.isMgr) return;
@@ -617,8 +618,18 @@ const QUICK_ACTIONS = {
         .filter((m) => !m.bot_id && m.text?.trim())
         .reverse()
         .map((m) => ({ author: m.user === ctx.slackUserId ? ctx.myName : ctx.partnerName, text: m.text }));
-      if (!messages.length) return;
-      const summary = await summarizeConversation(messages);
+      if (!messages.length) {
+        ctx._summaryNotice = `No messages found yet in your conversation with ${ctx.partnerName} -- send one with the Message button first, then try again.`;
+        return;
+      }
+      let summary;
+      try {
+        summary = await summarizeConversation(messages);
+      } catch (e) {
+        console.error("summary_generate:", e);
+        ctx._summaryNotice = "Couldn't generate a summary just now -- try again in a moment.";
+        return;
+      }
       const generatedAt = new Date().toISOString();
       await updatePair(admin, ctx.pairId, { conversation_summary: summary, conversation_summary_generated_at: generatedAt, conversation_summary_edited_at: null });
       ctx.pair.conversation_summary = summary;

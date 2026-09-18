@@ -1045,7 +1045,11 @@ function summaryBlocks(ctx) {
   const { conversation_summary: summary, conversation_summary_generated_at: generatedAt, conversation_summary_edited_at: editedAt } = ctx.pair;
   if (!summary) {
     return [
-      section(`*AI summary of your conversation with ${ctx.partnerName}*\nNothing generated yet.`),
+      section(
+        `*AI summary of your conversation with ${ctx.partnerName}*\n${
+          ctx._summaryNotice || "Nothing generated yet."
+        }`
+      ),
       actions([button("Summarize conversation", "summary_generate")]),
     ];
   }
