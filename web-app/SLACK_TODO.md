@@ -5340,3 +5340,45 @@ so it survives a fresh session.
 - `SLACK_CLIENT_ID`/`SLACK_CLIENT_SECRET` work explicitly moved to
   **2026-09-18** ("We'll do it tomorrow") — see the "Still blocking" list
   above, unchanged otherwise.
+
+## 2026-09-18 — Client ID/Secret set, Public Distribution activated, self-serve install gap closed
+
+Local commits `618b4b4`/`8273dca` pushed to GitHub (`performance-pulse`
+remote, not `origin`) by Melissa. `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET`
+were already present as empty/wrong placeholder rows in Vercel production
+(added 23h earlier, not "not set" as this doc previously said) —
+`SLACK_CLIENT_ID` was empty, filled with the real value from Slack's Basic
+Information page; `SLACK_CLIENT_SECRET` held a leftover value with a
+`sk_live_...` prefix (wrong format for a Slack secret, likely pasted from a
+different service at some point) and was overwritten with the real value.
+Redeployed. Slack app's "Public Distribution" activated (the 4th checklist
+item, "Remove Hard Coded Information," needed a manual attestation
+checkbox — verified clean first by grepping the whole repo for
+`xoxb-`/`xoxp-`/`hooks.slack.com/services`, found none, then checked it).
+
+**Gap #5 from the 2026-09-17 entry above (the real blocker, not a dashboard
+setting) is now fixed, and turned out smaller than that entry assumed.**
+`/api/slack/install` gated on `requireHr()`, which meant only someone
+already signed into the website with an HR profile could even reach
+Slack's OAuth consent screen — permanently locking out any brand-new
+company's first tester, who by definition has no such account. The fix
+was not "build an HR signup flow" (what the 2026-09-17 entry proposed
+investigating) — it was realizing `requireHr()` was the wrong gate
+entirely: Slack's own OAuth consent screen already is the real
+authorization boundary (only someone with permission to install apps in a
+given workspace can complete it for that workspace), and the callback
+(`saveSlackInstallation`) already self-serves a new `companies` row for a
+never-seen `team_id` regardless of who started the flow. Removed
+`requireHr()` from `app/api/slack/install/route.js` entirely, and added a
+new **public** page, `app/install/page.js` (outside the `(dashboard)`
+route group, so no sign-in or existing pairing required) — a plain "Add to
+Slack" button. This is the link to actually send a cold outside tester:
+`https://performance-pulse-lyart.vercel.app/install`. After that click,
+the existing self-serve chain (`saveSlackInstallation` → company row →
+`firstSetupHomeView`/`createFirstPairForSlack`) takes over entirely inside
+Slack, matching "must run from Slack."
+
+Verified: `npx eslint` clean on both changed/new files; `git diff` reviewed
+(only the intended lines changed). **Not yet verified**: an actual live
+end-to-end install by someone outside Melissa's own Slack workspace — that
+still hasn't been run even once, on this or any prior session.
