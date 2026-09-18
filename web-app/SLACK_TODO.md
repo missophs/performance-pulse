@@ -5397,3 +5397,43 @@ matter here: a plain dashboard "Redeploy" and `vercel --prod --force` from
 the repo root (confirmed via build log: `Skipping build cache, deployment
 was triggered without cache` — so this was never a stale-cache issue,
 `proxy.js` was simply missing `/install` from day one).
+
+## 2026-09-18, later session — `lib/slack-views.js` rebuilt on `slack-block-builder`
+
+Melissa's direct instruction: rebuild the Slack app's UI code with the
+`slack-block-builder` npm library instead of the hand-rolled Block Kit
+object literals it used before. Every block/element in the file (Home tab,
+every modal, every list view) now goes through `Surfaces`/`Blocks`/
+`Elements`/`Bits` from that library; only the top-level surface builders
+(`modal()`/`plainModal()`/`homeTab()`) call `.buildToObject()` to turn the
+tree into the plain JSON Slack's API wants. This is a construction-syntax
+change only — every platform quirk already documented in this file (the
+`_v2` block_id staleness workaround, "a select inside an input block never
+fires block_actions," Slack's 24-char title/submit caps, the 75-char option
+cap, etc.) still applies exactly as before and is handled the same way; the
+library has no idea any of that exists.
+
+Also fixed in passing (found by the library's own type constraints, not a
+separate bug hunt): `plainInput`'s `initial`/`placeholder` are now correctly
+gated on truthiness again — an early draft of the conversion set
+`initial_value: ""` explicitly instead of omitting the key the way the old
+code's `...(opts.initial ? {...} : {})` did, caught by a scripted diff
+against the pre-conversion output before this ever reached production.
+
+**Verified, not just committed:** `npm test` 27/27 (unchanged pass count),
+`npx eslint lib/slack-views.js` clean, `npm run build` succeeds. Wrote a
+throwaway script (not committed) that imports the pre-conversion version of
+this file from git and the new version side by side, calls every exported
+modal/view function with realistic sample data (~48 cases), and deep-compares
+the JSON each one produces. 45/48 are byte-identical; the other 3 are one
+single, understood, and accepted library limitation: `Elements.Checkboxes()`
+and `Elements.RadioButtons()` always render their option text as `mrkdwn`
+(Slack does support that for those two element types), where the old code
+always used `plain_text` — cosmetically irrelevant here since no
+topic/goal/action title in this app relies on literal, un-rendered
+markdown characters. Also: button/header text no longer carries an explicit
+`emoji: true` (the library's plain-text setter has no such option) — checked
+every button/header label in the file for `:shortcode:` emoji, found none,
+so this has zero visible effect. Not verified: an actual live click-through
+in Slack — nobody has opened the Home tab or a modal against this exact
+commit yet.
