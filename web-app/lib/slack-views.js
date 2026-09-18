@@ -566,7 +566,7 @@ export function editActionModal(ctx, action) {
   );
 }
 
-export function listActionsModal(list) {
+export function listActionsModal(list, notice) {
   const open = list.filter((a) => a.status !== "Done");
   const blocks = open.length
     ? open.flatMap((a) => [
@@ -574,7 +574,7 @@ export function listActionsModal(list) {
         actions([button("Mark done", "action_mark_done", a.id, "primary"), button("Edit", "action_edit", a.id), button("Delete", "action_delete", a.id, "danger")]),
       ])
     : [section("No open actions. Add one from the Home tab.")];
-  return modal("view_actions", "Open actions", blocks, "Close");
+  return modal("view_actions", "Open actions", notice ? [section(`✅ ${notice}`), divider(), ...blocks] : blocks, "Close");
 }
 
 // -------------------------------------------------------------- concerns ---
@@ -1034,27 +1034,24 @@ function meetingBlocks(m) {
 
 // Manager-only (Melissa's call, 2026-09-18): "the manager is the only one
 // that sees the history" -- both this AI summary and the wrapped-up-1:1
-// list below it. The one place in the whole app that reads the private
-// Message conversation, and the one place that ever calls AI (see
-// lib/ai-summary.js) -- reverses the 2026-09-17 "never read this
-// conversation" decision on purpose, for this feature only. Generated on
-// demand only (never automatic -- costs a real API call), always labeled
-// as AI-generated, and editable by the manager before it's final --
-// matches the governance rule in web-app/CLAUDE.md.
+// list below it. The one place in the whole app that ever calls AI (see
+// lib/ai-summary.js) -- summarizes the topics/goals/actions/past-notes
+// already logged for this pair, not the private Message conversation
+// (revised same day once Melissa confirmed the source; the DM read this
+// originally used is gone). Generated on demand only (never automatic --
+// costs a real API call), always labeled as AI-generated, and editable by
+// the manager before it's final -- matches the governance rule in
+// web-app/CLAUDE.md.
 function summaryBlocks(ctx) {
   const { conversation_summary: summary, conversation_summary_generated_at: generatedAt, conversation_summary_edited_at: editedAt } = ctx.pair;
   if (!summary) {
     return [
-      section(
-        `*AI summary of your conversation with ${ctx.partnerName}*\n${
-          ctx._summaryNotice || "Nothing generated yet."
-        }`
-      ),
-      actions([button("Summarize conversation", "summary_generate")]),
+      section(`*AI summary of your 1:1 history with ${ctx.partnerName}*\n${ctx._summaryNotice || "Nothing generated yet."}`),
+      actions([button("Summarize", "summary_generate")]),
     ];
   }
   return [
-    section(`*AI summary of this conversation — reviewed by ${ctx.myName}*\n${summary}`),
+    section(`*AI summary of your 1:1 history — reviewed by ${ctx.myName}*\n${summary}`),
     context(`Generated ${ago(generatedAt)}${editedAt ? ` · edited ${ago(editedAt)}` : ""}`),
     actions([button("Refresh", "summary_generate"), button("Edit", "summary_edit")]),
   ];

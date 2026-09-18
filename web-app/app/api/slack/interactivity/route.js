@@ -101,7 +101,7 @@ import {
   clearFormDraft,
 } from "@/lib/data";
 import { dmByEmail, openPairConversation } from "@/lib/slack-send";
-import { summarizeConversation } from "@/lib/ai-summary";
+import { summarizeOneOnOne, buildOneOnOneTranscript } from "@/lib/ai-summary";
 
 // Slack's interactivity endpoint is one request/response — there's no
 // browser tab to hold state in like the website's topic-add batching. This
@@ -507,8 +507,13 @@ const QUICK_ACTIONS = {
       if (!task) return;
       await toggleActionDone(admin, id, true, fromSlack(ctx));
       await notify(admin, ctx.pairId, `${ctx.myName} marked an action done`, ctx.role, ctx.otherRole, "actions");
+      // Done items drop off this list entirely (see listActionsModal) --
+      // that's real feedback, but not one everyone reads as "it worked" on
+      // its own, so a plain-text notice backs it up instead of relying on
+      // a button color anyone might miss.
+      ctx._actionNotice = `Marked "${task.text}" as done.`;
     },
-    refreshList: (data) => listActionsModal(data.actions),
+    refreshList: (data, ctx) => listActionsModal(data.actions, ctx._actionNotice),
   },
   // Open to both partners, matching the website (no creator gate on Remove
   // for any kind).
@@ -602,29 +607,25 @@ const QUICK_ACTIONS = {
     },
     refreshList: (data) => listMessagesModal(data.messages),
   },
-  // Manager-only, on demand only (never automatic -- this is a paid AI call
-  // and the one place in the app that ever reads the private Message
-  // conversation -- see the governance note on historyModal, lib/slack-
-  // views.js). Used to no-op silently when there was nothing to summarize
-  // or the AI call failed -- same class of bug as the original "Message"
-  // button (fire-and-forget, no feedback). ctx._summaryNotice surfaces the
-  // reason instead; refreshList runs after this, so summaryBlocks picks it up.
+  // Manager-only, on demand only (never automatic -- this is a paid AI
+  // call). Summarizes the structured 1:1 data already in the app -- topics,
+  // goals, actions, past wrap-up notes -- NOT the private Slack DM (Melissa's
+  // call, 2026-09-18, revised same day: the DM read this originally used,
+  // and the mpim:history scope it needed, are no longer used by this
+  // handler). ctx._summaryNotice surfaces a real reason instead of a silent
+  // no-op; refreshList runs after this, so summaryBlocks picks it up.
   summary_generate: {
     run: async (admin, ctx) => {
       if (!ctx.isMgr) return;
-      const channelId = await openPairConversation(ctx.pair.employee_email, ctx.slackUserId, ctx.companyId);
-      const history = await slackApi("conversations.history", { channel: channelId, limit: 200 }, { companyId: ctx.companyId });
-      const messages = (history.messages || [])
-        .filter((m) => !m.bot_id && m.text?.trim())
-        .reverse()
-        .map((m) => ({ author: m.user === ctx.slackUserId ? ctx.myName : ctx.partnerName, text: m.text }));
-      if (!messages.length) {
-        ctx._summaryNotice = `No messages found yet in your conversation with ${ctx.partnerName} -- send one with the Message button first, then try again.`;
+      const { topics, goals, actions, meetings } = await loadHomeData(admin, ctx.pairId);
+      const transcript = buildOneOnOneTranscript({ topics, goals, actions, meetings });
+      if (!transcript) {
+        ctx._summaryNotice = "Nothing logged yet for this pairing -- add a topic, goal, or action first, then try again.";
         return;
       }
       let summary;
       try {
-        summary = await summarizeConversation(messages);
+        summary = await summarizeOneOnOne({ topics, goals, actions, meetings });
       } catch (e) {
         console.error("summary_generate:", e);
         ctx._summaryNotice = "Couldn't generate a summary just now -- try again in a moment.";

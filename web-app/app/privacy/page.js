@@ -61,8 +61,9 @@ export default function PrivacyPage() {
           anything about your performance. Every topic, goal, action, and
           piece of feedback in this app is typed by you or your manager —
           nothing here is auto-generated or auto-approved. The one exception:
-          a manager can generate an AI summary of their private 1:1
-          conversation with their direct report, on demand. It&apos;s always
+          a manager can generate an AI summary of the topics, goals, actions,
+          and past meeting notes already logged for their 1:1, on demand —
+          it never reads the private Message conversation. It&apos;s always
           labeled as AI-generated, only the manager ever sees it, and the
           manager reviews it — and can edit it if it&apos;s wrong — before
           relying on it for anything. Any change to how this app behaves is
