@@ -503,7 +503,7 @@ const QUICK_ACTIONS = {
       // Was missing this check entirely (SLACK_TODO.md item 0k, found in the
       // 2026-08-29 code-review) — action.value has no server-side ownership
       // check otherwise. See the governance note in CLAUDE.md.
-      const task = await verifyOwnedRow(admin, "actions", "pair_id", id, ctx);
+      const task = await verifyOwnedRow(admin, "actions", "pair_id, text", id, ctx);
       if (!task) return;
       await toggleActionDone(admin, id, true, fromSlack(ctx));
       await notify(admin, ctx.pairId, `${ctx.myName} marked an action done`, ctx.role, ctx.otherRole, "actions");
