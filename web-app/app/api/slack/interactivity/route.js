@@ -45,7 +45,7 @@ import {
   wrapUpModal,
   wrapUpConversationModal,
   addEmployeeModal,
-  lastMeetingModal,
+  historyModal,
   listHandbookLinksModal,
   listMySuggestionsModal,
   addSuggestionModal,
@@ -250,7 +250,7 @@ const OPENERS = {
       return listFeedbackModal(d.feedback, d.feedbackRequests, ctx.role);
     },
   },
-  open_last_meeting: { title: "Last 1:1", build: async (admin, ctx) => lastMeetingModal(await listMeetings(admin, ctx.pairId)) },
+  open_history: { title: "History", build: async (admin, ctx) => historyModal(await listMeetings(admin, ctx.pairId)) },
   // A link added via the old "paste a link" flow already has l.url; one
   // uploaded via the newer HR upload feature (uploadHandbookFile, lib/data.js)
   // only has a storage_path, so the Slack button needs a real (signed) url

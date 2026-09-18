@@ -282,6 +282,8 @@ export function homeView(ctx, d) {
     actions([openInApp("Upload a document", "/dashboard"), button("View documents", "open_list_documents")]),
     section("*Handbook*"),
     actions([button("View handbook", "open_list_handbook")]),
+    section("*History*\nEvery wrapped-up 1:1, right here."),
+    actions([button("View history", "open_history")]),
     divider(),
     // Wording rewritten (Melissa, 2026-09-16): "Clear out" read as deleting
     // the information, which this never does -- it only marks open items
@@ -1001,26 +1003,36 @@ export function listHandbookLinksModal(links) {
 // functions (lib/data.js's listCareerAnswers/saveCareerAnswers), and the
 // career_answers table are all untouched -- easy to bring back if needed.
 
-export function lastMeetingModal(meetings) {
-  const last = meetings[0];
-  const blocks = last
-    ? [
-        section(`*1:1 on ${last.meeting_date}*`),
-        ...(last.discussed ? [section(`*Discussed:*\n${last.discussed}`)] : []),
-        ...(last.agreed ? [section(`*Agreed:*\n${last.agreed}`)] : []),
-        ...(last.revisit ? [section(`*Revisit next time:*\n${last.revisit}`)] : []),
-        ...(last.start_line || last.stop_line || last.keep_line
-          ? [
-              section(
-                [last.start_line && `*Start:* ${last.start_line}`, last.stop_line && `*Stop:* ${last.stop_line}`, last.keep_line && `*Keep:* ${last.keep_line}`]
-                  .filter(Boolean)
-                  .join("\n")
-              ),
-            ]
-          : []),
-      ]
+// Real in-Slack history -- replaces the old "Open History in the app"
+// website link (Melissa's call, 2026-09-18: this is a Slack plugin, nothing
+// should route out to the website). Every wrapped-up 1:1, most recent
+// first, capped at 10 for the same reason wrapUpConversationModal's
+// checkboxes are -- ponytail: page or raise the cap if a real pair's
+// history ever gets that long.
+function meetingBlocks(m) {
+  return [
+    section(`*1:1 on ${m.meeting_date}*`),
+    ...(m.discussed ? [section(`*Discussed:*\n${m.discussed}`)] : []),
+    ...(m.agreed ? [section(`*Agreed:*\n${m.agreed}`)] : []),
+    ...(m.revisit ? [section(`*Revisit next time:*\n${m.revisit}`)] : []),
+    ...(m.start_line || m.stop_line || m.keep_line
+      ? [
+          section(
+            [m.start_line && `*Start:* ${m.start_line}`, m.stop_line && `*Stop:* ${m.stop_line}`, m.keep_line && `*Keep:* ${m.keep_line}`]
+              .filter(Boolean)
+              .join("\n")
+          ),
+        ]
+      : []),
+  ];
+}
+
+export function historyModal(meetings) {
+  const recent = meetings.slice(0, 10);
+  const blocks = recent.length
+    ? recent.flatMap((m, i) => [...meetingBlocks(m), ...(i < recent.length - 1 ? [divider()] : [])])
     : [section("No 1:1s wrapped up yet.")];
-  return modal("view_last_meeting", "Last 1:1 summary", blocks, "Close");
+  return modal("view_history", "History", blocks, "Close");
 }
 
 // ------------------------------------------------------------- wrap up -----
