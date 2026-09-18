@@ -60,10 +60,14 @@ export default function PrivacyPage() {
           Performance Pulse doesn&apos;t use AI to write, score, or decide
           anything about your performance. Every topic, goal, action, and
           piece of feedback in this app is typed by you or your manager —
-          nothing here is auto-generated or auto-approved. Any change to how
-          this app behaves is reviewed and approved by a person before it
-          ships, not shipped automatically. If that ever changes, this page
-          will say so.
+          nothing here is auto-generated or auto-approved. The one exception:
+          a manager can generate an AI summary of their private 1:1
+          conversation with their direct report, on demand. It&apos;s always
+          labeled as AI-generated, only the manager ever sees it, and the
+          manager reviews it — and can edit it if it&apos;s wrong — before
+          relying on it for anything. Any change to how this app behaves is
+          reviewed and approved by a person before it ships, not shipped
+          automatically. If that ever changes, this page will say so.
         </p>
 
         <h3 style={{ marginTop: 20 }}>What we don&apos;t do</h3>

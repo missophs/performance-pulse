@@ -2,10 +2,10 @@
 // route (rendering it) and the interactivity route (re-rendering it after a
 // mutation), so both stay in sync with the same shape.
 
-import { listTopics, listActions, listGoals, listDevelopmentPlans, listAchievements, listFeedback, listFeedbackRequests, listDocuments, listCustomSuggestions, listMessages, listConcerns } from "@/lib/data";
+import { listTopics, listActions, listGoals, listDevelopmentPlans, listAchievements, listFeedback, listFeedbackRequests, listDocuments, listCustomSuggestions, listMessages, listConcerns, listMeetings } from "@/lib/data";
 
 export async function loadHomeData(supabaseAdmin, pairId) {
-  const [topics, actionsList, goals, devPlans, achievements, feedback, feedbackRequests, documents, customSuggestions, messages, concerns] = await Promise.all([
+  const [topics, actionsList, goals, devPlans, achievements, feedback, feedbackRequests, documents, customSuggestions, messages, concerns, meetings] = await Promise.all([
     listTopics(supabaseAdmin, pairId),
     listActions(supabaseAdmin, pairId),
     listGoals(supabaseAdmin, pairId),
@@ -21,6 +21,7 @@ export async function loadHomeData(supabaseAdmin, pairId) {
     // including unshared drafts -- callers building an employee-facing view
     // MUST filter to shared_at != null themselves. See listConcernsModal.
     listConcerns(supabaseAdmin, pairId),
+    listMeetings(supabaseAdmin, pairId),
   ]);
-  return { topics, actions: actionsList, goals, devPlans, achievements, feedback, feedbackRequests, documents, customSuggestions, messages, concerns };
+  return { topics, actions: actionsList, goals, devPlans, achievements, feedback, feedbackRequests, documents, customSuggestions, messages, concerns, meetings };
 }

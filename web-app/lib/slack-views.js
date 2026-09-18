@@ -282,8 +282,13 @@ export function homeView(ctx, d) {
     actions([openInApp("Upload a document", "/dashboard"), button("View documents", "open_list_documents")]),
     section("*Handbook*"),
     actions([button("View handbook", "open_list_handbook")]),
-    section("*History*\nEvery wrapped-up 1:1, right here."),
-    actions([button("View history", "open_history")]),
+    // Manager-only (Melissa's call, 2026-09-18): "the manager is the only
+    // one that sees the history" -- History now also carries the AI
+    // conversation summary (see historyModal), which is manager-reviewed
+    // content, not something to expose to the employee side of the pair.
+    ...(ctx.isMgr
+      ? [section("*History*\nEvery wrapped-up 1:1, right here."), actions([button("View history", "open_history")])]
+      : []),
     divider(),
     // Wording rewritten (Melissa, 2026-09-16): "Clear out" read as deleting
     // the information, which this never does -- it only marks open items
@@ -298,10 +303,10 @@ export function homeView(ctx, d) {
     // prohibits "AI mak[ing] consequential decisions without human review"
     // and names an HR agent auto-approving/denying requests as exactly what
     // not to build (see web-app/CLAUDE.md's governance rule for the source).
-    // This app has no runtime AI at all today -- every entry is typed by a
-    // person -- so this is a forward commitment as much as a current fact;
-    // keep it true if that ever changes.
-    context(":shield: No AI writes, scores, or decides anything about your performance here — every entry is from you or your manager, and a human reviews and approves how this app works before it changes."),
+    // Updated 2026-09-18 for the one real exception: the manager-only AI
+    // conversation summary (see historyModal) -- always labeled, always
+    // manager-reviewed/editable before it's final, never automatic.
+    context(":shield: No AI writes, scores, or decides anything about your performance here — every entry is from you or your manager. The one exception: a manager can generate an AI summary of your private conversation, always labeled as such and reviewed/editable by them before it's final. A human reviews and approves how this app works before it changes."),
   ];
   return homeTab(blocks);
 }
@@ -1027,12 +1032,46 @@ function meetingBlocks(m) {
   ];
 }
 
-export function historyModal(meetings) {
+// Manager-only (Melissa's call, 2026-09-18): "the manager is the only one
+// that sees the history" -- both this AI summary and the wrapped-up-1:1
+// list below it. The one place in the whole app that reads the private
+// Message conversation, and the one place that ever calls AI (see
+// lib/ai-summary.js) -- reverses the 2026-09-17 "never read this
+// conversation" decision on purpose, for this feature only. Generated on
+// demand only (never automatic -- costs a real API call), always labeled
+// as AI-generated, and editable by the manager before it's final --
+// matches the governance rule in web-app/CLAUDE.md.
+function summaryBlocks(ctx) {
+  const { conversation_summary: summary, conversation_summary_generated_at: generatedAt, conversation_summary_edited_at: editedAt } = ctx.pair;
+  if (!summary) {
+    return [
+      section(`*AI summary of your conversation with ${ctx.partnerName}*\nNothing generated yet.`),
+      actions([button("Summarize conversation", "summary_generate")]),
+    ];
+  }
+  return [
+    section(`*AI summary of this conversation — reviewed by ${ctx.myName}*\n${summary}`),
+    context(`Generated ${ago(generatedAt)}${editedAt ? ` · edited ${ago(editedAt)}` : ""}`),
+    actions([button("Refresh", "summary_generate"), button("Edit", "summary_edit")]),
+  ];
+}
+
+export function historyModal(meetings, ctx) {
   const recent = meetings.slice(0, 10);
-  const blocks = recent.length
+  const meetingList = recent.length
     ? recent.flatMap((m, i) => [...meetingBlocks(m), ...(i < recent.length - 1 ? [divider()] : [])])
     : [section("No 1:1s wrapped up yet.")];
+  const blocks = ctx.isMgr ? [...summaryBlocks(ctx), divider(), ...meetingList] : meetingList;
   return modal("view_history", "History", blocks, "Close");
+}
+
+export function editSummaryModal(currentText) {
+  return modal(
+    "edit_summary",
+    "Edit summary",
+    [inputBlock("summary", "AI summary", plainInput("val", { multiline: true, initial: currentText }))],
+    "Save changes"
+  );
 }
 
 // ------------------------------------------------------------- wrap up -----

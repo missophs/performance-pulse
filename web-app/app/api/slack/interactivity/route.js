@@ -46,6 +46,7 @@ import {
   wrapUpConversationModal,
   addEmployeeModal,
   historyModal,
+  editSummaryModal,
   listHandbookLinksModal,
   listMySuggestionsModal,
   addSuggestionModal,
@@ -100,6 +101,7 @@ import {
   clearFormDraft,
 } from "@/lib/data";
 import { dmByEmail, openPairConversation } from "@/lib/slack-send";
+import { summarizeConversation } from "@/lib/ai-summary";
 
 // Slack's interactivity endpoint is one request/response — there's no
 // browser tab to hold state in like the website's topic-add batching. This
@@ -250,7 +252,14 @@ const OPENERS = {
       return listFeedbackModal(d.feedback, d.feedbackRequests, ctx.role);
     },
   },
-  open_history: { title: "History", build: async (admin, ctx) => historyModal(await listMeetings(admin, ctx.pairId)) },
+  // Manager-only -- re-checked here same as every other role-gated opener,
+  // even though the button is already hidden from the employee's Home tab
+  // (see homeView). historyModal also carries the AI conversation summary,
+  // manager-reviewed content the employee side has no business seeing.
+  open_history: {
+    title: "History",
+    build: async (admin, ctx) => (ctx.isMgr ? historyModal(await listMeetings(admin, ctx.pairId), ctx) : noticeModal("History", "This is manager-only.")),
+  },
   // A link added via the old "paste a link" flow already has l.url; one
   // uploaded via the newer HR upload feature (uploadHandbookFile, lib/data.js)
   // only has a storage_path, so the Slack button needs a real (signed) url
@@ -391,6 +400,13 @@ const PUSH_ACTIONS = {
       const entry = await verifyOwnedRow(admin, "feedback_entries", "id, pair_id, type, text, example, response", value, ctx);
       return entry ? respondFeedbackModal(entry) : null;
     },
+  },
+  // Manager-only, same reasoning as historyModal/summary_generate above --
+  // this is the human-review step the governance rule in CLAUDE.md requires
+  // before AI-generated content counts as final.
+  summary_edit: {
+    title: "Edit summary",
+    build: async (admin, ctx) => (ctx.isMgr ? editSummaryModal(ctx.pair.conversation_summary || "") : null),
   },
 };
 
@@ -585,6 +601,31 @@ const QUICK_ACTIONS = {
       await deleteMessage(admin, id);
     },
     refreshList: (data) => listMessagesModal(data.messages),
+  },
+  // Manager-only, on demand only (never automatic -- this is a paid AI call
+  // and the one place in the app that ever reads the private Message
+  // conversation -- see the governance note on historyModal, lib/slack-
+  // views.js). No-ops quietly if there's nothing to summarize yet or the
+  // AI call fails, same "fail soft, log it" pattern as the rest of this
+  // file -- the modal just won't have changed, and the error is in the logs.
+  summary_generate: {
+    run: async (admin, ctx) => {
+      if (!ctx.isMgr) return;
+      const channelId = await openPairConversation(ctx.pair.employee_email, ctx.slackUserId, ctx.companyId);
+      const history = await slackApi("conversations.history", { channel: channelId, limit: 200 }, { companyId: ctx.companyId });
+      const messages = (history.messages || [])
+        .filter((m) => !m.bot_id && m.text?.trim())
+        .reverse()
+        .map((m) => ({ author: m.user === ctx.slackUserId ? ctx.myName : ctx.partnerName, text: m.text }));
+      if (!messages.length) return;
+      const summary = await summarizeConversation(messages);
+      const generatedAt = new Date().toISOString();
+      await updatePair(admin, ctx.pairId, { conversation_summary: summary, conversation_summary_generated_at: generatedAt, conversation_summary_edited_at: null });
+      ctx.pair.conversation_summary = summary;
+      ctx.pair.conversation_summary_generated_at = generatedAt;
+      ctx.pair.conversation_summary_edited_at = null;
+    },
+    refreshList: (data, ctx) => historyModal(data.meetings, ctx),
   },
   // Mirrors addFromSuggestion (page.js): creates a plain unsubmitted topic,
   // no ping until Submit — same as adding one by hand. role, not just
@@ -1125,6 +1166,23 @@ const SUBMISSIONS = {
       if (pairCtx === ctx) ctx.pair.next_1on1_date = next; // so the Home-tab refresh right after this shows the new date (same as edit_name) — only meaningful when the wrap-up's pair is still the active one
     }
     await notify(admin, pairCtx.pairId, `1:1 summary saved by ${pairCtx.myName}`, pairCtx.role, pairCtx.otherRole, "oneOnOne", "wrap");
+  },
+  // The human-review step the AI-content governance rule in CLAUDE.md
+  // requires -- re-checks ctx.isMgr independently of summary_edit's own
+  // gate, same reasoning as every other manager-only submission here.
+  edit_summary: async (admin, ctx, v, view) => {
+    if (!ctx.isMgr) return;
+    const summary = (fieldVal(v, "summary") || "").trim();
+    const editedAt = new Date().toISOString();
+    await updatePair(admin, ctx.pairId, { conversation_summary: summary, conversation_summary_edited_at: editedAt });
+    ctx.pair.conversation_summary = summary;
+    ctx.pair.conversation_summary_edited_at = editedAt;
+    if (view.previous_view_id) {
+      const data = await loadHomeData(admin, ctx.pairId);
+      await slackApi("views.update", { view_id: view.previous_view_id, view: historyModal(data.meetings, ctx) }, { companyId: ctx.companyId }).catch((e) =>
+        console.error("edit summary list refresh:", e)
+      );
+    }
   },
 };
 
