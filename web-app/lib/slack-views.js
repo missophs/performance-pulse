@@ -242,7 +242,7 @@ export function homeView(ctx, d) {
     ...(ctx.isMgr
       ? [
           section(`*Concerns* — ${d.concerns.length} logged${d.concerns.filter((c) => !c.shared_at).length ? `, ${d.concerns.filter((c) => !c.shared_at).length} not yet shared` : ""}`),
-          actions([button("Note a concern", "open_add_concern"), button("View concerns", "open_list_concerns")]),
+          actions([button("Note a concern", "open_add_concern", "", usedStyle(d.concerns.length)), button("View concerns", "open_list_concerns")]),
         ]
       : d.concerns.filter((c) => c.shared_at).length
         ? [
@@ -282,8 +282,6 @@ export function homeView(ctx, d) {
     actions([openInApp("Upload a document", "/dashboard"), button("View documents", "open_list_documents")]),
     section("*Handbook*"),
     actions([button("View handbook", "open_list_handbook")]),
-    section("*History*\nEverything past — meetings, goals, feedback, all of it — lives in the app."),
-    actions([openInApp("Open History in the app", "/history")]),
     divider(),
     // Wording rewritten (Melissa, 2026-09-16): "Clear out" read as deleting
     // the information, which this never does -- it only marks open items
