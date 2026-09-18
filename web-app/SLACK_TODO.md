@@ -5562,3 +5562,81 @@ summarize — that verification needs new real data logged first. The
 removed. Add a note to `schema.sql` or somewhere similarly visible that its
 table list can drift from the real migrated schema (handbook_links being
 the concrete example found this session) — not done yet, just noticed.
+
+## 2026-09-18, overnight -- Respond on development plans, and per-event Slack DMs replaced with one daily digest
+
+**MELISSA: READ THIS FIRST TOMORROW MORNING. Two migrations and one new
+Vercel env var need to be applied before what's below actually works.**
+
+1. Run `supabase/migrations/0035_devplan_response.sql` in the Supabase SQL
+   editor (adds `response`/`responded_at` to `development_plans`) -- if not
+   already run.
+2. Run `supabase/migrations/0036_notification_digest_tracking.sql` (adds
+   `digested_at` to `notifications`).
+3. In Vercel: Project → Settings → Environment Variables → add `CRON_SECRET`
+   set to any random string (e.g. generate one with `openssl rand -hex 32`
+   in a terminal). Vercel Cron automatically sends this as
+   `Authorization: Bearer <value>` to any cron-triggered route once the var
+   exists -- that's the official Vercel pattern, not something invented here.
+4. Trigger a redeploy after adding the env var (Vercel → Deployments → the
+   latest one → "Redeploy") -- env vars only take effect on deploys made
+   after they're added.
+5. Confirm the cron registered: Vercel → your project → Settings → Cron Jobs
+   should show `/api/slack/notify/digest` scheduled at `0 13 * * *` (13:00
+   UTC daily -- adjust the schedule in `vercel.json` if that's not a good
+   time; Hobby plan allows one run per day for this job).
+
+**What shipped, both verified where it's possible to verify without her
+present:**
+
+- **Respond on development plans** (commit `019a22b`): mirrors the existing
+  Feedback/Concerns respond flow exactly -- employee-only "Respond"/"Edit
+  your response" button, manager still gets Delete, response text shows on
+  the plan. Melissa's explicit, repeated instruction: "everyone needs to be
+  able to respond." Goals and achievements still have no equivalent -- goals
+  has Edit (open to both) but nothing that reads as "respond"; achievements
+  are still fully view-only. Not done tonight; flagged in the handoff doc.
+
+- **One daily combined Slack DM instead of a separate DM per event**
+  (commit `4f00ff7`), replacing per-event notifications entirely for every
+  kind except `"request"` (a feedback request someone's waiting on an
+  answer to -- that still sends immediately, unchanged, on purpose). Traced
+  the root cause first: `lib/slack-send.js`'s `sendSlackDigest` /
+  `app/api/slack/notify/route.js`'s burst logic already combined
+  notifications landing within 5 seconds of each other -- that's why rapid
+  clicks got one message but a dev plan added now and feedback given ten
+  minutes later got two. Considered and rejected widening that 5-second
+  window: this deployment is confirmed on Vercel's **Hobby plan** (see this
+  file's own 2026-xx entry on cron being capped to once a day there), whose
+  serverless functions have a hard 10-second execution ceiling -- the old
+  code was already sleeping 6.5s of that budget per batchable insert, so
+  pushing the window wider risked the function getting killed mid-send and
+  silently dropping notifications, a worse bug than the one being fixed.
+  Replaced the whole mechanism instead: `notifications.digested_at`
+  (migration 0036) tracks what's already gone out; the insert webhook no
+  longer sends anything for batchable kinds (removed the sleep/burst code
+  entirely, which also removes that timeout risk for good); a new
+  once-a-day Vercel Cron job (`app/api/slack/notify/digest/route.js`)
+  collects everything still undigested per pair+role and sends ONE DM,
+  reusing the existing `sendSlackDigest`/`buildDigestBlockKit` untouched
+  (its own single-item fallback to `sendSlackPing` still applies, so a
+  quiet day with exactly one thing still reads as a normal single message,
+  not an oddly-formatted digest of one). Added one line to the digest
+  payload pointing at the Home tab, since "with one link into the app" was
+  part of the ask and the multi-kind digest didn't point anywhere before.
+
+  **Verified**: `npm test` 27/27, `npx eslint` clean on every changed file,
+  `npm run build` succeeds (new route shows in the build's route list). A
+  throwaway dry-run script (not committed) fed synthetic multi-pair,
+  mixed-kind notification rows through the exact grouping logic the cron
+  route uses and through `buildDigestBlockKit`/`buildBlockKit` directly,
+  confirming: rows group correctly by `pair_id:to_role`, the multi-kind
+  digest text and Home-tab line render correctly, and the single-kind
+  fallback path still works. **Not verified**: an actual end-to-end cron
+  run against real Slack -- that needs `CRON_SECRET` to exist in Vercel
+  first (step 3 above), which wasn't something to do unattended overnight.
+
+- Both features are additive/reversible at the code level: `git revert
+  4f00ff7` restores the old per-event real-time DMs exactly, and `git
+  revert 019a22b` removes the dev-plan Respond button, if either turns out
+  to be the wrong call once seen live.
