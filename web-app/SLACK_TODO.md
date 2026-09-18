@@ -5437,3 +5437,128 @@ every button/header label in the file for `:shortcode:` emoji, found none,
 so this has zero visible effect. Not verified: an actual live click-through
 in Slack — nobody has opened the Home tab or a modal against this exact
 commit yet.
+
+## 2026-09-18, later session still — AI summary pivoted off the Slack DM, mark-done notice fixed, follow-up code-review pass, live pair reset
+
+Melissa's explicit instruction, given after the DM-based summary (added
+earlier the same day, see the entry above this) came back saying "no
+messages found" in her real test: **the AI summary must read the
+structured 1:1 data already in the app — topics, goals, actions, past
+wrap-up notes — not the private Slack DM.** Her words: "I could send him a
+DM. I don't care about that. But I wanna do performance pulse. I want a
+summary of that conversation" — confirmed via AskUserQuestion that "the
+structured 1:1 data in the app" is the intended source.
+
+Rebuilt accordingly: `lib/ai-summary.js`'s `summarizeConversation(messages)`
+became `summarizeOneOnOne(data)` + a new `buildOneOnOneTranscript({topics,
+goals, actions, meetings})`; `summary_generate` in
+`app/api/slack/interactivity/route.js` now calls `loadHomeData` instead of
+`conversations.history`/`openPairConversation`. The `mpim:history` Slack
+scope (added and granted specifically for the original DM-reading design)
+is no longer used by this feature — left granted, harmless, not removed.
+`app/privacy/page.js`'s governance paragraph updated in the same change
+("it never reads the private Message conversation"), per this file's own
+standing rule about keeping that page accurate. Commit `968f70e`.
+
+**Separately, "Mark done" reported as "doesn't turn green."** Verified at
+the code level the button's `style: "primary"` was correct and unrelated
+to anything changed this session (confirmed with a direct Node script
+serializing `slack-block-builder`'s `.primary()` output) — never actually
+reproduced live, no screenshot ever obtained. Per Melissa's explicit
+instruction ("if mark done doesn't turn green, we need another
+alternative"), added a color-independent confirmation regardless: marking
+an action done now also shows a plain-text banner at the top of the Open
+Actions list, sourced from `ctx._actionNotice`, set in `action_mark_done`'s
+`run()` and read back by its `refreshList`.
+
+**Follow-up code-review pass (high effort, 8-angle) on the above**, findings
+verified and fixed same session, commit `d165b9b`:
+- The Home tab governance line (`lib/slack-views.js`, the `:shield:` context
+  block) still said the AI summary reads "your private conversation" —
+  stale and now false once the source moved to structured data; brought in
+  line with the already-corrected privacy page.
+- `buildOneOnOneTranscript` silently dropped a meeting's Start/Stop/Keep
+  notes (only used discussed/agreed/revisit) even though `meetingBlocks`
+  renders all six fields — the AI summary was quietly incomplete.
+- `summary_generate` called `loadHomeData` once for the transcript, then
+  the shared `QUICK_ACTIONS` dispatcher called it again unconditionally
+  right after — doubling the Supabase load on the one handler already
+  flagged (this file's own `refreshHome` comment) as at risk of missing
+  Slack's 3s ack window. Fixed by stashing the first load on
+  `ctx._homeData` and having the dispatcher reuse it when present.
+- `summarizeOneOnOne` could resolve to `""` without throwing (a response
+  with no text-type content block) and `summary_generate` had no check for
+  that — would have silently persisted an empty summary, burned the paid
+  API call, and shown no notice. Now treated the same as a thrown error.
+- Topic status in the transcript used the raw DB value (`"open"`) instead
+  of reusing `topicStatusBadge` (`lib/badges.js`), which already maps it to
+  "Not yet discussed" for display elsewhere — was a third independent copy
+  of that mapping. Now reuses the shared helper.
+- The mark-done notice (`Marked "${task.text}" as done.`) could render with
+  garbled nested quotes if the task text itself contained a `"` — changed
+  to `Marked done: ${task.text}`, matching the existing `Goal removed: ...`/
+  `Development plan removed: ...` style used elsewhere in the same file.
+
+**Verified, not just committed, at every step**: `npm test` 27/27,
+`npx eslint` clean on every changed file, `npm run build` succeeds, a
+direct Node smoke test of `buildOneOnOneTranscript` (sample data + empty
+case), and a live click-through in her real Slack workspace: added a
+throwaway test action, clicked Mark done, confirmed the item left the open
+list and the notice read the real task text (not "undefined" — an earlier,
+narrower version of the mark-done fix this same session had that exact bug,
+caught live before it shipped further, see commit `cd379b1`). Deploys
+confirmed via `gh api repos/missophs/performance-pulse/commits/<sha>/status`
+polling to `success` for all three commits.
+
+**Same-day follow-up: Melissa asked to fully reset her real pairing** ("You
+go in and reset it all. Don't keep any history. I want to go in fresh"),
+after live-testing left real topics/goals/actions/concerns/feedback data on
+her pairing with monty. Scope confirmed via AskUserQuestion: this one
+pairing only, keep the pairing/relationship record itself, clear its
+content. Took **five attempts** to get the identifying `WHERE` clause
+right, each one a real, informative failure caught by the script's own
+`RAISE EXCEPTION` guard (never a silent wrong-row delete):
+1. Guessed `manager_email = 'melissaw212@gmail.com'` AND'd with
+   `employee_email ilike '%montoya%'` — 0 rows. "monte.montoya" turned out
+   to be a display name typed into the app, not any part of an email.
+2. Scoped by company via `slack_installations.team_id` alone — this
+   company has 8 pairs total (other managers/employees), not unique.
+3. Narrowed via `profiles.full_name ilike 'melissa%'` + employee email
+   guess — 3 manager-name matches, 0 employee-email matches; still wrong.
+4. Looked up both real emails directly from each person's Slack profile
+   card (Directories → People → Contact information) instead of guessing:
+   manager `melissaw212@gmail.com` (confirmed independently — it's also the
+   hardcoded HR email in `is_hr()`, migration `0030_companies_multi_tenant.sql`),
+   employee `melissahr212@gmail.com` ("monty" is a second Gmail account she
+   uses to test the employee side). Exact match on both found **2** rows,
+   not 1 — pairings are close/reopenable (`closed_at`, migration
+   `0012_pair_close.sql`), so an old closed pairing between the same two
+   people was still sitting in the table.
+5. Added `and closed_at is null` — exactly 1 match. Deleted from every
+   pair-scoped table (topics, checkins, meetings, achievements,
+   feedback_entries, feedback_requests, goals, development_plans,
+   career_answers, concerns, actions, notifications, activity_log,
+   review_drafts, form_drafts, custom_suggestions, documents, messages) and
+   cleared `pairs.conversation_summary*`/`chat_opened_at`/`next_1on1_*` for
+   that one row — **not** `handbook_links`, which looked pair-scoped in
+   `schema.sql` but had its `pair_id` column dropped years ago
+   (`0013_global_handbook.sql`, made company-wide/HR-only) — schema.sql's
+   table list was stale on that one table; the 6th attempt's first pass hit
+   `column "pair_id" does not exist` on it, rolled back cleanly with zero
+   deletions (Postgres rolls back the whole `DO` block on error), then
+   succeeded once that table was dropped from the script.
+
+Verified live afterward, not just from the query's own success message:
+reloaded the real Slack Home tab — 0 topics, 0 actions, 0 goals, 0 plans, 0
+achievements, Concerns section gone entirely, 0 feedback, 0 messages, 0
+documents, History empty. The pairing itself (manager/employee link) was
+never touched, matching the confirmed scope.
+
+**Not yet done**: no live re-test yet of the follow-up code-review pass's
+specific content fixes (the governance line wording, Start/Stop/Keep in a
+freshly-generated summary) since the pairing now has nothing logged to
+summarize — that verification needs new real data logged first. The
+`mpim:history` scope remains granted and unused; not requested to be
+removed. Add a note to `schema.sql` or somewhere similarly visible that its
+table list can drift from the real migrated schema (handbook_links being
+the concrete example found this session) — not done yet, just noticed.
