@@ -51,7 +51,6 @@ import {
   addEmployeeModal,
   historyModal,
   editSummaryModal,
-  listHandbookLinksModal,
   listMySuggestionsModal,
   addSuggestionModal,
   addMessageModal,
@@ -72,6 +71,7 @@ import {
   listActivity,
   saveGoal,
   deleteGoal,
+  setGoalStatus,
   respondToGoal,
   saveDevelopmentPlan,
   deleteDevelopmentPlan,
@@ -94,8 +94,6 @@ import {
   createPairForSlack,
   notify,
   deleteMeeting,
-  listHandbookLinks,
-  getHandbookFileUrl,
   getDocumentUrl,
   listCustomSuggestions,
   addCustomSuggestion,
@@ -284,18 +282,11 @@ const OPENERS = {
     // achievements so nothing exchanged outside a wrap-up is invisible here).
     build: async (admin, ctx) => historyModal(await loadHomeData(admin, ctx.pairId), ctx),
   },
-  // A link added via the old "paste a link" flow already has l.url; one
-  // uploaded via the newer HR upload feature (uploadHandbookFile, lib/data.js)
-  // only has a storage_path, so the Slack button needs a real (signed) url
-  // resolved before it can render as a link -- see getHandbookFileUrl.
-  open_list_handbook: {
-    title: "Handbook",
-    build: async (admin) => {
-      const links = await listHandbookLinks(admin);
-      const resolved = await Promise.all(links.map(async (l) => ({ ...l, url: await getHandbookFileUrl(admin, l).catch(() => null) })));
-      return listHandbookLinksModal(resolved);
-    },
-  },
+  // open_list_handbook removed 2026-09-19 (Melissa's request: "remove
+  // handbook completely") -- its Home tab button is gone (lib/slack-views.js),
+  // so this had no reachable caller left. The website's own handbook
+  // page/upload flow (app/api/handbook, lib/data.js's
+  // listHandbookLinks/getHandbookFileUrl/uploadHandbookFile) is untouched.
   open_list_documents: {
     title: "Documents",
     build: async (admin, ctx) => {
@@ -617,6 +608,21 @@ const QUICK_ACTIONS = {
       // Matches the website (goals/page.js handleDelete): in-app bell only,
       // no "kind" — deleting a goal doesn't fire a real Slack DM.
       await notify(admin, ctx.pairId, `Goal removed: ${goal.text}`, ctx.role, ctx.otherRole);
+    },
+    refreshList: (data, ctx) => listGoalsModal(data.goals, ctx.isMgr, ctx.role),
+  },
+  // Employee-only, added 2026-09-19 (Melissa's request): since Delete stays
+  // manager-only (see goal_delete above), this is the employee's one-click
+  // way to tell their manager a goal is done. setGoalStatus (lib/data.js) is
+  // a partial update, not saveGoal's full-row upsert, so it can't wipe the
+  // goal's other fields the way a naive "just call saveGoal" version would.
+  goal_complete: {
+    run: async (admin, ctx, id) => {
+      if (ctx.isMgr) return;
+      const goal = await verifyOwnedRow(admin, "goals", "pair_id, text, status", id, ctx);
+      if (!goal || goal.status === "Complete") return;
+      await setGoalStatus(admin, id, "Complete", fromSlack(ctx));
+      await notify(admin, ctx.pairId, `${ctx.myName} marked "${goal.text}" complete`, ctx.role, ctx.otherRole);
     },
     refreshList: (data, ctx) => listGoalsModal(data.goals, ctx.isMgr, ctx.role),
   },

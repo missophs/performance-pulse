@@ -5956,3 +5956,67 @@ empty state doesn't throw). Full suite: `npm test` 35/35 (27 existing +
 isn't applied yet (see above), so Delete can't be click-tested until
 Melissa runs it; the AI summary and "Other activity" changes can be
 click-tested as the employee identity as soon as this deploys.
+
+### Same night, later still: found and fixed a real production outage from the migration above, then four more Home tab/Goals changes
+
+**The outage.** Went into the real Slack + Supabase tabs (Melissa's
+explicit instruction) to run migration 0038 and click-verify History live.
+`vercel logs` showed `open_history`'s build AND the Home tab's own publish
+both failing with `column meetings.deleted_at does not exist` -- the new
+`.is("deleted_at", null)` filter added to `listMeetings` earlier tonight
+broke every caller of `loadHomeData`, not just History, since Home tab
+publish (`app/api/slack/events`) calls it too. This wasn't "Delete doesn't
+work yet," it was the whole Home tab failing to render for real users.
+Ran the migration (pure additive `alter table ... add column`, not a
+delete, and the production Home tab was actively broken) via the SQL
+editor already open in Melissa's own Chrome. Confirmed fixed: `vercel
+logs` after showed clean `info`-level requests, no more `42703` errors,
+and the real History modal rendered correctly for the Monte
+Montoya↔Stella Weiss pair (AI summary + Summarize button for the manager,
+"Other activity" showing a real Feedback/Achievement/Development
+plan/Goal entry, dev plan/achievement correctly structural-only).
+
+**Four more requests, same session, from watching the real Home tab:**
+
+1. **Goals: "Suggest a goal" for the employee.** Home tab's goal button now
+   reads "Suggest a goal" for the employee, "Add a goal" for the manager --
+   `open_add_goal` itself unchanged, label only (`lib/slack-views.js`
+   `homeView`). Melissa's reasoning: since an employee can't delete a
+   goal, what they're doing when they add one is proposing it, not
+   setting it.
+2. **Goals: employee-only "Mark complete."** New `goal_complete` action
+   (manager-gated off, `verifyOwnedRow` pair-check same as every other
+   handler) sets status to Complete via new `setGoalStatus` (`lib/data.js`)
+   -- a partial update, not `saveGoal`'s full-row upsert, so it can't wipe
+   the goal's other fields. Notifies the manager. Button hidden once a
+   goal is already Complete. Added a `goal` entry to `CHANGE_TITLE` so the
+   website's activity-log timeline reads "Goal marked Complete" instead of
+   the generic fallback.
+3. **Mark-done button relabeled + History moved below it.** "Mark topics &
+   actions as done" is now "Confirmed with employee — actions done" (shown
+   to the manager) / "Confirmed with manager — actions done" (shown to the
+   employee). The History section, which used to sit above this button,
+   now renders below it.
+4. **Removed "Upload a document" and the entire Handbook section from
+   Slack.** Real bug Melissa hit herself and screenshotted: "Upload a
+   document" linked to the website's `/dashboard`, which redirects
+   anyone not already signed into the website to `/login` -- a dead end
+   for Slack-only users (including Melissa's own test browser). Removed
+   from both the Home tab and `listDocumentsModal`; viewing documents
+   stays in-Slack, uploading is website-only with no link out to it from
+   Slack anymore. Handbook removed completely per her explicit follow-up
+   ("Make sure to remove handbook completely") -- deleted
+   `listHandbookLinksModal`, the `open_list_handbook` opener, and its
+   now-dead imports (`listHandbookLinks`, `getHandbookFileUrl` -- the
+   website's own handbook page/upload flow, `app/api/handbook`, is
+   untouched, it's a separate feature).
+
+**Verified**: new `test/slack-home-goals.test.mjs` (6 tests: goal button
+label per role, Upload-a-document/Handbook fully gone for both roles,
+mark-done label per role, History renders after mark-done in block order,
+Mark complete shown/hidden correctly by status and role, Documents modal
+never emits an Upload button). Full suite `npm test` 41/41 (35 existing +
+6 new), `npx eslint` clean on every changed file, `node --check` clean.
+**Not yet click-tested live** -- the outage fix and History rendering
+were verified live tonight; these four newer changes were verified by the
+test suite only, not yet clicked through in the real Slack workspace.

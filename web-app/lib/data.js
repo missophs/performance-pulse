@@ -961,6 +961,28 @@ export async function deleteGoal(supabase, id) {
   if (error) throw error;
 }
 
+// Lets an employee mark their own goal complete without the full saveGoal
+// upsert (which needs every field or it wipes the rest -- see edit_goal's
+// comment in route.js). Same shape as setTopicStatus above -- partial
+// update plus an activity-log entry. Melissa's request, 2026-09-19: since
+// an employee can't delete a goal, give them a one-click way to tell their
+// manager it's done instead.
+export async function setGoalStatus(supabase, id, status, ctx = {}) {
+  const { data: before } = await supabase.from("goals").select("pair_id, text, status").eq("id", id).maybeSingle();
+  const { error } = await supabase.from("goals").update({ status, updated_at: new Date().toISOString() }).eq("id", id);
+  if (error) throw error;
+  if (before) {
+    await logActivity(supabase, before.pair_id, {
+      entity: "goal",
+      entityId: id,
+      label: before.text,
+      oldValue: before.status,
+      newValue: status,
+      ...ctx,
+    });
+  }
+}
+
 // --------------------------------------------------------- development -----
 
 export async function listDevelopmentPlans(supabase, pairId) {
@@ -1518,6 +1540,7 @@ const CHANGE_TITLE = {
   topic: (v) => `Topic marked ${v}`,
   action: (v) => `Action marked ${v}`,
   feedback_request: (v) => `Feedback request ${v}`,
+  goal: (v) => `Goal marked ${v}`,
 };
 
 // `activity` defaults to empty so callers that don't pass it still work.

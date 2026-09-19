@@ -232,8 +232,13 @@ export function homeView(ctx, d) {
         ]
       : []),
     divider(),
+    // "Suggest" instead of "Add" for the employee (Melissa's request,
+    // 2026-09-19): an employee can't delete a goal, so what they're really
+    // doing when they create one is proposing it, not setting it -- the
+    // button should say so. Manager keeps "Add a goal"; open_add_goal itself
+    // is unchanged, this is a label only.
     section(`*Goals* — ${d.goals.length} on record`),
-    actions([button("Add a goal", "open_add_goal", "", usedStyle(openGoals.length)), button("View goals", "open_list_goals")]),
+    actions([button(ctx.isMgr ? "Add a goal" : "Suggest a goal", "open_add_goal", "", usedStyle(openGoals.length)), button("View goals", "open_list_goals")]),
     section(`*Learning & development* — ${d.devPlans.length} plan${d.devPlans.length === 1 ? "" : "s"}`),
     context("Tracked here by date and status only — keep the actual plan write-up somewhere else."),
     actions([button("Add a plan", "open_add_devplan", "", usedStyle(openDevPlans.length)), button("View plans", "open_list_devplans")]),
@@ -276,27 +281,30 @@ export function homeView(ctx, d) {
     section(`*Between you two* — ${d.messages.length} sent`),
     context("No meeting needed — send it when it's on your mind. Quiet by design: no Slack ping, just seen next time they open the app."),
     actions([button("Send a message", "open_add_message", "", usedStyle(d.messages.length)), button("View messages", "open_list_messages")]),
-    // Uploading still needs a real file, so that stays website-only -- but
-    // viewing now has a real in-Slack list (listDocumentsModal), same as
-    // Handbook already does, once the missing-signed-url guard was in place.
+    // "Upload a document" removed 2026-09-19 (Melissa's request): it linked
+    // out to the website's /dashboard, which means a real sign-in there --
+    // most Slack-only users have never done that, so the button was a dead
+    // end (she hit it herself and landed on the login screen). Viewing
+    // stays in-Slack (listDocumentsModal); uploading is website-only for
+    // now with no link out to it from here.
     section(`*Documents* — ${d.documents.length}`),
-    actions([openInApp("Upload a document", "/dashboard"), button("View documents", "open_list_documents")]),
-    section("*Handbook*"),
-    actions([button("View handbook", "open_list_handbook")]),
-    // Open to both roles (Melissa's call, 2026-09-18, then 2026-09-19: the
-    // AI conversation summary inside History (see historyModal) is now
-    // view-only for the employee too -- only generating/editing it stays
-    // manager-only, gated inside historyModal/summaryBlocks, not by hiding
-    // this button.
-    section("*History*\nEvery wrapped-up 1:1, right here."),
-    actions([button("View history", "open_history")]),
-    divider(),
+    actions([button("View documents", "open_list_documents")]),
     // Wording rewritten (Melissa, 2026-09-16): "Clear out" read as deleting
     // the information, which this never does -- it only marks open items
     // Discussed/Complete/Done (see wrapUpConversation, lib/data.js -- update
     // only, never delete). "Mark ... as done" says what actually happens.
+    // Label made role-relative 2026-09-19 (Melissa's request): naming who
+    // you're confirming with reads clearer than the generic verb did.
     section("If a topic, goal, or action is done, mark it so — nothing is deleted, the pairing stays open, and either of you can keep adding to it any time:"),
-    actions([button("Mark topics & actions as done", "open_close_pair")]),
+    actions([button(`Confirmed with ${ctx.isMgr ? "employee" : "manager"} — actions done`, "open_close_pair")]),
+    // Open to both roles (Melissa's call, 2026-09-18, then 2026-09-19: the
+    // AI conversation summary inside History (see historyModal) is now
+    // view-only for the employee too -- only generating/editing it stays
+    // manager-only, gated inside historyModal/summaryBlocks. Moved below
+    // the mark-done section (Melissa's request, same date) -- Handbook,
+    // which used to sit between Documents and History, is gone (see above).
+    section("*History*\nEvery wrapped-up 1:1, right here."),
+    actions([button("View history", "open_history")]),
     divider(),
     context(":lock: Everything here is shared only between you and your 1:1 partner — never with HR."),
     // Governance disclosure, visible on every Home tab load -- Melissa's
@@ -726,7 +734,10 @@ export function addGoalModal(ctx, draft, saved = false) {
 // Respond is employee-only (Melissa's 2026-09-19 request, same reasoning and
 // same Respond/Edit-your-response pattern as listDevPlansModal below) --
 // separate from Edit, which changes the goal's own fields rather than
-// reacting to it.
+// reacting to it. Mark complete is also employee-only, added the same day:
+// since Delete stays manager-only, this is the employee's one-click way to
+// tell their manager a goal is done, rather than opening Edit and hunting
+// for the status dropdown.
 export function listGoalsModal(goals, isMgr, viewerRole) {
   const blocks = goals.length
     ? goals.flatMap((g) => [
@@ -737,6 +748,7 @@ export function listGoalsModal(goals, isMgr, viewerRole) {
         actions([
           button("Edit", "goal_edit", g.id),
           ...(isMgr ? [button("Delete", "goal_delete", g.id, "danger")] : []),
+          ...(viewerRole === "employee" && g.status !== "Complete" ? [button("Mark complete", "goal_complete", g.id, "primary")] : []),
           ...(viewerRole === "employee" ? [button(g.response ? "Edit your response" : "Respond", "goal_respond", g.id, g.response ? undefined : "primary")] : []),
         ]),
       ])
@@ -1033,26 +1045,13 @@ export function listMessagesModal(messages) {
   return modal("list_messages", "Between you two", blocks, "Close");
 }
 
-// -------------------------------------------------------------- handbook ---
-
 // View-only, per the item 0g decision — no add/edit from Slack (uploading is
 // now HR-passcode-gated on the website, see app/api/handbook/route.js — not
 // a role any Slack account has, so there's nothing to link to here).
-// `l.url` may be null if getHandbookFileUrl (route.js) failed to sign it --
-// guard the button rather than emit an invalid `url` field, which Slack
-// rejects and silently sticks the whole modal on "Loading…" (the exact bug
-// that used to hit Documents' own in-Slack list, before it was replaced by
-// a plain link to the app -- see the comment above the Documents section in
-// homeView).
-// Same guard as listHandbookLinksModal below, for the exact same reason:
-// Documents used to have its own in-Slack list, and it broke Slack's whole
-// modal (stuck on "Loading…") the first time a signed URL failed to
-// generate, because it emitted an invalid `url` field instead of guarding
-// it -- see the file's git history and the note on listHandbookLinksModal.
-// Melissa's call at the time was to replace the whole thing with a plain
-// link to the app rather than fix the guard; SLACK_TODO.md 0g asks for the
-// real in-Slack view back now that the actual bug (missing guard, not the
-// list itself) is understood.
+// `d.url` may be null if the signed URL failed to generate -- guard the
+// button rather than emit an invalid `url` field, which Slack rejects and
+// silently sticks the whole modal on "Loading…" (the exact bug that used to
+// hit this list before the guard existed -- see the file's git history).
 export function listDocumentsModal(docs) {
   const blocks = docs.length
     ? docs.flatMap((d) => [
@@ -1062,21 +1061,15 @@ export function listDocumentsModal(docs) {
           : context("Couldn't generate a link for this file — try again from the app."),
       ])
     : [section("No documents uploaded yet.")];
-  blocks.push(divider(), actions([openInApp("Upload a document", "/dashboard")]));
   return modal("view_documents", "Documents", blocks, "Close");
 }
 
-export function listHandbookLinksModal(links) {
-  const blocks = links.length
-    ? links.flatMap((l) => [
-        section(`*${l.title}*`),
-        l.url
-          ? actions([Elements.Button({ text: "Open handbook", url: l.url, actionId: "open_handbook_link" })])
-          : context("Couldn't generate a link for this file — try again from the app."),
-      ])
-    : [section("No handbook uploaded yet.")];
-  return modal("view_handbook_links", "Handbook", blocks, "Close");
-}
+// listHandbookLinksModal removed 2026-09-19 (Melissa's request): it was
+// only reachable from the Home tab's "View handbook" button, now gone too
+// (she asked for it removed, separately from the "Upload a document" fix
+// above). The underlying handbook data/upload feature (lib/data.js's
+// listHandbookLinks/uploadHandbookFile, app/api/handbook) is untouched --
+// it's still used by the website's own handbook page.
 
 // Career was removed from Slack entirely (Melissa's call, 2026-09-04) --
 // too confusing mid-redesign to leave half-built. The website's nav link
