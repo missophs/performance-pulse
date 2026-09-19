@@ -21,6 +21,7 @@ import {
   editTopicModal,
   addActionModal,
   listActionsModal,
+  listDoneActionsModal,
   editActionModal,
   addConcernModal,
   listConcernsModal,
@@ -68,6 +69,7 @@ import {
   addTopic,
   saveAction,
   deleteAction,
+  listActivity,
   saveGoal,
   deleteGoal,
   respondToGoal,
@@ -235,6 +237,17 @@ const OPENERS = {
   },
   open_list_topics: { title: "Open topics", build: async (admin, ctx) => listTopicsModal((await loadHomeData(admin, ctx.pairId)).topics, ctx.role) },
   open_list_actions: { title: "Open actions", build: async (admin, ctx) => listActionsModal((await loadHomeData(admin, ctx.pairId)).actions) },
+  // Melissa's 2026-09-19 request: a completed action must stay visible to
+  // both partners, not just vanish. No role gate, matching listDoneActionsModal's
+  // own reasoning -- activity_log already carries whoever actually did it.
+  open_list_done_actions: {
+    title: "Done actions",
+    build: async (admin, ctx) => {
+      const entries = await listActivity(admin, ctx.pairId);
+      const done = entries.filter((e) => e.entity === "action" && e.new_value === "Done").slice(0, 25);
+      return listDoneActionsModal(done);
+    },
+  },
   open_list_goals: { title: "Goals", build: async (admin, ctx) => listGoalsModal((await loadHomeData(admin, ctx.pairId)).goals, ctx.isMgr, ctx.role) },
   open_list_devplans: { title: "Development plans", build: async (admin, ctx) => listDevPlansModal((await loadHomeData(admin, ctx.pairId)).devPlans, ctx.isMgr, ctx.role) },
   open_list_achievements: { title: "Achievements", build: async (admin, ctx) => listAchievementsModal((await loadHomeData(admin, ctx.pairId)).achievements, ctx.role) },

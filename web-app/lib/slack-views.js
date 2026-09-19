@@ -214,6 +214,7 @@ export function homeView(ctx, d) {
       button(`Topics (${openTopics.length})`, "open_list_topics"),
       button("Add an action", "open_add_action", "", usedStyle(openActions.length)),
       button(`Actions (${openActions.length})`, "open_list_actions"),
+      button("Done actions", "open_list_done_actions"),
       button("Wrap up a 1:1", "open_wrap_up"),
       button("Prepare a hard conversation", "open_add_hardconvo"),
     ]),
@@ -575,6 +576,20 @@ export function listActionsModal(list, notice) {
       ])
     : [section("No open actions. Add one from the Home tab.")];
   return modal("view_actions", "Open actions", notice ? [section(`✅ ${notice}`), divider(), ...blocks] : blocks, "Close");
+}
+
+// Persistent record of completed actions, visible to both partners --
+// Melissa's explicit call (2026-09-19): a done action must never just
+// disappear with nothing to look back on later. Reuses activity_log
+// (already written by toggleActionDone, migration 0004) rather than adding
+// new storage. No role gate -- the log itself isn't role-scoped, it already
+// carries whoever (manager or employee) actually clicked Mark done, so a
+// manager sees their own and their employee's completed actions together.
+export function listDoneActionsModal(entries) {
+  const blocks = entries.length
+    ? entries.map((e) => context(`*${e.label}* · done by ${e.actor_name} · ${ago(e.created_at)}`))
+    : [section("Nothing marked done yet.")];
+  return modal("view_done_actions", "Done actions", blocks, "Close");
 }
 
 // -------------------------------------------------------------- concerns ---
