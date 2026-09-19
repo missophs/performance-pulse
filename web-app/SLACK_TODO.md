@@ -5767,3 +5767,78 @@ someone opens Mel's Home tab, check whether it now shows the real Stella
 Weiss / melissahr212@gmail.com pairing correctly** -- if it still shows
 the not-linked message, the copy fix alone didn't address the real cause
 and this needs another look.
+
+### Melissa's own words today, verbatim, in order
+
+Saved exactly as said/typed, not paraphrased, per her request to leave
+nothing out:
+
+1. "Open up the Slack performance document. See where we are. It needs to
+   be finished today."
+2. "We are using Slack Builder for the app. There is no web."
+3. "Everything is open in Chrome."
+4. "Never assume I know what to do. You're to do everything except what I
+   need to do because you can't, and I have no idea where I'm supposed to
+   type that code you want me to copy."
+5. "I don't see where I'm supposed to put the code in. That's not the
+   page."
+6. "Open exactly where I need to put it in."
+7. "I don't know what the value is."
+8. "Done."
+9. "I'm not sure what you mean. I do have cron jobs for something else.
+   What do we need to do? I don't have any other time but today to get
+   this done, and I need you to get this done, so get moving as an
+   engineer."
+10. "I need the goals and achievements all flagged and to be done today."
+11. "Watch me do it. I'm going to go in as the manager and do Monty, then I
+    will go and log in as Monty to see what showed up."
+12. "It's still there. It shows past history. I don't want that. I said
+    that."
+13. "We shouldn't be seeing what's still open. I said get rid of that. I'd
+    need to start fresh."
+14. "If you watch, there is no delete."
+15. "I need them removed. I need to show a company from the beginning, so
+    figure out a way. Slack Block Builder lets you do that. Go back and
+    check. Don't come to me without an answer."
+16. "I don't know how to do it, and I opened that doc, and it still didn't
+    explain it to me. I don't see it. Get on the page and point the arrow
+    to each thing."
+17. "I don't know where you are. So you are going... taking me in circles.
+    You're not even in the same screen as me."
+18. "I'm in it now, but you're making this more complicated."
+19. "I don't even see where you are now. You're moving different screens
+    and you're not showing me. Don't tell me I'm right. You're supposed to
+    check everything first. I don't want you telling me I'm right. I want
+    you to do it."
+20. "Bring the page upfront and go delete everything."
+21. "Try this. swm3016gmail.com"
+22. "Erase what I'm putting in if you're doing it."
+23. "Now what? I want the original stuff that I said to you deleted: the
+    bad information from Monty and May."
+24. (AskUserQuestion) selected: "Remove the Monty test pairing entirely."
+25. "All conversation between Melissa and Monty should be deleted. We need
+    to start fresh. I don't understand what you don't know. We have 2
+    hours, and I need you to get this done, so get moving as an engineer."
+26. "Should I stay signed in as Monty, or should I go in as the manager?"
+27. "Monty wrote things in there but i don't see anything we need to be
+    able to go back and forth and edit as manager and employee, i think we
+    should erase all this history so we can start fresh."
+28. (AskUserQuestion) selected: "App data (topics, goals, actions,
+    feedback, etc.)."
+29. (AskUserQuestion) selected: "Add a 'Done' list in Slack."
+30. "Now that I marked it done, how does Monty see what he did?"
+31. "It should never disappear, Monty or Melissa, as his manager should be
+    able to see that. When Monty manages an employee, he should be able to
+    see what he wrote for theirs and the employees."
+32. "Nothing was cleared out. Look at this, and who is getting Stella? I
+    will do it as a manager, but I want this done."
+33. "The name is Mel, and she already accepted."
+34. "The name should be Stella Weiss."
+35. "There has to be a way to delete all messages, and you're not doing
+    it. Now I'm getting. I don't even have an account."
+36. "Did you fix the bug? do a /code-review"
+37. "Well, where are we? You didn't answer."
+38. "Back this all up to the Slack document. Do not leave anything out,
+    including that we will leave Stella under Melissa HR two one two. I
+    mean, everything should be in that document."
+39. "Just save everything I said."
