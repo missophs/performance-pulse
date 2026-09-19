@@ -316,7 +316,7 @@ export function notLinkedHomeView() {
   return homeTab([
     header("Performance Pulse"),
     section(
-      "This Slack account isn't linked to a Performance Pulse pair yet. Sign in on the website with the same email address this Slack account uses, and this tab will pick it up automatically."
+      "This Slack account isn't paired with a manager yet. There's no separate sign-in — ask your manager to add you from their own Home tab (\"Add or change employee\"), and this tab will pick it up automatically."
     ),
   ]);
 }
