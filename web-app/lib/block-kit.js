@@ -49,7 +49,7 @@ function bkOpenAction(label, inSlackActionId, value) {
 }
 function bkFoot() {
   return bkContext(
-    ":lock: Nothing about your performance is in this message. The detail stays in the app, visible only to you and your manager."
+    ":lock: Nothing about your performance is in this message. The detail stays in Performance Pulse's Home tab, visible only to you and your manager."
   );
 }
 
@@ -160,7 +160,7 @@ export function buildBlockKit(kind, ctx) {
   } else if (kind === "action") {
     text = `${mineActionsCount} action${mineActionsCount === 1 ? "" : "s"} assigned to you`;
     b.push(bkSection(`You have *${mineActionsCount} open action${mineActionsCount === 1 ? "" : "s"}* from your 1:1s.`));
-    b.push(bkContext("Listed in the app with owners and dates. No nagging, no scores."));
+    b.push(bkContext("Listed in Performance Pulse's Home tab with owners and dates. No nagging, no scores."));
     b.push(bkOpenAction("See what's open", "open_list_actions"));
   } else if (kind === "concern") {
     text = `${partnerName} shared something with you in Concerns`;
