@@ -5842,3 +5842,32 @@ nothing out:
     including that we will leave Stella under Melissa HR two one two. I
     mean, everything should be in that document."
 39. "Just save everything I said."
+
+### Same day, later: History opened up to the employee too
+
+Melissa's call, reversing yesterday's manager-only decision: "The history
+should also be for the employee so they can go back." Two one-line gate
+removals -- `historyModal` (`lib/slack-views.js`) already built itself
+correctly for a non-manager caller (`ctx.isMgr ? [...summaryBlocks(ctx),
+...] : meetingList`, i.e. it already dropped the AI summary and kept just
+the plain wrapped-up-1:1 list when isMgr was false), so nothing in the
+modal itself needed to change:
+- `homeView`'s History section/button is no longer wrapped in `ctx.isMgr ?
+  ... : []` -- both roles see it now.
+- The `open_history` handler (`app/api/slack/interactivity/route.js`) no
+  longer returns a "This is manager-only" notice for non-managers; it
+  always builds `historyModal`.
+
+**The AI-generated conversation summary stays manager-only** -- that gate
+lives inside `historyModal`/`summaryBlocks` itself and wasn't touched, per
+the existing governance reasoning (manager-reviewed content, not something
+to expose to the employee side). Employees now see the plain history --
+date, discussed/agreed/revisit, Start/Stop/Continue -- just not the AI
+summary layered on top of it.
+
+**Verified**: `npm test` 27/27, `npx eslint` clean on both changed files,
+`node --check` on both. **Not yet verified live** -- no fresh wrapped-up
+1:1 exists on any test pairing right now to click through and confirm the
+employee's History modal actually renders (the Monty pairing was fully
+deleted earlier today; the Stella Weiss pairing has its own history,
+untested).

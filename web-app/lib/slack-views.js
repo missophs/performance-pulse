@@ -287,9 +287,8 @@ export function homeView(ctx, d) {
     // one that sees the history" -- History now also carries the AI
     // conversation summary (see historyModal), which is manager-reviewed
     // content, not something to expose to the employee side of the pair.
-    ...(ctx.isMgr
-      ? [section("*History*\nEvery wrapped-up 1:1, right here."), actions([button("View history", "open_history")])]
-      : []),
+    section("*History*\nEvery wrapped-up 1:1, right here."),
+    actions([button("View history", "open_history")]),
     divider(),
     // Wording rewritten (Melissa, 2026-09-16): "Clear out" read as deleting
     // the information, which this never does -- it only marks open items

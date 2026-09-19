@@ -271,13 +271,15 @@ const OPENERS = {
       return listFeedbackModal(d.feedback, d.feedbackRequests, ctx.role);
     },
   },
-  // Manager-only -- re-checked here same as every other role-gated opener,
-  // even though the button is already hidden from the employee's Home tab
-  // (see homeView). historyModal also carries the AI conversation summary,
-  // manager-reviewed content the employee side has no business seeing.
+  // Open to both roles (Melissa's call, 2026-09-19, reversing the
+  // 2026-09-18 manager-only rule): an employee should be able to look back
+  // at their own wrapped-up 1:1s too. historyModal itself still keeps the
+  // AI conversation summary manager-only internally (ctx.isMgr gate inside
+  // historyModal) -- that's still manager-reviewed content the employee
+  // side has no business seeing, only the plain meeting history opened up.
   open_history: {
     title: "History",
-    build: async (admin, ctx) => (ctx.isMgr ? historyModal(await listMeetings(admin, ctx.pairId), ctx) : noticeModal("History", "This is manager-only.")),
+    build: async (admin, ctx) => historyModal(await listMeetings(admin, ctx.pairId), ctx),
   },
   // A link added via the old "paste a link" flow already has l.url; one
   // uploaded via the newer HR upload feature (uploadHandbookFile, lib/data.js)
