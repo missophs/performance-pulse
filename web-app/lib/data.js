@@ -575,9 +575,17 @@ export async function listMeetings(supabase, pairId) {
     .from("meetings")
     .select("*")
     .eq("pair_id", pairId)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false });
   if (error) throw error;
   return data;
+}
+
+// Soft delete only (migration 0038), matching pairs.closed_at -- listMeetings
+// above filters deleted_at out, nothing is ever actually destroyed.
+export async function deleteMeeting(supabase, id) {
+  const { error } = await supabase.from("meetings").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+  if (error) throw error;
 }
 
 export async function saveWrapUp(supabase, pairId, fields, discussedTopicIds, name) {

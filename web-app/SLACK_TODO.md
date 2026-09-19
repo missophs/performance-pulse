@@ -5871,3 +5871,88 @@ summary layered on top of it.
 employee's History modal actually renders (the Monty pairing was fully
 deleted earlier today; the Stella Weiss pairing has its own history,
 untested).
+
+### Same night, later: AI summary opened to the employee, delete added to History, and History widened beyond just 1:1s -- "literally everything"
+
+Melissa's three asks in one message, looking at the real Slack History
+modal live: (1) "AI summary should be on both sides," (2) "I want to be
+able to delete prior history," and (3) "we're still missing a lot of
+information because she went back to him for information, and it's not in
+here for him to review." Confirmed via her own follow-up answer that (3)
+meant both a feedback follow-up not being recorded anywhere Slack shows,
+and real fields from a wrap-up conversation missing from History.
+
+**1. AI summary, view-only for the employee.** `summaryBlocks`
+(`lib/slack-views.js`) no longer skips entirely for `!ctx.isMgr` -- the
+text/timestamp render for both roles now, but the Summarize/Refresh/Edit
+buttons stay manager-only (`ctx.isMgr` gate moved from wrapping the whole
+block to wrapping just the `actions()` row). Fixed a real bug found while
+doing this: the "reviewed by" name used `ctx.myName`, which is
+viewer-relative -- an employee viewing it would have seen "reviewed by
+[their own name]" instead of the manager's. Added `managerName = ctx.isMgr
+? ctx.myName : ctx.partnerName` (same pattern already used in
+`addDevPlanModal`) so it always names the actual manager.
+
+**2. Delete a wrapped-up 1:1, manager-only.** No delete existed anywhere
+in Slack's History before tonight -- flagged as still-open Slack-parity
+work earlier in this file. New migration
+`supabase/migrations/0038_meetings_soft_delete.sql` adds
+`meetings.deleted_at` (soft delete only, matches the `pairs.closed_at`
+pattern -- nothing is ever actually destroyed). `listMeetings`
+(`lib/data.js`) now filters `deleted_at is null` for both Slack and the
+website's History page; new `deleteMeeting()` sets it. New `meeting_delete`
+handler in the Slack interactivity route, manager-only
+(`if (!ctx.isMgr) return`) with the same `verifyOwnedRow(admin, "meetings",
+"pair_id", id, ctx)` pair-ownership check every other Slack delete handler
+uses (the 2026-08-29 IDOR rule in `web-app/CLAUDE.md`) -- a Delete button
+renders per 1:1 only for the manager.
+
+**IMPORTANT -- Melissa still needs to run the migration by hand.** Per this
+file's rule #3, Claude did not and will not run this itself. Exact steps:
+open the Supabase dashboard for this project → SQL Editor → New query →
+paste the contents of
+`web-app/supabase/migrations/0038_meetings_soft_delete.sql` (one line:
+`alter table meetings add column if not exists deleted_at timestamptz;`) →
+Run. Delete won't work in Slack until this is applied -- the button will
+appear but the underlying UPDATE will fail with a "column does not exist"
+error until then.
+
+**3a. `topics_snapshot` finally rendered.** `saveWrapUp` has saved this
+(the per-topic notes typed during the actual wrap-up conversation) since
+the feature existed, but nothing anywhere -- not Slack, not the website's
+History page -- ever displayed it. `meetingBlocks` now renders a "Topics
+discussed" section per 1:1 listing each topic's text/status/notes.
+
+**3b. Slack's History widened beyond just 1:1s.** This was the real gap
+behind "she went back to him for information, and it's not in here":
+Slack's History modal only ever called `listMeetings` and showed 1:1s --
+feedback, goals, actions, dev plans, and achievements never appeared there
+at all, unlike the website's History page (`buildHistory`,
+`lib/data.js`), which already aggregates everything. So a feedback
+follow-up given after the original answer was always visible on the
+website, never in Slack. `historyModal`'s signature changed from
+`(meetings, ctx)` to `(data, ctx)` -- it now takes the same shape
+`loadHomeData()` already returns (which every other Slack list modal
+already calls). New `otherActivityBlocks()` merges feedback/goals/actions/
+dev plans/achievements, sorted newest-first, capped at 8 (ponytail-marked
+in the code -- raise it if a real pair's activity ever gets that long).
+Dev plans and achievements stay structural-fields-only in this feed too
+(type/status/category/date, no full text) -- matches the existing privacy
+rule already documented at the top of `lib/slack-views.js` for
+`listDevPlansModal`/`listAchievementsModal`, not a new decision. Updated
+all four `historyModal(...)` call sites in the interactivity route
+(`open_history`, `summary_generate`'s refreshList, `meeting_delete`'s
+refreshList, `edit_summary`'s manual `views.update`) to pass the full
+`loadHomeData()` result instead of just `.meetings`.
+
+**Verified**: new `test/slack-history.test.mjs` (8 tests covering all of
+the above: employee sees summary text but not the buttons, "reviewed by"
+names the manager not the viewer, Delete is manager-only,
+`topics_snapshot` renders for both roles, Other activity surfaces a
+feedback item across both roles, dev plan/achievement stay structural,
+empty state doesn't throw). Full suite: `npm test` 35/35 (27 existing +
+8 new), `npx eslint` clean on every changed file, `node --check` clean.
+**Not yet verified live in the real Slack workspace** -- migration 0038
+isn't applied yet (see above), so Delete can't be click-tested until
+Melissa runs it; the AI summary and "Other activity" changes can be
+click-tested as the employee identity as soon as this deploys.

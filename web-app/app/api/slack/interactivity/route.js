@@ -93,7 +93,7 @@ import {
   wrapUpConversation,
   createPairForSlack,
   notify,
-  listMeetings,
+  deleteMeeting,
   listHandbookLinks,
   getHandbookFileUrl,
   getDocumentUrl,
@@ -273,13 +273,16 @@ const OPENERS = {
   },
   // Open to both roles (Melissa's call, 2026-09-19, reversing the
   // 2026-09-18 manager-only rule): an employee should be able to look back
-  // at their own wrapped-up 1:1s too. historyModal itself still keeps the
-  // AI conversation summary manager-only internally (ctx.isMgr gate inside
-  // historyModal) -- that's still manager-reviewed content the employee
-  // side has no business seeing, only the plain meeting history opened up.
+  // at their own wrapped-up 1:1s too. The AI conversation summary inside
+  // historyModal is now view-only for the employee as well (same date,
+  // separate request) -- only generating/editing it stays manager-only,
+  // gated inside summaryBlocks itself.
   open_history: {
     title: "History",
-    build: async (admin, ctx) => historyModal(await listMeetings(admin, ctx.pairId), ctx),
+    // historyModal now takes the full loadHomeData shape, not just meetings
+    // (2026-09-19: it also surfaces feedback/goals/actions/dev plans/
+    // achievements so nothing exchanged outside a wrap-up is invisible here).
+    build: async (admin, ctx) => historyModal(await loadHomeData(admin, ctx.pairId), ctx),
   },
   // A link added via the old "paste a link" flow already has l.url; one
   // uploaded via the newer HR upload feature (uploadHandbookFile, lib/data.js)
@@ -700,7 +703,19 @@ const QUICK_ACTIONS = {
       ctx.pair.conversation_summary_generated_at = generatedAt;
       ctx.pair.conversation_summary_edited_at = null;
     },
-    refreshList: (data, ctx) => historyModal(data.meetings, ctx),
+    refreshList: (data, ctx) => historyModal(data, ctx),
+  },
+  // Manager-only (same reasoning as goal_delete/devplan_delete below) --
+  // soft delete only (migration 0038), matches pairs.closed_at. Melissa's
+  // explicit request, 2026-09-19: "I want to be able to delete prior history."
+  meeting_delete: {
+    run: async (admin, ctx, id) => {
+      if (!ctx.isMgr) return;
+      const meeting = await verifyOwnedRow(admin, "meetings", "pair_id", id, ctx);
+      if (!meeting) return;
+      await deleteMeeting(admin, id);
+    },
+    refreshList: (data, ctx) => historyModal(data, ctx),
   },
   // Mirrors addFromSuggestion (page.js): creates a plain unsubmitted topic,
   // no ping until Submit — same as adding one by hand. role, not just
@@ -1308,7 +1323,7 @@ const SUBMISSIONS = {
     ctx.pair.conversation_summary_edited_at = editedAt;
     if (view.previous_view_id) {
       const data = await loadHomeData(admin, ctx.pairId);
-      await slackApi("views.update", { view_id: view.previous_view_id, view: historyModal(data.meetings, ctx) }, { companyId: ctx.companyId }).catch((e) =>
+      await slackApi("views.update", { view_id: view.previous_view_id, view: historyModal(data, ctx) }, { companyId: ctx.companyId }).catch((e) =>
         console.error("edit summary list refresh:", e)
       );
     }

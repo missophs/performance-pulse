@@ -283,10 +283,11 @@ export function homeView(ctx, d) {
     actions([openInApp("Upload a document", "/dashboard"), button("View documents", "open_list_documents")]),
     section("*Handbook*"),
     actions([button("View handbook", "open_list_handbook")]),
-    // Manager-only (Melissa's call, 2026-09-18): "the manager is the only
-    // one that sees the history" -- History now also carries the AI
-    // conversation summary (see historyModal), which is manager-reviewed
-    // content, not something to expose to the employee side of the pair.
+    // Open to both roles (Melissa's call, 2026-09-18, then 2026-09-19: the
+    // AI conversation summary inside History (see historyModal) is now
+    // view-only for the employee too -- only generating/editing it stays
+    // manager-only, gated inside historyModal/summaryBlocks, not by hiding
+    // this button.
     section("*History*\nEvery wrapped-up 1:1, right here."),
     actions([button("View history", "open_history")]),
     divider(),
@@ -303,9 +304,11 @@ export function homeView(ctx, d) {
     // prohibits "AI mak[ing] consequential decisions without human review"
     // and names an HR agent auto-approving/denying requests as exactly what
     // not to build (see web-app/CLAUDE.md's governance rule for the source).
-    // Updated 2026-09-18 for the one real exception: the manager-only AI
-    // conversation summary (see historyModal) -- always labeled, always
-    // manager-reviewed/editable before it's final, never automatic.
+    // Updated 2026-09-18 for the one real exception: the manager-generated AI
+    // conversation summary (see historyModal, viewable by both roles since
+    // 2026-09-19 but still only generated/edited by the manager) -- always
+    // labeled, always manager-reviewed/editable before it's final, never
+    // automatic.
     context(":shield: No AI writes, scores, or decides anything about your performance here — every entry is from you or your manager. The one exception: a manager can generate an AI summary of the topics, goals, actions, and past meeting notes already logged for your 1:1 — it never reads the private Message conversation. It's always labeled as such and reviewed/editable by them before it's final. A human reviews and approves how this app works before it changes."),
   ];
   return homeTab(blocks);
@@ -1087,7 +1090,7 @@ export function listHandbookLinksModal(links) {
 // first, capped at 10 for the same reason wrapUpConversationModal's
 // checkboxes are -- ponytail: page or raise the cap if a real pair's
 // history ever gets that long.
-function meetingBlocks(m) {
+function meetingBlocks(m, ctx) {
   return [
     section(`*1:1 on ${m.meeting_date}*`),
     ...(m.discussed ? [section(`*Discussed:*\n${m.discussed}`)] : []),
@@ -1102,40 +1105,93 @@ function meetingBlocks(m) {
           ),
         ]
       : []),
+    // Saved at wrap-up time (saveWrapUp, lib/data.js) but never rendered
+    // anywhere until now -- Melissa's request, 2026-09-19: "we're still
+    // missing a lot of information," referring to the per-topic notes taken
+    // during the actual conversation, not just the summary fields above.
+    ...(m.topics_snapshot?.length
+      ? [
+          section(
+            `*Topics discussed:*\n${m.topics_snapshot
+              .map((t) => `• ${t.text}${t.status ? ` (${t.status})` : ""}${t.notes ? ` — ${t.notes}` : ""}`)
+              .join("\n")}`
+          ),
+        ]
+      : []),
+    // Manager-only delete (migration 0038), same reasoning as goal_delete/
+    // devplan_delete -- soft delete, matches pairs.closed_at, nothing is
+    // actually destroyed. Melissa's explicit request, 2026-09-19: "I want to
+    // be able to delete prior history."
+    ...(ctx?.isMgr ? [actions([button("Delete", "meeting_delete", m.id, "danger")])] : []),
   ];
 }
 
-// Manager-only (Melissa's call, 2026-09-18): "the manager is the only one
-// that sees the history" -- both this AI summary and the wrapped-up-1:1
-// list below it. The one place in the whole app that ever calls AI (see
-// lib/ai-summary.js) -- summarizes the topics/goals/actions/past-notes
-// already logged for this pair, not the private Message conversation
-// (revised same day once Melissa confirmed the source; the DM read this
-// originally used is gone). Generated on demand only (never automatic --
-// costs a real API call), always labeled as AI-generated, and editable by
-// the manager before it's final -- matches the governance rule in
-// web-app/CLAUDE.md.
+// Everything besides 1:1s that can happen between wrap-ups -- feedback,
+// goals, actions -- added 2026-09-19 (Melissa's request: "we're still
+// missing a lot of information because she went back to him for
+// information, and it's not in here for him to review"). Before this, a
+// feedback follow-up given after the original answer only ever showed up on
+// the website's History page (buildHistory, lib/data.js), never in Slack's.
+// Dev plans/achievements stay structural-fields-only here too, matching
+// listDevPlansModal/listAchievementsModal's existing privacy rule (see this
+// file's header comment) -- no full plan/achievement text, just like their
+// own list modals never show it either.
+// ponytail: capped at 8 combined items, same reasoning as meetingBlocks'
+// cap above -- raise it if a real pair's activity ever gets that long.
+function otherActivityBlocks(data) {
+  const items = [
+    ...data.feedback.map((f) => ({ at: f.created_at, text: `*Feedback (${f.type})* from ${f.from_name}\n${f.text}` })),
+    ...data.goals.map((g) => ({ at: g.created_at, text: `*Goal* — ${g.text}${g.why ? `\n_${g.why}_` : ""}` })),
+    ...data.actions.map((a) => ({ at: a.created_at, text: `*Action* — ${a.text}${a.notes ? `\n_${a.notes}_` : ""}` })),
+    ...data.devPlans.map((p) => ({ at: p.created_at, text: `*Development plan* — ${p.type}${p.status ? ` · ${p.status}` : ""}` })),
+    ...data.achievements.map((a) => ({ at: a.created_at, text: `*Achievement* — ${a.category}${a.achievement_date ? ` · ${a.achievement_date}` : ""}` })),
+  ]
+    .sort((a, b) => new Date(b.at) - new Date(a.at))
+    .slice(0, 8);
+  if (!items.length) return [];
+  return [divider(), header("Other activity"), ...items.map((it) => context(`${it.text} · ${ago(it.at)}`))];
+}
+
+// The AI summary text is view-only for the employee (Melissa's request,
+// 2026-09-19: "AI summary should be on both sides") -- only
+// generating/editing it stays manager-only, since that's the actual
+// AI-content governance line (web-app/CLAUDE.md): a human (the manager)
+// reviews and approves it before anyone sees it as final. The one place in
+// the whole app that ever calls AI (see lib/ai-summary.js) -- summarizes
+// the topics/goals/actions/past-notes already logged for this pair, not the
+// private Message conversation (revised same day once Melissa confirmed the
+// source; the DM read this originally used is gone). Generated on demand
+// only (never automatic -- costs a real API call), always labeled as
+// AI-generated.
 function summaryBlocks(ctx) {
   const { conversation_summary: summary, conversation_summary_generated_at: generatedAt, conversation_summary_edited_at: editedAt } = ctx.pair;
+  // ctx.isMgr ? ctx.myName : ctx.partnerName -- the manager's name specifically,
+  // not the viewer's own (matches addDevPlanModal's identical pattern above) --
+  // "reviewed by" must name the manager even when an employee is the viewer.
+  const managerName = ctx.isMgr ? ctx.myName : ctx.partnerName;
   if (!summary) {
     return [
-      section(`*AI summary of your 1:1 history with ${ctx.partnerName}*\n${ctx._summaryNotice || "Nothing generated yet."}`),
-      actions([button("Summarize", "summary_generate")]),
+      section(
+        `*AI summary of your 1:1 history with ${ctx.partnerName}*\n${
+          ctx._summaryNotice || (ctx.isMgr ? "Nothing generated yet." : "Nothing generated yet — your manager can create one.")
+        }`
+      ),
+      ...(ctx.isMgr ? [actions([button("Summarize", "summary_generate")])] : []),
     ];
   }
   return [
-    section(`*AI summary of your 1:1 history — reviewed by ${ctx.myName}*\n${summary}`),
+    section(`*AI summary of your 1:1 history — reviewed by ${managerName}*\n${summary}`),
     context(`Generated ${ago(generatedAt)}${editedAt ? ` · edited ${ago(editedAt)}` : ""}`),
-    actions([button("Refresh", "summary_generate"), button("Edit", "summary_edit")]),
+    ...(ctx.isMgr ? [actions([button("Refresh", "summary_generate"), button("Edit", "summary_edit")])] : []),
   ];
 }
 
-export function historyModal(meetings, ctx) {
-  const recent = meetings.slice(0, 10);
+export function historyModal(data, ctx) {
+  const recent = data.meetings.slice(0, 10);
   const meetingList = recent.length
-    ? recent.flatMap((m, i) => [...meetingBlocks(m), ...(i < recent.length - 1 ? [divider()] : [])])
+    ? recent.flatMap((m, i) => [...meetingBlocks(m, ctx), ...(i < recent.length - 1 ? [divider()] : [])])
     : [section("No 1:1s wrapped up yet.")];
-  const blocks = ctx.isMgr ? [...summaryBlocks(ctx), divider(), ...meetingList] : meetingList;
+  const blocks = [...summaryBlocks(ctx), divider(), ...meetingList, ...otherActivityBlocks(data)];
   return modal("view_history", "History", blocks, "Close");
 }
 
