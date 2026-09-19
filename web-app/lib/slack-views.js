@@ -706,19 +706,39 @@ export function addGoalModal(ctx, draft, saved = false) {
 // 0b) — Edit stays open to both partners, but per Melissa's 2026-09-13
 // decision, Delete is manager-only: an employee can tweak a goal with their
 // manager but should never be able to unilaterally remove one the manager set.
-export function listGoalsModal(goals, isMgr) {
+// Respond is employee-only (Melissa's 2026-09-19 request, same reasoning and
+// same Respond/Edit-your-response pattern as listDevPlansModal below) --
+// separate from Edit, which changes the goal's own fields rather than
+// reacting to it.
+export function listGoalsModal(goals, isMgr, viewerRole) {
   const blocks = goals.length
     ? goals.flatMap((g) => [
         section(
-          `*${g.text}*\n${g.status} · ${g.progress || 0}%${g.target_date ? ` · target ${g.target_date}` : ""}${g.why ? `\n_${g.why}_` : ""}${g.measure ? `\n*How you'll know it's met:* ${g.measure}` : ""}`
+          `*${g.text}*\n${g.status} · ${g.progress || 0}%${g.target_date ? ` · target ${g.target_date}` : ""}${g.why ? `\n_${g.why}_` : ""}${g.measure ? `\n*How you'll know it's met:* ${g.measure}` : ""}` +
+            (g.response ? `\n*Response:* ${g.response}` : "")
         ),
-        actions([button("Edit", "goal_edit", g.id), ...(isMgr ? [button("Delete", "goal_delete", g.id, "danger")] : [])]),
+        actions([
+          button("Edit", "goal_edit", g.id),
+          ...(isMgr ? [button("Delete", "goal_delete", g.id, "danger")] : []),
+          ...(viewerRole === "employee" ? [button(g.response ? "Edit your response" : "Respond", "goal_respond", g.id, g.response ? undefined : "primary")] : []),
+        ]),
       ])
     : [section("No goals yet. Add one from the Home tab.")];
   // Same reasoning as listTopicsModal above -- real text, why, and measure
   // are all shown here now, so there's nothing left the app has that this
   // modal doesn't.
   return modal("view_goals", "Goals", blocks, "Close");
+}
+
+// Pushed on top of listGoalsModal, same pattern as respondDevPlanModal below.
+export function respondGoalModal(goal) {
+  return modal(
+    "respond_goal",
+    "Respond",
+    [section(`*${goal.text}*`), inputBlock("response", "Your response", plainInput("val", { multiline: true, initial: goal.response || "" }))],
+    "Send",
+    goal.id
+  );
 }
 
 // Pushed on top of listGoalsModal (views.push), same pattern as
@@ -834,15 +854,31 @@ export function addAchievementModal(draft, saved = false) {
 }
 
 // Same reasoning as Dev plans above — structural fields only, no full text.
-// Delete only, no Edit (item 0d's scope is Goals + Actions).
-export function listAchievementsModal(list) {
+// Delete only, no Edit (item 0d's scope is Goals + Actions). Respond is
+// employee-only, added 2026-09-19 (Melissa's request), same
+// Respond/Edit-your-response pattern as listDevPlansModal above.
+export function listAchievementsModal(list, viewerRole) {
   const blocks = list.length
     ? list.flatMap((a, i) => [
-        section(`*Achievement ${i + 1}* — ${a.category}${a.achievement_date ? ` · ${a.achievement_date}` : ""}`),
-        actions([button("Delete", "achievement_delete", a.id, "danger")]),
+        section(`*Achievement ${i + 1}* — ${a.category}${a.achievement_date ? ` · ${a.achievement_date}` : ""}` + (a.response ? `\n*Response:* ${a.response}` : "")),
+        actions([
+          button("Delete", "achievement_delete", a.id, "danger"),
+          ...(viewerRole === "employee" ? [button(a.response ? "Edit your response" : "Respond", "achievement_respond", a.id, a.response ? undefined : "primary")] : []),
+        ]),
       ])
     : [section("Nothing logged yet. Add one from the Home tab.")];
   return modal("view_achievements", "Achievements", blocks, "Close");
+}
+
+// Pushed on top of listAchievementsModal, same pattern as respondDevPlanModal.
+export function respondAchievementModal(achievement) {
+  return modal(
+    "respond_achievement",
+    "Respond",
+    [section(`*Achievement* — ${achievement.category}`), inputBlock("response", "Your response", plainInput("val", { multiline: true, initial: achievement.response || "" }))],
+    "Send",
+    achievement.id
+  );
 }
 
 // ------------------------------------------------------------- feedback ----

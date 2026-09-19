@@ -1011,6 +1011,22 @@ export async function respondToDevelopmentPlan(supabase, planId, response) {
   if (error) throw error;
 }
 
+export async function respondToGoal(supabase, goalId, response) {
+  const { error } = await supabase
+    .from("goals")
+    .update({ response, responded_at: new Date().toISOString() })
+    .eq("id", goalId);
+  if (error) throw error;
+}
+
+export async function respondToAchievement(supabase, achievementId, response) {
+  const { error } = await supabase
+    .from("achievements")
+    .update({ response, responded_at: new Date().toISOString() })
+    .eq("id", achievementId);
+  if (error) throw error;
+}
+
 // -------------------------------------------------------------- career -----
 
 export async function listCareerAnswers(supabase, pairId) {

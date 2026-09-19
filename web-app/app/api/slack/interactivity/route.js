@@ -31,6 +31,7 @@ import {
   GOAL_FIELDS,
   listGoalsModal,
   editGoalModal,
+  respondGoalModal,
   addDevPlanModal,
   DEVPLAN_FIELDS,
   listDevPlansModal,
@@ -38,6 +39,7 @@ import {
   addAchievementModal,
   ACHIEVEMENT_FIELDS,
   listAchievementsModal,
+  respondAchievementModal,
   addFeedbackModal,
   FEEDBACK_FIELDS,
   addFeedbackRequestModal,
@@ -68,11 +70,13 @@ import {
   deleteAction,
   saveGoal,
   deleteGoal,
+  respondToGoal,
   saveDevelopmentPlan,
   deleteDevelopmentPlan,
   respondToDevelopmentPlan,
   addAchievement,
   deleteAchievement,
+  respondToAchievement,
   deleteTopics,
   createFirstPairForSlack,
   addConcern,
@@ -231,9 +235,9 @@ const OPENERS = {
   },
   open_list_topics: { title: "Open topics", build: async (admin, ctx) => listTopicsModal((await loadHomeData(admin, ctx.pairId)).topics, ctx.role) },
   open_list_actions: { title: "Open actions", build: async (admin, ctx) => listActionsModal((await loadHomeData(admin, ctx.pairId)).actions) },
-  open_list_goals: { title: "Goals", build: async (admin, ctx) => listGoalsModal((await loadHomeData(admin, ctx.pairId)).goals, ctx.isMgr) },
+  open_list_goals: { title: "Goals", build: async (admin, ctx) => listGoalsModal((await loadHomeData(admin, ctx.pairId)).goals, ctx.isMgr, ctx.role) },
   open_list_devplans: { title: "Development plans", build: async (admin, ctx) => listDevPlansModal((await loadHomeData(admin, ctx.pairId)).devPlans, ctx.isMgr, ctx.role) },
-  open_list_achievements: { title: "Achievements", build: async (admin, ctx) => listAchievementsModal((await loadHomeData(admin, ctx.pairId)).achievements) },
+  open_list_achievements: { title: "Achievements", build: async (admin, ctx) => listAchievementsModal((await loadHomeData(admin, ctx.pairId)).achievements, ctx.role) },
   // build is never actually called -- deferredModal's after() callback
   // special-cases this action_id before it would try (and fail) to resolve
   // ctx for a Slack account that has no pair yet. title still drives the
@@ -415,6 +419,24 @@ const PUSH_ACTIONS = {
       return plan ? respondDevPlanModal(plan) : null;
     },
   },
+  // Same pattern as devplan_respond above -- added 2026-09-19, Melissa's
+  // explicit request to flag Goals and Achievements the same way.
+  goal_respond: {
+    title: "Respond",
+    build: async (admin, ctx, value) => {
+      if (ctx.isMgr) return null;
+      const goal = await verifyOwnedRow(admin, "goals", "id, pair_id, text, response", value, ctx);
+      return goal ? respondGoalModal(goal) : null;
+    },
+  },
+  achievement_respond: {
+    title: "Respond",
+    build: async (admin, ctx, value) => {
+      if (ctx.isMgr) return null;
+      const item = await verifyOwnedRow(admin, "achievements", "id, pair_id, category, response", value, ctx);
+      return item ? respondAchievementModal(item) : null;
+    },
+  },
   // Manager-only, same reasoning as historyModal/summary_generate above --
   // this is the human-review step the governance rule in CLAUDE.md requires
   // before AI-generated content counts as final.
@@ -578,7 +600,7 @@ const QUICK_ACTIONS = {
       // no "kind" — deleting a goal doesn't fire a real Slack DM.
       await notify(admin, ctx.pairId, `Goal removed: ${goal.text}`, ctx.role, ctx.otherRole);
     },
-    refreshList: (data, ctx) => listGoalsModal(data.goals, ctx.isMgr),
+    refreshList: (data, ctx) => listGoalsModal(data.goals, ctx.isMgr, ctx.role),
   },
   devplan_delete: {
     // Manager-only, same reasoning and same date as goal_delete above.
@@ -598,7 +620,7 @@ const QUICK_ACTIONS = {
       if (!item) return;
       await deleteAchievement(admin, id);
     },
-    refreshList: (data) => listAchievementsModal(data.achievements),
+    refreshList: (data, ctx) => listAchievementsModal(data.achievements, ctx.role),
   },
   // Open to both partners -- no delete existed anywhere for feedback (Slack
   // or website) before this; matches topic_delete/action_delete's "no
@@ -1001,6 +1023,40 @@ const SUBMISSIONS = {
       );
     }
   },
+  // Same pattern as respond_devplan above -- added 2026-09-19, Melissa's
+  // explicit request to flag Goals and Achievements the same way.
+  respond_goal: async (admin, ctx, v, view) => {
+    if (ctx.isMgr) return { skip: true };
+    const id = view?.private_metadata;
+    if (!id) return { skip: true };
+    const response = (fieldVal(v, "response") || "").trim();
+    if (!response) return { error: { blockId: "response", message: "Say something before sending." } };
+    const goal = await verifyOwnedRow(admin, "goals", "pair_id", id, ctx);
+    if (!goal) return { skip: true };
+    await respondToGoal(admin, id, response);
+    if (view.previous_view_id) {
+      const data = await loadHomeData(admin, ctx.pairId);
+      await slackApi("views.update", { view_id: view.previous_view_id, view: listGoalsModal(data.goals, ctx.isMgr, ctx.role) }, { companyId: ctx.companyId }).catch((e) =>
+        console.error("respond goal list refresh:", e)
+      );
+    }
+  },
+  respond_achievement: async (admin, ctx, v, view) => {
+    if (ctx.isMgr) return { skip: true };
+    const id = view?.private_metadata;
+    if (!id) return { skip: true };
+    const response = (fieldVal(v, "response") || "").trim();
+    if (!response) return { error: { blockId: "response", message: "Say something before sending." } };
+    const item = await verifyOwnedRow(admin, "achievements", "pair_id", id, ctx);
+    if (!item) return { skip: true };
+    await respondToAchievement(admin, id, response);
+    if (view.previous_view_id) {
+      const data = await loadHomeData(admin, ctx.pairId);
+      await slackApi("views.update", { view_id: view.previous_view_id, view: listAchievementsModal(data.achievements, ctx.role) }, { companyId: ctx.companyId }).catch((e) =>
+        console.error("respond achievement list refresh:", e)
+      );
+    }
+  },
   // Matches the website's atomic answer-a-request behavior
   // (app/(dashboard)/performance/page.js's saveFeedback): saving the entry
   // and closing the request it answers happen together, from one submit,
@@ -1142,7 +1198,7 @@ const SUBMISSIONS = {
     );
     if (view.previous_view_id) {
       const data = await loadHomeData(admin, ctx.pairId);
-      await slackApi("views.update", { view_id: view.previous_view_id, view: listGoalsModal(data.goals, ctx.isMgr) }, { companyId: ctx.companyId }).catch((e) =>
+      await slackApi("views.update", { view_id: view.previous_view_id, view: listGoalsModal(data.goals, ctx.isMgr, ctx.role) }, { companyId: ctx.companyId }).catch((e) =>
         console.error("edit goal list refresh:", e)
       );
     }
