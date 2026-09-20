@@ -1407,6 +1407,39 @@ export async function uploadDocument(supabase, pairId, file, byName) {
   return data;
 }
 
+// Server-side counterpart to uploadDocument above, added 2026-09-19
+// (Melissa's request: "Could we add attached documents and actually do
+// that?" -- real upload from Slack itself, not a link to the website).
+// Slack's file_input hands back a downloaded Buffer + separate metadata,
+// not a browser File object, so this can't just call uploadDocument with a
+// fake File shape -- kept as its own function rather than forcing an
+// artificial shared implementation for two genuinely different input
+// shapes. Same DOC_SIZE_LIMIT, same "documents" storage bucket/path
+// convention, same documents-table row shape as uploadDocument.
+export async function uploadDocumentFromSlack(admin, pairId, { name, size, mimeType, buffer }, byName) {
+  if (size > DOC_SIZE_LIMIT) {
+    throw new Error("File is larger than 15MB.");
+  }
+  const path = `${pairId}/${crypto.randomUUID()}-${name}`;
+  const { error: uploadErr } = await admin.storage.from("documents").upload(path, buffer, { contentType: mimeType });
+  if (uploadErr) throw uploadErr;
+
+  const { data, error } = await admin
+    .from("documents")
+    .insert({
+      pair_id: pairId,
+      name,
+      storage_path: path,
+      size,
+      mime_type: mimeType,
+      created_by_name: byName,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 export async function getDocumentUrl(supabase, doc) {
   if (doc.url) return doc.url;
   const { data, error } = await supabase.storage.from("documents").createSignedUrl(doc.storage_path, 3600);

@@ -6050,3 +6050,66 @@ still has the Slack picker, now also a required `employee_name` field).
 Full suite `npm test` 42/42, `npx eslint` clean, `node --check` clean.
 **Not yet click-tested live** -- adding a real employee through this modal
 wasn't re-run tonight after the change.
+
+### Same night, later still: topics were missing from History, real document upload built, and Private notes opened to both roles
+
+**Real bug found live, from Melissa's own words**: "I'm missing the topics
+for one on one that I sent Monte. Everything I did is missing. as an
+employee to my manager." `otherActivityBlocks` (added earlier tonight for
+History's "Other activity" feed) never read from `data.topics` at all --
+only feedback/goals/actions/dev plans/achievements. A topic marked
+Discussed via wrap-up-conversation never disappears from the `topics`
+table, but nothing showed it anywhere in Slack again. Fixed: topics added
+to the merge, full text shown (matches listTopicsModal's own privacy rule),
+cap raised from 8 to 10 for the extra category. Also explained, not a bug:
+adding a topic never auto-notifies the manager (needs an explicit Submit
+click from the Topics list) while goals/actions/dev plans/achievements all
+notify immediately -- this is why "only one thing came through" to Monte
+after Melissa added several things at once.
+
+**Real in-Slack document upload**, replacing the link removed earlier
+tonight ("Could we add attached documents and actually do that?" -- yes,
+built tonight). New `addDocumentModal()` uses Block Kit's native
+`file_input` element (`lib/slack-views.js`); new `open_add_document`
+opener and `add_document` submission handler (route.js) download the
+upload via its `url_private_download` (bot token as `Authorization:
+Bearer`, `resolveBotToken` now exported from `lib/slack-api.js`) and store
+it via new `uploadDocumentFromSlack` (`lib/data.js`, same "documents"
+storage bucket/path/row shape as the website's own `uploadDocument`, just
+built for a server-side Buffer instead of a browser `File`). Button is
+back on the Home tab and inside the Documents list.
+**Real blocker, not yet resolved**: this needs the `files:read` OAuth
+scope, which SLACK_TODO.md flagged as missing back on 2026-09-02 (item 2,
+"Not started") and still is. The modal will open fine; submitting a real
+file will fail with a clear, caught error ("Couldn't download that file
+from Slack") until Melissa adds that scope in the Slack app dashboard and
+reinstalls the app -- same shape of manual step as tonight's DB migration,
+except this one doesn't risk breaking anything else if it's skipped, since
+it's a net-new button nobody depended on before tonight.
+
+**Private notes opened to both roles** ("The manager and employee should
+have their own private notes"). This used to be manager-only specifically
+because the old "My suggestions" label read like a suggestion TO the other
+person -- current "Private notes" copy doesn't have that problem, and the
+underlying data was already built for this: `custom_suggestions.role` and
+`listMySuggestionsModal`'s own `list.filter((s) => s.role === role)`
+already scope each person to their own notes, per that function's own
+2026-09-xx comment anticipating exactly this ask. Removed the `ctx.isMgr`
+gates on the Home tab section, `open_list_suggestions`, `open_add_suggestion`,
+and `add_suggestion` -- four gates, zero new data plumbing. Caught and fixed
+one real bug while doing this: the "Write a note" green/used indicator was
+keyed off `d.customSuggestions.length` (every note for the pair, both
+roles combined) -- now filtered to `ctx.role` so one side's notes can't
+light up the other side's button, per the 2026-09-12 usedStyle rule.
+
+**Verified**: `npm test` 45/45 (3 new/updated in `test/slack-home-goals.test.mjs`:
+topics regression test in `slack-history.test.mjs`, `addDocumentModal`'s
+file_input shape, Private notes open to both roles + the role-scoped
+green-state fix). `npx eslint` clean, `node --check` clean.
+**Not yet click-tested live**: none of these three changes were clicked
+through in the real Slack workspace tonight -- document upload especially
+needs a real click-test once the files:read scope is added, since a code
+review alone can't confirm Slack's file_input actually renders correctly
+when patched in via views.update (this app's loadingModal-then-patch
+pattern) rather than shown on the very first views.open, which is the one
+thing Slack's own docs didn't confirm either way.

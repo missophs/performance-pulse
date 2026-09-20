@@ -42,6 +42,7 @@ const data = {
   actions: [{ created_at: "2026-09-11T09:00:00Z", text: "Schedule 1:1s", notes: "weekly" }],
   devPlans: [{ created_at: "2026-09-12T09:00:00Z", type: "Coaching", status: "In progress" }],
   achievements: [{ created_at: "2026-09-13T09:00:00Z", category: "Delivery", achievement_date: "2026-09-13" }],
+  topics: [{ created_at: "2026-09-14T09:00:00Z", text: "Discuss promotion timeline", category: "Career", why: "want clarity before year end" }],
 };
 
 test("historyModal: AI summary text is view-only for the employee, not manager-gated out entirely", () => {
@@ -88,6 +89,13 @@ test("historyModal: 'Other activity' surfaces feedback/goals/actions given outsi
   assert.match(rendered, /Schedule 1:1s/);
 });
 
+test("historyModal: topics marked Discussed via wrap-up still show up in Other activity (2026-09-19 regression: 'everything I did is missing')", () => {
+  const view = historyModal(data, mgrCtx);
+  const rendered = allText(view);
+  assert.match(rendered, /Discuss promotion timeline/);
+  assert.match(rendered, /want clarity before year end/);
+});
+
 test("historyModal: dev plans/achievements in 'Other activity' stay structural-fields-only (no full text)", () => {
   const view = historyModal(data, mgrCtx);
   const rendered = allText(view);
@@ -97,7 +105,7 @@ test("historyModal: dev plans/achievements in 'Other activity' stay structural-f
 });
 
 test("historyModal: empty state doesn't throw, no Summarize button for an employee with nothing generated yet", () => {
-  const emptyData = { meetings: [], feedback: [], goals: [], actions: [], devPlans: [], achievements: [] };
+  const emptyData = { meetings: [], feedback: [], goals: [], actions: [], devPlans: [], achievements: [], topics: [] };
   const emptyPair = { conversation_summary: null, conversation_summary_generated_at: null, conversation_summary_edited_at: null };
   const view = historyModal(emptyData, { ...empCtx, pair: emptyPair });
   assert.match(allText(view), /No 1:1s wrapped up yet\./);

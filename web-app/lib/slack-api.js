@@ -22,7 +22,12 @@ const SLACK_API = "https://slack.com/api";
 const TOKEN_CACHE_MS = 60_000;
 const tokenCache = new Map(); // companyId -> { token, expiresAt }
 
-async function resolveBotToken(companyId) {
+// Exported 2026-09-19 for add_document (interactivity route): downloading a
+// file_input upload's content means fetching its url_private_download
+// directly with the bot token as a Bearer header, which slackApi()'s own
+// JSON-API wrapper doesn't cover -- everything else still goes through
+// slackApi() as before.
+export async function resolveBotToken(companyId) {
   if (!companyId) {
     throw new Error("[SLACK_INTEGRATION_DOWN] slackApi called with no companyId -- every call site must know which company's token to use, there is no shared fallback");
   }

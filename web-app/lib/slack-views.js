@@ -218,19 +218,25 @@ export function homeView(ctx, d) {
       button("Wrap up a 1:1", "open_wrap_up"),
       button("Prepare a hard conversation", "open_add_hardconvo"),
     ]),
-    // Manager-only private scratchpad -- Melissa's explicit call, since the
-    // old per-role "My suggestions" (both sides had their own private list)
-    // read as if it were a suggestion TO the other person, which it never
-    // was. Hidden from the employee's Home tab entirely, not just relabeled
-    // -- re-checked server-side too (see open_list_suggestions/
-    // open_add_suggestion in route.js), same defense-in-depth as every
-    // other role-gated feature here.
-    ...(ctx.isMgr
-      ? [
-          section(`*Private notes* — only you see this, never ${ctx.partnerName}.`),
-          actions([button("View notes", "open_list_suggestions"), button("Write a note", "open_add_suggestion", "", usedStyle(d.customSuggestions.length))]),
-        ]
-      : []),
+    // Opened to both roles 2026-09-19 (Melissa's explicit request: "The
+    // manager and employee should have their own private notes"). This used
+    // to be manager-only because the old "My suggestions" label read like a
+    // suggestion TO the other person -- the current "Private notes" copy
+    // doesn't have that problem, and the underlying data/filtering
+    // (custom_suggestions.role, listMySuggestionsModal's own
+    // list.filter((s) => s.role === role)) was already built to support
+    // both sides -- see that function's comment. open_list_suggestions/
+    // open_add_suggestion/add_suggestion (route.js) had their own
+    // ctx.isMgr gates removed the same way.
+    section(`*Private notes* — only you see this, never ${ctx.partnerName}.`),
+    // Filtered to ctx.role, not d.customSuggestions.length -- now that both
+    // roles use this table, an unfiltered count would light this green off
+    // the OTHER person's notes, exactly the "count of something unrelated"
+    // the 2026-09-12 usedStyle rule forbids (see CLAUDE.md/memory).
+    actions([
+      button("View notes", "open_list_suggestions"),
+      button("Write a note", "open_add_suggestion", "", usedStyle(d.customSuggestions.filter((s) => s.role === ctx.role).length)),
+    ]),
     divider(),
     // "Suggest" instead of "Add" for the employee (Melissa's request,
     // 2026-09-19): an employee can't delete a goal, so what they're really
@@ -288,7 +294,7 @@ export function homeView(ctx, d) {
     // stays in-Slack (listDocumentsModal); uploading is website-only for
     // now with no link out to it from here.
     section(`*Documents* — ${d.documents.length}`),
-    actions([button("View documents", "open_list_documents")]),
+    actions([button("Upload a document", "open_add_document"), button("View documents", "open_list_documents")]),
     // Wording rewritten (Melissa, 2026-09-16): "Clear out" read as deleting
     // the information, which this never does -- it only marks open items
     // Discussed/Complete/Done (see wrapUpConversation, lib/data.js -- update
@@ -1045,13 +1051,33 @@ export function listMessagesModal(messages) {
   return modal("list_messages", "Between you two", blocks, "Close");
 }
 
-// View-only, per the item 0g decision — no add/edit from Slack (uploading is
-// now HR-passcode-gated on the website, see app/api/handbook/route.js — not
-// a role any Slack account has, so there's nothing to link to here).
-// `d.url` may be null if the signed URL failed to generate -- guard the
-// button rather than emit an invalid `url` field, which Slack rejects and
-// silently sticks the whole modal on "Loading…" (the exact bug that used to
-// hit this list before the guard existed -- see the file's git history).
+// Real in-Slack upload, added 2026-09-19 (Melissa's request: "Could we add
+// attached documents and actually do that?" -- replacing the old website
+// link, which dead-ended at a login screen for Slack-only users). Uses
+// Block Kit's native file_input element (modals only, confirmed against
+// Slack's own docs) -- requires the files:read OAuth scope, which
+// SLACK_TODO.md has flagged as missing since 2026-09-02 (item 2, "Not
+// started"). The modal opens fine either way; submitting will fail with a
+// clear error (see add_document, route.js) until Melissa adds that scope
+// in the Slack app dashboard and reinstalls the app.
+export function addDocumentModal() {
+  return modal(
+    "add_document",
+    "Upload a document",
+    [
+      section("Attach a file — it'll show up in Documents for both of you."),
+      inputBlock("file", "File", Elements.FileInput({ actionId: "val", maxFiles: 1 })),
+    ],
+    "Upload"
+  );
+}
+
+// Real upload button added back 2026-09-19 (see addDocumentModal above) --
+// this list itself stays otherwise as it was: `d.url` may be null if the
+// signed URL failed to generate -- guard the button rather than emit an
+// invalid `url` field, which Slack rejects and silently sticks the whole
+// modal on "Loading…" (the exact bug that used to hit this list before the
+// guard existed -- see the file's git history).
 export function listDocumentsModal(docs) {
   const blocks = docs.length
     ? docs.flatMap((d) => [
@@ -1061,6 +1087,7 @@ export function listDocumentsModal(docs) {
           : context("Couldn't generate a link for this file — try again from the app."),
       ])
     : [section("No documents uploaded yet.")];
+  blocks.push(divider(), actions([button("Upload a document", "open_add_document")]));
   return modal("view_documents", "Documents", blocks, "Close");
 }
 
@@ -1133,6 +1160,15 @@ function meetingBlocks(m, ctx) {
 // cap above -- raise it if a real pair's activity ever gets that long.
 function otherActivityBlocks(data) {
   const items = [
+    // topics added 2026-09-19 (Melissa's request, found live: "I'm missing
+    // the topics for one on one that I sent Monte. Everything I did is
+    // missing") -- a topic marked Discussed via wrap-up-conversation
+    // (wrapUpConversation, lib/data.js) never disappears from the `topics`
+    // table, but it fell out of "open" lists with nothing else anywhere in
+    // Slack ever showing it again. Full text shown, same as listTopicsModal
+    // already does for this exact data (file header's Slack-is-the-product
+    // privacy rule).
+    ...data.topics.map((t) => ({ at: t.created_at, text: `*Topic (${t.category})* — ${t.text}${t.why ? `\n_${t.why}_` : ""}` })),
     ...data.feedback.map((f) => ({ at: f.created_at, text: `*Feedback (${f.type})* from ${f.from_name}\n${f.text}` })),
     ...data.goals.map((g) => ({ at: g.created_at, text: `*Goal* — ${g.text}${g.why ? `\n_${g.why}_` : ""}` })),
     ...data.actions.map((a) => ({ at: a.created_at, text: `*Action* — ${a.text}${a.notes ? `\n_${a.notes}_` : ""}` })),
@@ -1140,7 +1176,7 @@ function otherActivityBlocks(data) {
     ...data.achievements.map((a) => ({ at: a.created_at, text: `*Achievement* — ${a.category}${a.achievement_date ? ` · ${a.achievement_date}` : ""}` })),
   ]
     .sort((a, b) => new Date(b.at) - new Date(a.at))
-    .slice(0, 8);
+    .slice(0, 10);
   if (!items.length) return [];
   return [divider(), header("Other activity"), ...items.map((it) => context(`${it.text} · ${ago(it.at)}`))];
 }

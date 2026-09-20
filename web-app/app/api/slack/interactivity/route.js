@@ -9,7 +9,7 @@ import { createClient } from "@supabase/supabase-js";
 import { after } from "next/server";
 import { verifySlackSignature } from "@/lib/slack-verify";
 import { resolveSlackUser, setSlackPairSelection, resolvePairContext, getCompanyIdForTeam, slackUserEmail } from "@/lib/slack-user";
-import { slackApi } from "@/lib/slack-api";
+import { slackApi, resolveBotToken } from "@/lib/slack-api";
 import { loadHomeData } from "@/lib/slack-home-data";
 import { LD_RULES } from "@/lib/development-content";
 import {
@@ -27,6 +27,7 @@ import {
   listConcernsModal,
   respondConcernModal,
   listDocumentsModal,
+  addDocumentModal,
   setupFirstPairModal,
   addGoalModal,
   GOAL_FIELDS,
@@ -95,6 +96,7 @@ import {
   notify,
   deleteMeeting,
   getDocumentUrl,
+  uploadDocumentFromSlack,
   listCustomSuggestions,
   addCustomSuggestion,
   deleteCustomSuggestion,
@@ -295,17 +297,19 @@ const OPENERS = {
       return listDocumentsModal(resolved);
     },
   },
-  // Manager-only private scratchpad -- re-checked here same as every other
-  // role-gated opener, even though the button is already hidden for
-  // employees on the Home tab.
+  // Real in-Slack upload, added 2026-09-19 -- see addDocumentModal
+  // (lib/slack-views.js) and add_document (SUBMISSIONS below) for the rest.
+  open_add_document: { title: "Upload a document", build: async () => addDocumentModal() },
+  // Opened to both roles 2026-09-19 -- see the homeView comment on this
+  // section (lib/slack-views.js). listMySuggestionsModal already filters to
+  // ctx.role, so each side only ever sees their own notes.
   open_list_suggestions: {
     title: "Private notes",
-    build: async (admin, ctx) =>
-      ctx.isMgr ? listMySuggestionsModal(await listCustomSuggestions(admin, ctx.pairId), ctx.role) : noticeModal("Private notes", "This is manager-only."),
+    build: async (admin, ctx) => listMySuggestionsModal(await listCustomSuggestions(admin, ctx.pairId), ctx.role),
   },
   open_add_suggestion: {
     title: "Write a private note",
-    build: async (admin, ctx) => (ctx.isMgr ? addSuggestionModal(ctx.role) : noticeModal("Write a private note", "This is manager-only.")),
+    build: async (admin, ctx) => addSuggestionModal(ctx.role),
   },
   // Two-way, no isMgr gate -- see the homeView comment on this section.
   open_add_message: { title: "Send a message", build: async () => addMessageModal() },
@@ -974,9 +978,9 @@ const SUBMISSIONS = {
   },
   // Matches saveCustomSuggestion (page.js): no notify() call at all, same as
   // the website — a saved suggestion is a private note-to-self, not
-  // something the partner is told about.
+  // something the partner is told about. Opened to both roles 2026-09-19 --
+  // isMgr guard removed, already scoped by ctx.role, same as the opener.
   add_suggestion: async (admin, ctx, v) => {
-    if (!ctx.isMgr) return { skip: true }; // manager-only -- re-checked same as the opener
     const text = fieldValV2(v, "text");
     const category = fieldValV2(v, "category");
     await addCustomSuggestion(admin, ctx.pairId, ctx.role, text, category);
@@ -1004,6 +1008,39 @@ const SUBMISSIONS = {
     });
     await clearFormDraft(admin, ctx.pairId, ctx.role, "achievement").catch(() => {});
     delayedNotify(admin, ctx.pairId, `${ctx.myName} logged an achievement: ${title}`, ctx.role, ctx.otherRole, "performance", "achievement");
+  },
+  // Added 2026-09-19 (Melissa's request: "Could we add attached documents
+  // and actually do that?"). file_input's payload shape (an array under
+  // `.files`, not a scalar) is why this reads v.file.val directly instead
+  // of through fieldVal, same as every other non-scalar field in this file.
+  // Needs the files:read OAuth scope to actually download the upload's
+  // content (SLACK_TODO.md item 2, flagged 2026-09-02, never added) -- the
+  // modal opens fine regardless; this download step is what will fail with
+  // a clear Slack API error until that scope is added and the app is
+  // reinstalled.
+  add_document: async (admin, ctx, v) => {
+    const file = v?.file?.val?.files?.[0];
+    if (!file) return { error: { blockId: "file", message: "Attach a file." } };
+    let buffer;
+    try {
+      const token = await resolveBotToken(ctx.companyId);
+      const res = await fetch(file.url_private_download, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error(`Slack returned ${res.status} downloading the file`);
+      buffer = Buffer.from(await res.arrayBuffer());
+    } catch (e) {
+      console.error("add_document download:", e);
+      return { error: { blockId: "file", message: "Couldn't download that file from Slack -- try again, or ask Melissa to check the files:read permission." } };
+    }
+    try {
+      await uploadDocumentFromSlack(admin, ctx.pairId, { name: file.name, size: file.size, mimeType: file.mimetype, buffer }, ctx.myName);
+    } catch (e) {
+      return { error: { blockId: "file", message: e.message } };
+    }
+    // No view/kind here -- unlike goals/dev plans/achievements above,
+    // Documents has no dedicated website page to deep-link to (checked the
+    // route list: no /documents), same reasoning as goal_delete's bare
+    // 4-arg notify() call.
+    delayedNotify(admin, ctx.pairId, `${ctx.myName} uploaded a document: ${file.name}`, ctx.role, ctx.otherRole);
   },
   // Manager-only (concerns is manager-exclusive, migration 0007) -- re-checked
   // here same as add_feedback's ctx.isMgr guard, since the opener already
