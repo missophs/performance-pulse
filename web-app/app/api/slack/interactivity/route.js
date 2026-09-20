@@ -832,6 +832,12 @@ const SUBMISSIONS = {
     if (email === ctx.email) {
       return { error: { blockId: "employee_picker", message: "That's your own email." } };
     }
+    // Required (Melissa's request, 2026-09-19: "make sure they add the
+    // employee name, not the email") -- without it, this pair would have no
+    // employee_label and display by raw email until something else set a
+    // real name, same root cause as tonight's Monty/Stella Weiss mixup.
+    const employeeName = (fieldVal(v, "employee_name") || "").trim();
+    if (!employeeName) return { error: { blockId: "employee_name", message: "Enter their name." } };
     // "archive" closes the pairing this modal was opened from (ctx.pairId,
     // already verified as this manager's own -- never a Slack-supplied id),
     // same closePair() the website/HR route uses. "keep" leaves it
@@ -842,7 +848,7 @@ const SUBMISSIONS = {
     // and no replacement.
     const keepCurrent = fieldVal(v, "keep_current");
     try {
-      await createPairForSlack(admin, ctx.profileId, ctx.email, email);
+      await createPairForSlack(admin, ctx.profileId, ctx.email, email, employeeName);
       if (keepCurrent === "archive") {
         await closePair(admin, ctx.pairId, `Replaced by ${email}`);
       }

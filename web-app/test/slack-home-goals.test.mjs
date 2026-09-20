@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-const { homeView, listGoalsModal, listDocumentsModal } = await import("@/lib/slack-views");
+const { homeView, listGoalsModal, listDocumentsModal, addEmployeeModal } = await import("@/lib/slack-views");
 
 function allText(view) {
   return JSON.stringify(view.blocks ?? view);
@@ -91,4 +91,13 @@ test("listDocumentsModal: no Upload a document button regardless of contents", (
   const withDocs = listDocumentsModal([{ id: "d1", name: "Handbook.pdf", url: "https://example.com/f", created_at: new Date().toISOString(), created_by_name: "Alex" }]);
   assert.doesNotMatch(allText(empty), /Upload a document/);
   assert.doesNotMatch(allText(withDocs), /Upload a document/);
+});
+
+test("addEmployeeModal: asks for the employee's name, not just the Slack picker", () => {
+  const view = addEmployeeModal({ ...baseCtx, isMgr: true, role: "manager", otherRole: "employee" });
+  const inputBlocks = view.blocks.filter((b) => b.type === "input").map((b) => b.block_id);
+  assert.ok(inputBlocks.includes("employee_picker"), "expected the Slack user picker to still be there");
+  assert.ok(inputBlocks.includes("employee_name"), "expected a text field asking for the employee's name");
+  const nameBlock = view.blocks.find((b) => b.block_id === "employee_name");
+  assert.equal(nameBlock.optional, false, "the name field must be required, not optional");
 });

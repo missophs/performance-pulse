@@ -1263,6 +1263,15 @@ export function wrapUpModal(topics, pairId) {
 // the old free-text field and resolveEmployeeNameToEmail (lib/data.js),
 // removed since nothing else called it -- the picker can't return a typo,
 // so the roster-name-fallback it existed for no longer applies.
+// employee_name added 2026-09-19 (Melissa's request: "make sure they add the
+// employee name, not the email") -- without it, a fresh pair has no
+// employee_label, and the manager's own Home tab falls back to
+// pair.employee_email for display (pairRoleFields, lib/slack-user.js) until
+// something else happens to set a real name -- exactly the kind of stale/
+// wrong-looking identity that caused tonight's Monty/Stella Weiss mixup.
+// Required, saved as employee_label (manager-only per-pairing display name,
+// migration 0015) -- separate from the employee's own profile/identity, same
+// as every other employee_label already in this app.
 export function addEmployeeModal(ctx) {
   return modal(
     "add_employee",
@@ -1270,6 +1279,7 @@ export function addEmployeeModal(ctx) {
     [
       section("Starts a new 1:1 pairing with you as their manager. Pick them from the workspace — it links right away if they already use Performance Pulse, or the moment they sign up otherwise."),
       inputBlock("employee_picker", "Employee", userSelect("val", "Choose a person")),
+      inputBlock("employee_name", "Employee's name", plainInput("val", { placeholder: "e.g. Jordan Lee" })),
       inputBlock(
         "keep_current",
         `Your current pairing with ${ctx.partnerName}`,

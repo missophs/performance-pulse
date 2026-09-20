@@ -6020,3 +6020,33 @@ never emits an Upload button). Full suite `npm test` 41/41 (35 existing +
 **Not yet click-tested live** -- the outage fix and History rendering
 were verified live tonight; these four newer changes were verified by the
 test suite only, not yet clicked through in the real Slack workspace.
+
+### Same night, later still: "Add or change employee" now requires the employee's real name
+
+Root-caused live, during the exact confusion this fixes: Melissa was signed
+in as `melissahr212@gmail.com` (display name "monty," profile full_name
+"Monte Montoya") and asked "is this Stella Weiss?" -- it wasn't; the account
+was the manager of the "Stella Weiss" pairing, not Stella herself.
+`addEmployeeModal` (`lib/slack-views.js`) never asked for a name at all --
+only a Slack `users_select` picker -- so a fresh pair has no
+`employee_label`, and `pairRoleFields` (`lib/slack-user.js`) falls back to
+the raw `employee_email` for display until something else sets a real name.
+Her request: "make sure they add the employee name, not the email."
+
+Added a required `employee_name` text field to `addEmployeeModal`, right
+after the Slack picker. `add_employee` (interactivity route) validates it's
+non-empty (same "Enter their name" pattern as every other required-field
+check in this file) and passes it through to `createPairForSlack`
+(`lib/data.js`, new optional 5th param `employeeLabel` -- one caller, this
+one) which now sets `employee_label` on the new pair row. This is the same
+column the "Stella Weiss" pairing already had set (manager-only, per
+migration 0015) -- just wired into the one flow that was skipping it.
+Deliberately does NOT touch the employee's own `profiles.full_name` --
+`employee_label` is what the MANAGER calls them, never the employee's own
+identity, same separation every other use of this column already respects.
+
+**Verified**: new test in `test/slack-home-goals.test.mjs` (`addEmployeeModal`
+still has the Slack picker, now also a required `employee_name` field).
+Full suite `npm test` 42/42, `npx eslint` clean, `node --check` clean.
+**Not yet click-tested live** -- adding a real employee through this modal
+wasn't re-run tonight after the change.

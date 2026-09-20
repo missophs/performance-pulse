@@ -48,7 +48,7 @@ export async function createPair(supabase, myRole, partnerEmail) {
 // caller's already-verified Slack identity (resolveSlackUser), never from
 // anything in the interaction payload itself. Scoped to manager-adds-employee
 // only, matching the one real request this exists for (SLACK_TODO.md).
-export async function createPairForSlack(admin, managerId, managerEmail, employeeEmail) {
+export async function createPairForSlack(admin, managerId, managerEmail, employeeEmail, employeeLabel) {
   // The roster importer (createPairFromRoster) enforces one active manager
   // per employee; this path had no equivalent check, so a manager could add
   // someone here who already has a different active manager elsewhere,
@@ -75,6 +75,7 @@ export async function createPairForSlack(admin, managerId, managerEmail, employe
       manager_email: managerEmail,
       employee_id: employeeProfile?.id || null,
       employee_email: employeeEmail,
+      employee_label: employeeLabel || null,
     })
     .select()
     .single();
